@@ -465,7 +465,7 @@ along with this software (see the LICENSE.md file). If not, see
                 // NOTE: using 365 days isn't always correct, should use number of days in expectedEndOfLife year, but shouldn't matter much
                 int daysInYear = 365
                 if (days < 0) { yearsInt = yearsInt - 1; days = daysInYear + days }
-                usefulLifeYears = (yearsInt as BigDecimal) + days/daysInYear
+                usefulLifeYears = (yearsInt == null ? null : toDecimal(yearsInt)) + days/daysInYear
                 */
 
                 Calendar txCal = nowCalendar.clone()

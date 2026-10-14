@@ -561,9 +561,9 @@ along with this software (see the LICENSE.md file). If not, see
                         if (roleTypeId) termSb.append(' AND roles.roleTypeId:(').append(roleTypeId.replaceAll(/,/, ' OR ')).append(')')
                         termSb.append(' AND (NOT disabled:Y)')
 
-                        if ('MANTLE_USER_ORG'.equals(entityFilterSetId)) {
+                        if ('MANTLE_USER_ORG' === entityFilterSetId) {
                             termSb.append(' AND ownerPartyId:(' + (filterOrgIds ? filterOrgIds.join(' OR ') + ' OR ' : '') + '_NA_)')
-                        } else if ('MANTLE_ACTIVE_ORG'.equals(entityFilterSetId) && activeOrgId) {
+                        } else if (('MANTLE_ACTIVE_ORG' === entityFilterSetId) && activeOrgId) {
                             termSb.append(' AND ownerPartyId:(' + activeOrgId + ' OR _NA_)')
                         }
                     ]]></script>

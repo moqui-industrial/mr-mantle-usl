@@ -173,9 +173,9 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- <log level="warn" message="Doing party search with activeOrgId ${activeOrgId} filterOrgIds ${filterOrgIds} entityFilterSetId ${entityFilterSetId}"/> -->
             <script><![CDATA[
                 if (queryString) {
-                    if ('MANTLE_USER_ORG'.equals(entityFilterSetId)) {
+                    if ('MANTLE_USER_ORG' === entityFilterSetId) {
                         queryString = (queryString ? queryString + ' AND ' : '' ) + 'ownerPartyId:(' + (filterOrgIds ? filterOrgIds.join(' OR ') + ' OR ' : '') + '_NA_)'
-                    } else if ('MANTLE_ACTIVE_ORG'.equals(entityFilterSetId) && activeOrgId) {
+                    } else if (('MANTLE_ACTIVE_ORG' === entityFilterSetId) && activeOrgId) {
                         queryString = (queryString ? queryString + ' AND ' : '' ) + 'ownerPartyId:(' + activeOrgId + ' OR _NA_)'
                     }
                 }

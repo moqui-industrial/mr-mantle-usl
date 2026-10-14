@@ -563,7 +563,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="glAccountInfoMap" from="{}"/>
             <iterate list="glAccountDetailList" entry="glAccountDetail">
                 <script>
-                    boolean isDebit = glAccountDetail.isDebit.equals('Y')
+                    boolean isDebit = (glAccountDetail.isDebit === 'Y')
                     BigDecimal balance = glAccountDetail.endingBalance || 0.0
                     BigDecimal posted = balance - (glAccountDetail.beginningBalance || 0.0)
                     BigDecimal postedNoClosing = isDebit ? ((glAccountDetail.postedDebitsNoClosing || 0.0) - (glAccountDetail.postedCreditsNoClosing || 0.0)) :
@@ -759,7 +759,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="glAccountId" from="glAccountOrgTimePeriod.glAccountId"/>
                 <entity-find-one entity-name="mantle.ledger.account.GlAccount" value-field="glAccount" cache="true">
                     <field-map field-name="glAccountId"/></entity-find-one>
-                <set field="isDebitAccount" from="glAccount.isDebit.equals('Y')"/>
+                <set field="isDebitAccount" from="(glAccount.isDebit === 'Y')"/>
 
                 <set field="glAccountCodeMask" from="partyAcctgPreference?.glAccountCodeMask || ec.user.getPreference('GlAccountCodeMask')"/>
                 <set field="accountCodeFormatter" from="masker(glAccountCodeMask, '0')"/><!-- will be null if no mask -->
@@ -994,7 +994,7 @@ along with this software (see the LICENSE.md file). If not, see
                             </then><else-if condition="'Ending'.equalsIgnoreCase(dataset.totalBasis)">
                                 <set field="curAmount" from="gaotpSummary.endingBalance"/>
                             </else-if><else>
-                                <set field="curAmount" from="'Y'.equals(gaotpSummary.isDebit) ?
+                                <set field="curAmount" from="('Y' === gaotpSummary.isDebit) ?
                                         ((gaotpSummary.postedDebitsNoClosing || 0.0) - (gaotpSummary.postedCreditsNoClosing || 0.0)) :
                                         ((gaotpSummary.postedCreditsNoClosing || 0.0) - (gaotpSummary.postedDebitsNoClosing || 0.0))"/>
                             </else></if>

@@ -390,7 +390,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="(markupMultiplier != 0.0 || markupAmount != 0.0)">
                     <if condition="shippingTotal">
                         <set field="shippingTotal" from="shippingTotal + markupAmount +
-                            (markupMultiplier as BigDecimal).multiply(shippingTotal).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+                            (markupMultiplier == null ? null : toDecimal(markupMultiplier)).multiply(shippingTotal).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
                     </if>
                     <!-- if an OrderItem was created update it too -->
                     <if condition="createOrderItem">
@@ -402,7 +402,7 @@ along with this software (see the LICENSE.md file). If not, see
                             <if condition="shippingItem.unitAmount">
                                 <set field="shippingItem.standardCost" from="shippingItem.unitAmount"/>
                                 <set field="shippingItem.unitAmount" from="shippingItem.unitAmount + markupAmount +
-                                    (markupMultiplier as BigDecimal).multiply(shippingItem.unitAmount).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+                                    (markupMultiplier == null ? null : toDecimal(markupMultiplier)).multiply(shippingItem.unitAmount).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
                                 <entity-update value-field="shippingItem"/>
                             </if>
                         </iterate>
@@ -528,7 +528,7 @@ along with this software (see the LICENSE.md file). If not, see
 
                             <if condition="(markupMultiplier != 0.0 || markupAmount != 0.0) &amp;&amp; shippingRateInfo.shippingTotal">
                                 <set field="shippingRateInfo.shippingTotal" from="shippingRateInfo.shippingTotal + markupAmount +
-                                    (markupMultiplier as BigDecimal).multiply(shippingRateInfo.shippingTotal).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+                                    (markupMultiplier == null ? null : toDecimal(markupMultiplier)).multiply(shippingRateInfo.shippingTotal).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
                             </if>
                         </if>
 
@@ -630,7 +630,7 @@ along with this software (see the LICENSE.md file). If not, see
                                 <if condition="packageRouteSeg.baseAmount == null">
                                     <set field="packageRouteSeg.baseAmount" from="packageRouteSeg.estimatedAmount"/></if>
                                 <set field="packageRouteSeg.estimatedAmount" from="packageRouteSeg.baseAmount + markupAmount +
-                                        (markupMultiplier as BigDecimal).multiply(packageRouteSeg.baseAmount).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+                                        (markupMultiplier == null ? null : toDecimal(markupMultiplier)).multiply(packageRouteSeg.baseAmount).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
                             </if>
                             <!-- normalize and calc RETURN label amounts -->
                             <if condition="packageRouteSeg.returnEstimatedAmount != null || packageRouteSeg.returnBaseAmount != null">
@@ -639,7 +639,7 @@ along with this software (see the LICENSE.md file). If not, see
                                 <if condition="packageRouteSeg.returnBaseAmount == null">
                                     <set field="packageRouteSeg.returnBaseAmount" from="packageRouteSeg.returnEstimatedAmount"/></if>
                                 <set field="packageRouteSeg.returnEstimatedAmount" from="packageRouteSeg.returnBaseAmount + markupAmount +
-                                        (markupMultiplier as BigDecimal).multiply(packageRouteSeg.returnBaseAmount).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+                                        (markupMultiplier == null ? null : toDecimal(markupMultiplier)).multiply(packageRouteSeg.returnBaseAmount).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
                             </if>
                             <!-- save it -->
                             <entity-update value-field="packageRouteSeg"/>
@@ -692,7 +692,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <if condition="baseAmount != null">
                 <set field="markedUpAmount" from="baseAmount + markupAmount +
-                    (markupMultiplier as BigDecimal).multiply(baseAmount).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+                    (markupMultiplier == null ? null : toDecimal(markupMultiplier)).multiply(baseAmount).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
             </if>
         </actions>
     </service>

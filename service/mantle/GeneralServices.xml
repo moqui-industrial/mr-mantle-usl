@@ -235,9 +235,9 @@ along with this software (see the LICENSE.md file). If not, see
                     <if condition="findFilters"><set field="entityFilterSetId" from="findFilters[0].entityFilterSetId"/></if>
                 </if>
                 <script><![CDATA[
-                    if ('MANTLE_USER_ORG'.equals(entityFilterSetId)) {
+                    if ('MANTLE_USER_ORG' === entityFilterSetId) {
                         queryString = (queryString ? queryString + ' AND ' : '' ) + 'ownerPartyId:(' + filterOrgIds.join(' OR ') + ')'
-                    } else if ('MANTLE_ACTIVE_ORG'.equals(entityFilterSetId) && activeOrgId) {
+                    } else if (('MANTLE_ACTIVE_ORG' === entityFilterSetId) && activeOrgId) {
                         queryString = (queryString ? queryString + ' AND ' : '' ) + 'ownerPartyId:(' + activeOrgId + ' OR _NA_)'
                     }
                 ]]></script>
@@ -245,9 +245,9 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="findFilters" from="ec.artifactExecution.getFindFiltersForUser('mantle.party.Party')"/>
                 <if condition="findFilters"><set field="entityFilterSetId" from="findFilters[0].entityFilterSetId"/></if>
                 <script><![CDATA[
-                    if ('MANTLE_USER_ORG'.equals(entityFilterSetId)) {
+                    if ('MANTLE_USER_ORG' === entityFilterSetId) {
                         queryString = (queryString ? queryString + ' AND ' : '' ) + 'ownerPartyId:(' + (filterOrgIds ? filterOrgIds.join(' OR ') + ' OR ' : '') + '_NA_)'
-                    } else if ('MANTLE_ACTIVE_ORG'.equals(entityFilterSetId) && activeOrgId) {
+                    } else if (('MANTLE_ACTIVE_ORG' === entityFilterSetId) && activeOrgId) {
                         queryString = (queryString ? queryString + ' AND ' : '' ) + 'ownerPartyId:(' + activeOrgId + ' OR _NA_)'
                     }
                 ]]></script>
@@ -255,9 +255,9 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="findFilters" from="ec.artifactExecution.getFindFiltersForUser('mantle.product.Product')"/>
                 <if condition="findFilters"><set field="entityFilterSetId" from="findFilters[0].entityFilterSetId"/></if>
                 <script><![CDATA[
-                    if ('MANTLE_USER_ORG'.equals(entityFilterSetId)) {
+                    if ('MANTLE_USER_ORG' === entityFilterSetId) {
                         queryString = (queryString ? queryString + ' AND ' : '' ) + 'ownerPartyId:(' + filterOrgIds.join(' OR ') + ')'
-                    } else if ('MANTLE_ACTIVE_ORG'.equals(entityFilterSetId) && activeOrgId) {
+                    } else if (('MANTLE_ACTIVE_ORG' === entityFilterSetId) && activeOrgId) {
                         queryString = (queryString ? queryString + ' AND ' : '' ) + 'ownerPartyId:(' + activeOrgId + ' OR _NA_)'
                     }
                 ]]></script>

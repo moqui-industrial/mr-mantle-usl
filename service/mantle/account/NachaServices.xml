@@ -45,8 +45,8 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.account.method.BankAccount" value-field="bankAccount"/>
             <if condition="bankAccount == null"><return error="true" message="Payment method ${paymentMethodId} is not a bank account"/></if>
 
-            <if condition="addNewLine == null"><set field="addNewLine" from="!'N'.equals(bankAccount.nachaAddNewLine)"/></if>
-            <if condition="addOffsetRecord == null"><set field="addOffsetRecord" from="'Y'.equals(bankAccount.nachaAddOffsetRecord)"/></if>
+            <if condition="addNewLine == null"><set field="addNewLine" from="!('N' === bankAccount.nachaAddNewLine)"/></if>
+            <if condition="addOffsetRecord == null"><set field="addOffsetRecord" from="('Y' === bankAccount.nachaAddOffsetRecord)"/></if>
 
             <if condition="addOffsetRecord">
                 <!-- if adding offset record check bankAccount's routingNumber and accountNumber -->
@@ -148,7 +148,7 @@ along with this software (see the LICENSE.md file). If not, see
                     for (int i = 0; i < 8; i++) routingCheckSum += (Character.digit(routingNumber.charAt(i), 10)) * (Character.digit(routingWeights.charAt(i), 10))
                     int routingCheckSumMod = 10 - (routingCheckSum % 10)
                     if (routingCheckSumMod == 10) routingCheckSumMod = 0
-                    return routingCheckSumMod as String
+                    return routingCheckSumMod?.toString()
                 }
 
                 ExecutionContext ec = context.ec
@@ -318,7 +318,7 @@ along with this software (see the LICENSE.md file). If not, see
                     entry.append("0")
                     // 80-94: Trace number (15 chars); ODFI ID, plus index (entryCount zero left padded to 7 chars)
                     entry.append(nachaOdfiId)
-                    entry.append((entryCount as String).padLeft(7, '0'))
+                    entry.append((entryCount?.toString()).padLeft(7, '0'))
 
                     lines.add(entry)
 
@@ -376,13 +376,13 @@ along with this software (see the LICENSE.md file). If not, see
                         entry.append("0")
                         // 80-94: Trace number (15 chars); ODFI ID, plus index (entryCount zero left padded to 7 chars)
                         entry.append(nachaOdfiId)
-                        entry.append((entryCount as String).padLeft(7, '0'))
+                        entry.append((entryCount?.toString()).padLeft(7, '0'))
 
                         lines.add(entry)
                     }
                 }
 
-                String routingNumberSumStr = routingNumberSum as String
+                String routingNumberSumStr = routingNumberSum?.toString()
                 if (routingNumberSumStr.length() > 10)
                     routingNumberSumStr = routingNumberSumStr.substring(routingNumberSumStr.length() - 10, routingNumberSumStr.length())
 
@@ -395,7 +395,7 @@ along with this software (see the LICENSE.md file). If not, see
                 // 02-04: Service class code (same as batch header) = '200'
                 batchControl.append("8200")
                 // 05-10: Entry/addenda count (6 chars, zero left padded)
-                batchControl.append((entryCount as String).padLeft(6, '0'))
+                batchControl.append((entryCount?.toString()).padLeft(6, '0'))
                 // 11-20: Entry hash (10 chars); sum of the 8-digit receiving DFI routing/transit numbers in entry
                 //     detail records; zero left padded, if too long trim from left
                 batchControl.append(routingNumberSumStr.padLeft(10, '0'))

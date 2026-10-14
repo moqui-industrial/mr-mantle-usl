@@ -132,7 +132,7 @@ along with this software (see the LICENSE.md file). If not, see
                             </if>
                         </iterate>
 
-                        <set field="unitAmountLessDiscounts" from="((itemTotal + discountTotal) as BigDecimal).divide(combinedQuantity as BigDecimal, 3, BigDecimal.ROUND_HALF_UP)"/>
+                        <set field="unitAmountLessDiscounts" from="((itemTotal + discountTotal) as BigDecimal).divide((combinedQuantity == null ? null : toDecimal(combinedQuantity)), 3, BigDecimal.ROUND_HALF_UP)"/>
                         <script>items.add({itemId:orderItem.orderItemSeqId, itemTypeEnumId:orderItem.itemTypeEnumId,
                                 quantity:orderItem.quantity, unitAmount:orderItem.unitAmount, unitAmountLessDiscounts:unitAmountLessDiscounts,
                                 itemTotal:itemTotal, discountTotal:discountTotal,
@@ -151,7 +151,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <log level="warn" message="In calculate#OrderSalesTax got back entry with invalid orderItemSeqId ${taxResult.itemId} for order ${orderId}, skipping"/>
                         <continue/>
                     </if>
-                    <set field="taxAmount" from="(taxResult.taxAmount as BigDecimal).setScale(3, BigDecimal.ROUND_HALF_UP)"/>
+                    <set field="taxAmount" from="(taxResult.taxAmount == null ? null : toDecimal(taxResult.taxAmount)).setScale(3, BigDecimal.ROUND_HALF_UP)"/>
                     <entity-find-one entity-name="mantle.other.tax.TaxAuthority" value-field="taxAuthority" cache="true">
                         <field-map field-name="taxAuthorityId" from="taxResult.taxAuthorityId"/></entity-find-one>
                     <set field="itemDescription" value="${taxAuthority?.description ? taxAuthority.description + ' ' : ''}${taxResult.taxName||''}"/>

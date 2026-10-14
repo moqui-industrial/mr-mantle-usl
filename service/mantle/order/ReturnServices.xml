@@ -418,7 +418,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <!-- all returned, use remaining child item amount -->
                         <set field="childRetAmount" from="childOut.returnableTotal"/>
                     </then><else>
-                        <set field="parentRatio" from="(returnQuantity as BigDecimal).divide(invoiceQuantity as BigDecimal, 6, BigDecimal.ROUND_HALF_UP)"/>
+                        <set field="parentRatio" from="(returnQuantity == null ? null : toDecimal(returnQuantity)).divide((invoiceQuantity == null ? null : toDecimal(invoiceQuantity)), 6, BigDecimal.ROUND_HALF_UP)"/>
                         <set field="childRetAmount" from="(childOut.invoiceTotal * parentRatio).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
                     </else></if>
                 </then><else>
@@ -427,7 +427,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <!-- all returned, use remaining child item amount -->
                         <set field="childRetAmount" from="childOut.returnableTotal"/>
                     </then><else>
-                        <set field="parentRatio" from="(returnTotal as BigDecimal).divide(invoiceTotal as BigDecimal, 6, BigDecimal.ROUND_HALF_UP).abs()"/>
+                        <set field="parentRatio" from="(returnTotal == null ? null : toDecimal(returnTotal)).divide((invoiceTotal == null ? null : toDecimal(invoiceTotal)), 6, BigDecimal.ROUND_HALF_UP).abs()"/>
                         <set field="childRetAmount" from="(childOut.invoiceTotal * parentRatio).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
                     </else></if>
                 </else></if>
@@ -594,7 +594,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="returnItem.receivedQuantity">
                 <set field="receivedQuantity" from="receivedQuantity + returnItem.receivedQuantity"/></if>
             <set field="curReceivedRatio" from="returnItem.returnQuantity &amp;&amp; returnItem.returnQuantity != receivedQuantity ?
-                    (receivedQuantity as BigDecimal).divide(returnItem.returnQuantity, 6, BigDecimal.ROUND_HALF_UP) : 1.0"/>
+                    (receivedQuantity == null ? null : toDecimal(receivedQuantity)).divide(returnItem.returnQuantity, 6, BigDecimal.ROUND_HALF_UP) : 1.0"/>
             <set field="allReceived" from="returnItem.returnQuantity == receivedQuantity"/>
             <set field="hasResponse" from="returnItem.responseDate != null"/>
 

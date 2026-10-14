@@ -74,7 +74,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions><script><![CDATA[
             import org.moqui.elasticsearch.ElasticSearchUtil
 
-            String estThruDateStr = estThruDate ? (estThruDate.getTime() as String) : null
+            String estThruDateStr = estThruDate ? ((estThruDate.getTime())?.toString()) : null
             // consolidate the results into a single Map by productId
             infoByProductId = {} as Map<String, Map>
 
@@ -190,8 +190,8 @@ along with this software (see the LICENSE.md file). If not, see
             import org.elasticsearch.search.aggregations.AggregationBuilders
             import org.moqui.elasticsearch.ElasticSearchUtil
 
-            String fromDateStr = fromDate ? (fromDate.getTime() as String) : null
-            String thruDateStr = thruDate.getTime() as String
+            String fromDateStr = fromDate ? ((fromDate.getTime())?.toString()) : null
+            String thruDateStr = (thruDate.getTime())?.toString()
 
             List andList = [{terms: {productId: productIdList}}, {bool: {must_not: {terms: {partStatusId: ['OrderRejected', 'OrderCancelled']}}}}]
             if (facilityId) andList.add({term: {facilityId: facilityId}})

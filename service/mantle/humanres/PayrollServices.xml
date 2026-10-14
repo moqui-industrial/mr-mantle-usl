@@ -159,7 +159,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <script>
                     Calendar dueDateCal = ec.user.getCalendarSafe()
                     dueDateCal.setTime(payDate)
-                    dueDateCal.add(Calendar.DAY_OF_MONTH, payeeDueDays as int)
+                    dueDateCal.add(Calendar.DAY_OF_MONTH, (payeeDueDays == null ? null : Math.trunc(toDecimal(payeeDueDays).toNumber())))
                     dueDate = new java.sql.Timestamp(dueDateCal.getTimeInMillis())
                 </script>
 

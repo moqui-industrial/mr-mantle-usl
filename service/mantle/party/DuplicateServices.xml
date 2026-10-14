@@ -153,7 +153,7 @@ along with this software (see the LICENSE.md file). If not, see
             <iterate list="matchPartyIdSet" entry="matchPartyId">
                 <entity-find-one entity-name="mantle.party.Party" value-field="matchParty">
                     <field-map field-name="partyId" from="matchPartyId"/></entity-find-one>
-                <if condition="'Y'.equals(matchParty.disabled)"><script>matchingInfoByPartyId.remove(matchPartyId)</script></if>
+                <if condition="('Y' === matchParty.disabled)"><script>matchingInfoByPartyId.remove(matchPartyId)</script></if>
             </iterate>
 
             <set field="dupPartyIds" from="new HashSet(matchingInfoByPartyId.keySet())"/>

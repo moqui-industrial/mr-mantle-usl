@@ -263,7 +263,7 @@ along with this software (see the LICENSE.md file). If not, see
             </iterate>
             <!-- round total to 2 decimal places -->
             <!-- NOTE: CurrencyRoundingMarker scale here may vary by currency, make configurable -->
-            <set field="invoiceTotal" from="(invoiceTotal as BigDecimal).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+            <set field="invoiceTotal" from="(invoiceTotal == null ? null : toDecimal(invoiceTotal)).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
 
             <!-- PaymentApplication by invoiceId (expect either paymentId to toInvoiceId to be populated) -->
             <!-- PaymentApplication by toInvoiceId (expect invoiceId to be populated) -->
@@ -394,12 +394,12 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="noAdjustmentTotal" from="0.0"/>
             <iterate list="invoiceItemList" entry="invoiceItem">
                 <set field="noAdjustmentTotal" from="noAdjustmentTotal + ((invoiceItem.quantity != null ? invoiceItem.quantity : 1.0) * (invoiceItem.amount || 0.0))"/></iterate>
-            <set field="noAdjustmentTotal" from="(noAdjustmentTotal as BigDecimal).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+            <set field="noAdjustmentTotal" from="(noAdjustmentTotal == null ? null : toDecimal(noAdjustmentTotal)).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
 
             <set field="adjustmentTotal" from="0.0"/>
             <iterate list="adjustmentItemList" entry="invoiceItem">
                 <set field="adjustmentTotal" from="adjustmentTotal + ((invoiceItem.quantity != null ? invoiceItem.quantity : 1.0) * (invoiceItem.amount || 0.0))"/></iterate>
-            <set field="adjustmentTotal" from="(adjustmentTotal as BigDecimal).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+            <set field="adjustmentTotal" from="(adjustmentTotal == null ? null : toDecimal(adjustmentTotal)).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
 
             <!-- build itemTypeSummaryMapMap with itemTypeEnumId, amount (only for ItemTimeEntry), quantity, total -->
             <set field="hasProductItems" from="false"/>
@@ -573,11 +573,11 @@ along with this software (see the LICENSE.md file). If not, see
 
                         Integer invoiceDateDays = invoice.invoiceDate != null ? asOfTimestamp - invoice.invoiceDate : null
                         Integer invoiceDateIdx = invoiceDateDays != null ? (invoiceDateDays < 0 ? 0 :
-                                ((invoiceDateDays as BigDecimal) / periodDaysBd).setScale(0, BigDecimal.ROUND_DOWN).intValue() + 1) : null
+                                ((invoiceDateDays == null ? null : toDecimal(invoiceDateDays)) / periodDaysBd).setScale(0, BigDecimal.ROUND_DOWN).intValue() + 1) : null
                         if (invoiceDateIdx != null && invoiceDateIdx > 5) invoiceDateIdx = 5
                         Integer dueDateDays = invoice.dueDate != null ? asOfTimestamp - invoice.dueDate : null
                         Integer dueDateIdx = dueDateDays != null ? (dueDateDays < 0 ? 0 :
-                                ((dueDateDays as BigDecimal) / periodDaysBd).setScale(0, BigDecimal.ROUND_DOWN).intValue() + 1) : null
+                                ((dueDateDays == null ? null : toDecimal(dueDateDays)) / periodDaysBd).setScale(0, BigDecimal.ROUND_DOWN).intValue() + 1) : null
                         if (dueDateIdx != null && dueDateIdx > 5) dueDateIdx = 5
 
                         if (invoiceDateIdx != null) receivableAgingList[invoiceDateIdx] = receivableAgingList[invoiceDateIdx] + invoice.unpaidTotal
@@ -765,13 +765,13 @@ along with this software (see the LICENSE.md file). If not, see
                             dueDateDt = dueDateDt.plusMonths(1)
                             // fall through intentionally
                         case 'TtFinPaymentDayCurMonth':
-                            int dayOfMonth = settlementTerm.termValue as long || 1
+                            int dayOfMonth = (settlementTerm.termValue == null ? null : Math.trunc(toDecimal(settlementTerm.termValue).toNumber())) || 1
                             int maxDays = dueDateDt.range(java.time.temporal.ChronoField.DAY_OF_MONTH).getMaximum()
                             if (dayOfMonth > maxDays) dayOfMonth = maxDays
                             dueDateDt = dueDateDt.withDayOfMonth(dayOfMonth)
                             break
                         default:
-                            dueDateDt = dueDateDt.plusDays((settlementTerm.termValue as long) || 0)
+                            dueDateDt = dueDateDt.plusDays((settlementTerm.termValue == null ? null : Math.trunc(toDecimal(settlementTerm.termValue).toNumber())) || 0)
                     }
                     dueDate = java.sql.Timestamp.from(dueDateDt.toInstant())
                     // could happen for TtFinPaymentDayCurMonth with a day less than today
@@ -1346,7 +1346,7 @@ along with this software (see the LICENSE.md file). If not, see
                                 <if condition="allShippedQuantity &gt;= orderItemQty"><then>
                                     <set field="childAmountToBill" from="childTotalNotBilled"/>
                                 </then><else>
-                                    <set field="parentRatio" from="(quantityToBill as BigDecimal).divide(orderItemQty as BigDecimal, 6, BigDecimal.ROUND_HALF_EVEN)"/>
+                                    <set field="parentRatio" from="(quantityToBill == null ? null : toDecimal(quantityToBill)).divide((orderItemQty == null ? null : toDecimal(orderItemQty)), 6, BigDecimal.ROUND_HALF_EVEN)"/>
                                     <set field="childAmountToBill" from="(childTotal * parentRatio).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
                                 </else></if>
                             </else></if>
@@ -1454,7 +1454,7 @@ along with this software (see the LICENSE.md file). If not, see
                                     <set field="childAmountToBill" from="childTotalNotBilled"/>
                                 </then><else>
                                     <!-- NOTE: all of this is the same as the code section above for product type parent order items, except the parentRatio right here -->
-                                    <set field="parentRatio" from="(otherTotalToBill as BigDecimal).divide(otherItemTotal as BigDecimal, 6, BigDecimal.ROUND_HALF_EVEN)"/>
+                                    <set field="parentRatio" from="(otherTotalToBill == null ? null : toDecimal(otherTotalToBill)).divide((otherItemTotal == null ? null : toDecimal(otherItemTotal)), 6, BigDecimal.ROUND_HALF_EVEN)"/>
                                     <set field="childAmountToBill" from="(childTotal * parentRatio).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
                                 </else></if>
                             </else></if>

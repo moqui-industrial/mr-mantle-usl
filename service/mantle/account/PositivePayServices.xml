@@ -79,7 +79,7 @@ along with this software (see the LICENSE.md file). If not, see
                     </if>
                 </if>
 
-                <set field="checkNumberLong" from="payment.paymentRefNum as Long"/>
+                <set field="checkNumberLong" from="(payment.paymentRefNum == null ? null : Math.trunc(toDecimal(payment.paymentRefNum).toNumber()))"/>
                 <set field="checkNumberSum" from="checkNumberSum + checkNumberLong"/>
 
                 <script>paymentList.add(payment)</script>
@@ -245,11 +245,11 @@ along with this software (see the LICENSE.md file). If not, see
                 // 05-05: Blank
                 fileTrailer.append(' ')
                 // 06-10: Number of detail records (5 numbers, left 0 pad)
-                fileTrailer.append((entryCount as String).padLeft(5, '0'))
+                fileTrailer.append((entryCount?.toString()).padLeft(5, '0'))
                 // 11-30: Blanks (20)
                 fileTrailer.append(' '.padRight(20, ' '))
                 // 31-40: "Hash total" (simple sum) of all check numbers (10 numbers, left 0 pad)
-                fileTrailer.append((checkNumberSum as String).padLeft(10, '0'))
+                fileTrailer.append((checkNumberSum?.toString()).padLeft(10, '0'))
                 // 41-50: Sum of check amounts (issues and cancels; 10 numbers, last 2 are cents, left 0 padded)
                 fileTrailer.append(debitAmountTotalWithCancelsStr.padLeft(10, '0'))
                 // 51-80: Blanks (30)
@@ -457,7 +457,7 @@ along with this software (see the LICENSE.md file). If not, see
                 // 24-25: Number Batches (always 01)
                 batchTrailer.append('01')
                 // 26-34: Number of Items, including lines, batch header/trailer (9 numbers, left 0 pad)
-                batchTrailer.append(((entryCount + 2) as String).padLeft(9, '0'))
+                batchTrailer.append(((entryCount + 2)?.toString()).padLeft(9, '0'))
                 // 35-45: Sum of check amounts (issues only, NOT including cancels; 11 numbers, last 2 are cents, left 0 padded)
                 batchTrailer.append(debitAmountTotalStr.padLeft(11, '0'))
                 // 46-240: Blanks (195)
@@ -475,7 +475,7 @@ along with this software (see the LICENSE.md file). If not, see
                 // 24-25: Number Batches (always 01)
                 fileTrailer.append('01')
                 // 26-34: Number of Items, including lines, batch header/trailer, and file trailer (9 numbers, left 0 pad)
-                fileTrailer.append(((entryCount + 3) as String).padLeft(9, '0'))
+                fileTrailer.append(((entryCount + 3)?.toString()).padLeft(9, '0'))
                 // 35-45: Sum of check amounts (issues only, NOT including cancels; 11 numbers, last 2 are cents, left 0 padded)
                 fileTrailer.append(debitAmountTotalStr.padLeft(11, '0'))
                 // 46-240: Blanks (195)
@@ -536,7 +536,7 @@ along with this software (see the LICENSE.md file). If not, see
                 // 38-49: Sum of check amounts (issues and cancels; 12 digits, last 2 are cents, left 0 padded)
                 fileHeader.append(debitAmountTotalWithCancelsStr.padLeft(12, '0'))
                 // 50-54: Number of detail records (5 digits, left 0 pad)
-                fileHeader.append((entryCount as String).padLeft(5, '0'))
+                fileHeader.append((entryCount?.toString()).padLeft(5, '0'))
                 // 55-80: Filler (26 spaces)
                 fileHeader.append("".padRight(26, ' '))
 
@@ -681,7 +681,7 @@ along with this software (see the LICENSE.md file). If not, see
                 // 02-15: Spaces (15)
                 fileTrailer.append(' '.padRight(15, ' '))
                 // 16-20: Number of detail records (5 digits, left 0 pad)
-                fileTrailer.append((entryCount as String).padLeft(5, '0'))
+                fileTrailer.append((entryCount?.toString()).padLeft(5, '0'))
                 // 21-23: Blanks (3)
                 fileTrailer.append(' '.padRight(3, ' '))
                 // 24-33: Sum of check amounts (issues and cancels; 10 numbers, last 2 are cents, left 0 padded)

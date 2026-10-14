@@ -284,7 +284,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="quantityNotBilledByPart" from="{}"/>
             <iterate list="orderItemList" entry="orderItem"><script><![CDATA[
                 def orderItemQuantity = (orderItem.quantity != null ? orderItem.quantity : 1.0) * (orderItem.selectedAmount || 1.0)
-                def orderItemTotal = ec.l10n.roundCurrency(orderItemQuantity * (orderItem.unitAmount as BigDecimal || 0.0), orderHeader.currencyUomId)
+                def orderItemTotal = ec.l10n.roundCurrency(orderItemQuantity * ((orderItem.unitAmount == null ? null : toDecimal(orderItem.unitAmount)) || 0.0), orderHeader.currencyUomId)
                 addToBigDecimalInMap(orderItem.orderItemSeqId, orderItemQuantity, quantityNotBilledByItem)
                 addToBigDecimalInMap(orderItem.orderItemSeqId, orderItemTotal, totalNotBilledByItem)
                 addToBigDecimalInMap(orderItem.orderPartSeqId, orderItemQuantity, quantityNotBilledByPart)
@@ -393,9 +393,9 @@ along with this software (see the LICENSE.md file). If not, see
                 boolean singleLot = false
                 boolean newerInventory = false
                 if (hasShippableItems && orderPart.customerPartyId) {
-                    singleLot = "BlY".equals(ec.service.sync().name("mantle.party.PartyServices.get#PartySettingValue")
+                    singleLot = ("BlY" === ec.service.sync().name("mantle.party.PartyServices.get#PartySettingValue")
                             .parameter("partySettingTypeId", "CustomerSingleLot").parameter("partyId", orderPart.customerPartyId).call()?.get("settingValue"))
-                    newerInventory = "BlY".equals(ec.service.sync().name("mantle.party.PartyServices.get#PartySettingValue")
+                    newerInventory = ("BlY" === ec.service.sync().name("mantle.party.PartyServices.get#PartySettingValue")
                             .parameter("partySettingTypeId", "CustomerNewerInventory").parameter("partyId", orderPart.customerPartyId).call()?.get("settingValue"))
                 }
 
@@ -657,9 +657,9 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="itemAmountNotBilled" from="orderItemTotal - itemAmountBilled"/>
 
             <if condition="isShippable &amp;&amp; product != null">
-                <set field="singleLot" from="'BlY'.equals(ec.service.sync().name('mantle.party.PartyServices.get#PartySettingValue')
+                <set field="singleLot" from="('BlY' === ec.service.sync().name('mantle.party.PartyServices.get#PartySettingValue')
                         .parameter('partySettingTypeId', 'CustomerSingleLot').parameter('partyId', orderPart.customerPartyId).call()?.get('settingValue'))"/>
-                <set field="newerInventory" from="'BlY'.equals(ec.service.sync().name('mantle.party.PartyServices.get#PartySettingValue')
+                <set field="newerInventory" from="('BlY' === ec.service.sync().name('mantle.party.PartyServices.get#PartySettingValue')
                         .parameter('partySettingTypeId', 'CustomerNewerInventory').parameter('partyId', orderPart.customerPartyId).call()?.get('settingValue'))"/>
 
                 <entity-find entity-name="mantle.product.issuance.AssetReservation" list="existingResList">
@@ -900,7 +900,7 @@ along with this software (see the LICENSE.md file). If not, see
                 for (storeApprove in productStoreApproveList) {
                     String storeApproveId = storeApprove.storeApproveId
                     try {
-                        Map parmMap = new HashMap()
+                        Map parmMap = {}
                         List promoParameterList = storeApprove.parameters
                         for (promoParameter in promoParameterList) parmMap.put(promoParameter.parameterName, promoParameter.parameterValue)
                         parmMap.put("orderId", orderId)
@@ -938,21 +938,21 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="otherPartCount" from="otherPartList.size()"/>
 
                 <!-- check new customer (no other orders; see also PromotionServices.apply#NewCustomerDiscount) -->
-                <if condition="otherPartCount == 0 &amp;&amp; !'false'.equals(storeSettingList.find({'PsstOrdApproveNewCust'.equals(it.settingTypeEnumId)})?.settingValue)">
+                <if condition="otherPartCount == 0 &amp;&amp; !('false' === storeSettingList.find({('PsstOrdApproveNewCust' === it.settingTypeEnumId)})?.settingValue)">
                     <script>approveWarnings.add(ec.resource.expand('OrderApproveNewCustomer', null))</script>
                 </if>
 
                 <!-- check shipping address (for each part) present and valid -->
                 <iterate list="orderPartList" entry="orderPart">
-                    <if condition="!orderPart.postalContactMechId &amp;&amp; !'false'.equals(storeSettingList.find({'PsstOrdApproveAddrMissing'.equals(it.settingTypeEnumId)})?.settingValue)">
+                    <if condition="!orderPart.postalContactMechId &amp;&amp; !('false' === storeSettingList.find({('PsstOrdApproveAddrMissing' === it.settingTypeEnumId)})?.settingValue)">
                         <script>approveWarnings.add(ec.resource.expand('OrderPlacePartNoShippingAddress', null, {orderPart:orderPart}))</script>
                         <continue/>
                     </if>
-                    <if condition="!'false'.equals(storeSettingList.find({'PsstOrdApproveAddrNotValid'.equals(it.settingTypeEnumId)})?.settingValue)">
+                    <if condition="!('false' === storeSettingList.find({('PsstOrdApproveAddrNotValid' === it.settingTypeEnumId)})?.settingValue)">
                         <entity-find-one entity-name="mantle.party.contact.ContactMechPostalAddress" value-field="postalCm">
                             <field-map field-name="contactMechId" from="orderPart.postalContactMechId"/></entity-find-one>
                         <set field="trustLevelEnumId" from="postalCm.trustLevelEnumId || 'CmtlNew'"/>
-                        <if condition="!'CmtlValid'.equals(trustLevelEnumId) &amp;&amp; !'CmtlVerified'.equals(trustLevelEnumId)">
+                        <if condition="!('CmtlValid' === trustLevelEnumId) &amp;&amp; !('CmtlVerified' === trustLevelEnumId)">
                             <entity-find-one entity-name="moqui.basic.Enumeration" value-field="trustLevelEnum">
                                 <field-map field-name="enumId" from="trustLevelEnumId"/></entity-find-one>
                             <script>approveWarnings.add(ec.resource.expand('OrderApproveShippingAddressTrust', null))</script>
@@ -961,7 +961,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </iterate>
 
                 <!-- potential fraud: billing and shipping addresses different (multiple payments: any billing address differs) -->
-                <if condition="!'false'.equals(storeSettingList.find({'PsstOrdApproveBillShipAddrDiff'.equals(it.settingTypeEnumId)})?.settingValue)">
+                <if condition="!('false' === storeSettingList.find({('PsstOrdApproveBillShipAddrDiff' === it.settingTypeEnumId)})?.settingValue)">
                     <iterate list="billingAddressList" entry="billingAddress">
                         <set field="foundCurMatch" from="false"/>
                         <iterate list="shippingAddressList" entry="shippingAddress">
@@ -987,7 +987,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
 
                 <!-- potential fraud: different names on Party and PaymentMethod -->
-                <if condition="!'false'.equals(storeSettingList.find({'PsstOrdApprovePayMethNameDiff'.equals(it.settingTypeEnumId)})?.settingValue)">
+                <if condition="!('false' === storeSettingList.find({('PsstOrdApprovePayMethNameDiff' === it.settingTypeEnumId)})?.settingValue)">
                     <entity-find-one entity-name="mantle.party.PartyDetail" value-field="customerParty">
                         <field-map field-name="partyId" from="customerPartyId"/></entity-find-one>
                     <iterate list="paymentMethodList" entry="paymentMethod">
@@ -1017,7 +1017,7 @@ along with this software (see the LICENSE.md file). If not, see
                 -->
 
                 <!-- potential fraud: ContactMech blacklisted (shipping address + phone, billing address(es) + phone, email) -->
-                <if condition="!'false'.equals(storeSettingList.find({'PsstOrdApproveContactBlacklist'.equals(it.settingTypeEnumId)})?.settingValue)">
+                <if condition="!('false' === storeSettingList.find({('PsstOrdApproveContactBlacklist' === it.settingTypeEnumId)})?.settingValue)">
                     <iterate list="shippingAddressList" entry="addr">
                         <!-- NOTE: don't need to check these for shipping addresses, checked and displayed when validation ship addresses above (general warning if trust level not Valid):
                         <if condition="'CmtlBlacklisted' == addr.trustLevelEnumId">
@@ -1074,16 +1074,16 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
 
                 <!-- is this a large order? -->
-                <set field="settingLargeOrderAmount" from="storeSettingList.find({'PsstOrdApproveLargeOrder'.equals(it.settingTypeEnumId)})?.settingValue || '0.0'"/>
-                <set field="largeOrderAmountBd" from="settingLargeOrderAmount.isBigDecimal() ? (settingLargeOrderAmount as BigDecimal) : 0.0"/>
+                <set field="settingLargeOrderAmount" from="storeSettingList.find({('PsstOrdApproveLargeOrder' === it.settingTypeEnumId)})?.settingValue || '0.0'"/>
+                <set field="largeOrderAmountBd" from="settingLargeOrderAmount.isBigDecimal() ? (settingLargeOrderAmount == null ? null : toDecimal(settingLargeOrderAmount)) : 0.0"/>
                 <if condition="largeOrderAmountBd &amp;&amp; orderHeader.grandTotal &gt; largeOrderAmountBd"><script>approveWarnings.add(ec.resource.expand(
                         'Large Order: total ${ec.l10n.format(orderHeader.grandTotal, "#,##0.00")} is greater than ${ec.l10n.format(largeOrderAmountBd, "#,##0.00")}', null))
                 </script></if>
 
                 <!-- is this a large Web order? -->
                 <if condition="orderHeader.salesChannelEnumId in ['ScWeb', 'ScWebExternal']">
-                    <set field="settingLargeWebOrderAmount" from="storeSettingList.find({'PsstOrdApproveLargeWebOrder'.equals(it.settingTypeEnumId)})?.settingValue || '0.0'"/>
-                    <set field="largeWebOrderAmountBd" from="settingLargeWebOrderAmount.isBigDecimal() ? (settingLargeWebOrderAmount as BigDecimal) : 0.0"/>
+                    <set field="settingLargeWebOrderAmount" from="storeSettingList.find({('PsstOrdApproveLargeWebOrder' === it.settingTypeEnumId)})?.settingValue || '0.0'"/>
+                    <set field="largeWebOrderAmountBd" from="settingLargeWebOrderAmount.isBigDecimal() ? (settingLargeWebOrderAmount == null ? null : toDecimal(settingLargeWebOrderAmount)) : 0.0"/>
                     <if condition="largeWebOrderAmountBd &amp;&amp; orderHeader.grandTotal &gt; largeWebOrderAmountBd"><script>approveWarnings.add(ec.resource.expand(
                             'Large Web Order: total ${ec.l10n.format(orderHeader.grandTotal, "#,##0.00")} is greater than ${ec.l10n.format(largeWebOrderAmountBd, "#,##0.00")}', null))
                     </script></if>
@@ -1091,8 +1091,8 @@ along with this software (see the LICENSE.md file). If not, see
 
                 <!-- is this order much larger than past orders? (by part if 3 or more; avg + 3 std devs) -->
                 <if condition="otherPartCount &gt;= 3">
-                    <set field="settingStdDevTotal" from="storeSettingList.find({'PsstOrdApproveStdDevTotal'.equals(it.settingTypeEnumId)})?.settingValue || '3.0'"/>
-                    <set field="stdDevTotalBd" from="settingStdDevTotal.isBigDecimal() ? (settingStdDevTotal as BigDecimal) : 0.0"/>
+                    <set field="settingStdDevTotal" from="storeSettingList.find({('PsstOrdApproveStdDevTotal' === it.settingTypeEnumId)})?.settingValue || '3.0'"/>
+                    <set field="stdDevTotalBd" from="settingStdDevTotal.isBigDecimal() ? (settingStdDevTotal == null ? null : toDecimal(settingStdDevTotal)) : 0.0"/>
                     <if condition="stdDevTotalBd">
                         <set field="partMaxTotal" from="stdDevMaxFromMapField(otherPartList, 'partTotal', stdDevTotalBd)?.maximum"/>
                         <iterate list="orderPartList" entry="orderPart">
@@ -1103,8 +1103,8 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
 
                 <!-- is this order much larger than past orders? (by product if 3 or more; avg + 3 std devs) -->
-                <set field="settingStdDevProdQty" from="storeSettingList.find({'PsstOrdApproveStdDevProdQty'.equals(it.settingTypeEnumId)})?.settingValue || '3.0'"/>
-                <set field="stdDevProdQtyBd" from="settingStdDevProdQty.isBigDecimal() ? (settingStdDevProdQty as BigDecimal) : 0.0"/>
+                <set field="settingStdDevProdQty" from="storeSettingList.find({('PsstOrdApproveStdDevProdQty' === it.settingTypeEnumId)})?.settingValue || '3.0'"/>
+                <set field="stdDevProdQtyBd" from="settingStdDevProdQty.isBigDecimal() ? (settingStdDevProdQty == null ? null : toDecimal(settingStdDevProdQty)) : 0.0"/>
                 <if condition="stdDevProdQtyBd">
                     <iterate list="orderItemList" entry="orderItem">
                         <set field="productId" from="orderItem.productId"/>
@@ -1128,7 +1128,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="orderId"/><order-by field-name="orderItemSeqId"/></entity-find>
 
                 <!-- are there any unavailable reservations? -->
-                <if condition="!'false'.equals(storeSettingList.find({'PsstOrdApproveInventoryNotAvail'.equals(it.settingTypeEnumId)})?.settingValue)">
+                <if condition="!('false' === storeSettingList.find({('PsstOrdApproveInventoryNotAvail' === it.settingTypeEnumId)})?.settingValue)">
                     <set field="arUnavailableMap" from="{}"/>
                     <iterate list="assetResList" entry="assetRes">
                         <if condition="assetRes.quantityNotAvailable">
@@ -1142,9 +1142,9 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
 
                 <!-- see if we need to check for single lot or newer inventory -->
-                <set field="singleLot" from="'BlY'.equals(ec.service.sync().name('mantle.party.PartyServices.get#PartySettingValue')
+                <set field="singleLot" from="('BlY' === ec.service.sync().name('mantle.party.PartyServices.get#PartySettingValue')
                         .parameter('partySettingTypeId', 'CustomerSingleLot').parameter('partyId', orderPart.customerPartyId).call()?.get('settingValue'))"/>
-                <set field="newerInventory" from="'BlY'.equals(ec.service.sync().name('mantle.party.PartyServices.get#PartySettingValue')
+                <set field="newerInventory" from="('BlY' === ec.service.sync().name('mantle.party.PartyServices.get#PartySettingValue')
                         .parameter('partySettingTypeId', 'CustomerNewerInventory').parameter('partyId', orderPart.customerPartyId).call()?.get('settingValue'))"/>
 
                 <set field="lotIdSetByItemSeqId" from="{}"/>
@@ -1196,8 +1196,8 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
 
                 <!-- is this a large order by percentage of available inventory? more than quantity 10 and 20% of available -->
-                <set field="settingPercAvailInv" from="storeSettingList.find({'PsstOrdApprovePercAvailInv'.equals(it.settingTypeEnumId)})?.settingValue || '20.0'"/>
-                <set field="bdPercAvailInv" from="settingPercAvailInv.isBigDecimal() ? settingPercAvailInv as BigDecimal : 0.0"/>
+                <set field="settingPercAvailInv" from="storeSettingList.find({('PsstOrdApprovePercAvailInv' === it.settingTypeEnumId)})?.settingValue || '20.0'"/>
+                <set field="bdPercAvailInv" from="settingPercAvailInv.isBigDecimal() ? (settingPercAvailInv == null ? null : toDecimal(settingPercAvailInv)) : 0.0"/>
                 <if condition="bdPercAvailInv">
                     <set field="productIdSet" from="new HashSet()"/><!-- prep this for similar order check below -->
                     <iterate list="orderItemList" entry="orderItem">
@@ -1227,7 +1227,7 @@ along with this software (see the LICENSE.md file). If not, see
 
                 <!-- duplicate/similar order with 24 hours (+/- 24hrs); any other order with any of the products on this order -->
                 <!-- find by OrderHeader.placedDate so it is at least in the Placed status, exclude OrderCancelled and OrderRejected -->
-                <if condition="!'false'.equals(storeSettingList.find({'PsstOrdApproveSimilar'.equals(it.settingTypeEnumId)})?.settingValue)">
+                <if condition="!('false' === storeSettingList.find({('PsstOrdApproveSimilar' === it.settingTypeEnumId)})?.settingValue)">
                     <entity-find entity-name="mantle.order.OrderHeaderAndPart" list="nearOrderList">
                         <econdition field-name="orderId" operator="not-equals"/><econdition field-name="customerPartyId"/>
                         <econdition field-name="placedDate" operator="greater" from="placedDate - 1"/>
@@ -1251,7 +1251,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
 
                 <!-- price min/max compare, for each product with min/max prices -->
-                <if condition="!'false'.equals(storeSettingList.find({'PsstOrdApprovePriceMinMax'.equals(it.settingTypeEnumId)})?.settingValue)">
+                <if condition="!('false' === storeSettingList.find({('PsstOrdApprovePriceMinMax' === it.settingTypeEnumId)})?.settingValue)">
                     <iterate list="orderItemList" entry="orderItem">
                         <set field="productId" from="orderItem.productId"/>
                         <if condition="!productId || !productItemTypes.contains(orderItem.itemTypeEnumId)"><continue/></if>

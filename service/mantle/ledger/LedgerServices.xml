@@ -230,9 +230,9 @@ along with this software (see the LICENSE.md file). If not, see
                         in-map="{glAccountClassEnumId:glAccount.glAccountClassEnumId}"/>
 
                 <if condition="rootOut.isContra == 'Y'"><then>
-                    <set field="entityValue.isDebit" from="'DEBIT'.equals(rootOut.rootGlAccountClassEnumId) ? 'N' : 'Y'"/>
+                    <set field="entityValue.isDebit" from="('DEBIT' === rootOut.rootGlAccountClassEnumId) ? 'N' : 'Y'"/>
                 </then><else>
-                    <set field="entityValue.isDebit" from="'DEBIT'.equals(rootOut.rootGlAccountClassEnumId) ? 'Y' : 'N'"/>
+                    <set field="entityValue.isDebit" from="('DEBIT' === rootOut.rootGlAccountClassEnumId) ? 'Y' : 'N'"/>
                 </else></if>
                 <set field="glAccount.isTemporary" value="N"/>
                 <set field="tempAccountClasses" from="['REVENUE', 'COST_OF_SALES', 'INCOME', 'EXPENSE', 'NON_OP_EXPENSE']"/>
@@ -520,7 +520,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- get GlAccount records, make sure accounts allow posting -->
             <set field="glAccountIdList" from="new LinkedList(new HashSet(acctgTransEntryList*.glAccountId)).sort()"/>
-            <set field="glAccountById" from="new LinkedHashMap()"/>
+            <set field="glAccountById" from="{}"/>
             <iterate list="glAccountIdList" entry="glAccountId">
                 <entity-find-one entity-name="mantle.ledger.account.GlAccount" value-field="glAccount" cache="true">
                     <field-map field-name="glAccountId" from="glAccountId"/></entity-find-one>
@@ -682,7 +682,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="acctgTransId"/><order-by field-name="acctgTransEntrySeqId"/></entity-find>
 
             <set field="glAccountIdList" from="new LinkedList(new HashSet(acctgTransEntryList*.glAccountId)).sort()"/>
-            <set field="glAccountById" from="new LinkedHashMap()"/>
+            <set field="glAccountById" from="{}"/>
             <iterate list="glAccountIdList" entry="glAccountId">
                 <entity-find-one entity-name="mantle.ledger.account.GlAccount" value-field="glAccount" cache="true">
                     <field-map field-name="glAccountId" from="glAccountId"/></entity-find-one>
@@ -696,7 +696,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="!timePeriodList?.length"><return message="Not un-posting transaction ${acctgTransId}, could not find time period for organization ${acctgTrans.organizationPartyId} at ${ec.l10n.format(acctgTrans.transactionDate, null)}"/></if>
             </if>
 
-            <set field="subsequentPeriodListArray" from="new ArrayList()"/>
+            <set field="subsequentPeriodListArray" from="[]"/>
             <iterate entry="timePeriod" list="timePeriodList">
                 <!-- get any existing subsequent time periods to update those as well -->
                 <script>
@@ -741,7 +741,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- have already iterated through the entry list once, all GlAccount records should be there -->
                 <set field="glAccount" from="glAccountById.get(acctgTransEntry.glAccountId)"/>
 
-                <if condition="glAccount.isDebit.equals('Y')"><then>
+                <if condition="(glAccount.isDebit === 'Y')"><then>
                     <set field="postingAmount" from="acctgTransEntry.debitCreditFlag == 'D' ? acctgTransEntry.amount : -acctgTransEntry.amount"/>
                 </then><else>
                     <set field="postingAmount" from="acctgTransEntry.debitCreditFlag == 'D' ? -acctgTransEntry.amount : acctgTransEntry.amount"/>
@@ -1315,7 +1315,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <!-- set the endingBalance based on beginningBalance, postedDebits, postedCredits -->
                     <entity-find-one entity-name="mantle.ledger.account.GlAccount" value-field="glAccount" cache="true">
                         <field-map field-name="glAccountId" from="glAccountOrgTimePeriod.glAccountId"/></entity-find-one>
-                    <if condition="glAccount.isDebit.equals('Y')"><then>
+                    <if condition="(glAccount.isDebit === 'Y')"><then>
                         <set field="glAccountOrgTimePeriod.endingBalance" from="(glAccountOrgTimePeriod.beginningBalance||0.0) +
                                 (glAccountOrgTimePeriod.postedDebits||0.0) - (glAccountOrgTimePeriod.postedCredits||0.0)"/>
                     </then><else>
@@ -1427,7 +1427,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="descEnumIdSet" from="nestedEnumOut.enumIdSet"/>
                 <service-call name="mantle.ledger.LedgerServices.find#RootGlAccountClassEnum" out-map="rootEnumOut"
                         in-map="{glAccountClassEnumId:tempAccountClass}"/>
-                <set field="isDebit" from="'DEBIT'.equals(rootEnumOut.rootGlAccountClassEnumId)"/>
+                <set field="isDebit" from="('DEBIT' === rootEnumOut.rootGlAccountClassEnumId)"/>
                 <if condition="rootEnumOut.isContra == 'Y'"><set field="isDebit" from="!isDebit"/></if>
 
                 <!-- find GAOTP records for balances -->
@@ -1592,7 +1592,7 @@ along with this software (see the LICENSE.md file). If not, see
                             Map glAccount = ec.entity.find("mantle.ledger.account.GlAccount").condition("glAccountId", glAccountId).useCache(true).one()
                             isDebit = glAccount.isDebit
                         }
-                        boolean isDebitAccount = isDebit.equals('Y')
+                        boolean isDebitAccount = (isDebit === 'Y')
 
                         Map debitTransSummary = null
                         boolean isCredit = transSummary.debitCreditFlag == 'C'
@@ -1678,7 +1678,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <order-by field-name="glAccountId,acctgTransTypeEnumId,debitCreditFlag"/>
                 </entity-find>
                 <script><![CDATA[
-                    LinkedHashMap<String, ArrayList<Map>> transSummariesByGlAccountId = new LinkedHashMap<>()
+                    LinkedHashMap<String, ArrayList<Map>> transSummariesByGlAccountId = {}
                     transSummaryListSize = transSummaryList.size()
                     for (int i = 0; i < transSummaryListSize; i++) {
                         Map transSummary = (Map) transSummaryList.get(i)
@@ -1695,7 +1695,7 @@ along with this software (see the LICENSE.md file). If not, see
                             Map glAccount = ec.entity.find("mantle.ledger.account.GlAccount").condition("glAccountId", glAccountId).useCache(true).one()
                             isDebit = glAccount.isDebit
                         }
-                        boolean isDebitAccount = isDebit.equals('Y')
+                        boolean isDebitAccount = (isDebit === 'Y')
 
                         org.moqui.entity.EntityValue glAccountOrgTimePeriod = ec.entity.find("mantle.ledger.account.GlAccountOrgTimePeriod")
                                 .condition("glAccountId", glAccountId).condition("organizationPartyId", organizationPartyId)
@@ -1719,12 +1719,12 @@ along with this software (see the LICENSE.md file). If not, see
                         int transSummaryListSize = transSummaryList.size()
                         for (int i = 0; i < transSummaryListSize; i++) {
                             Map transSummary = (Map) transSummaryList.get(i)
-                            if ('C'.equals(transSummary.debitCreditFlag)) {
+                            if ('C' === transSummary.debitCreditFlag) {
                                 postedCredits += (BigDecimal) transSummary.amount
-                                if (!'AttNetIncomeClosing'.equals(transSummary.acctgTransTypeEnumId)) postedCreditsNoClosing += (BigDecimal) transSummary.amount
+                                if (!('AttNetIncomeClosing' === transSummary.acctgTransTypeEnumId)) postedCreditsNoClosing += (BigDecimal) transSummary.amount
                             } else {
                                 postedDebits += (BigDecimal) transSummary.amount
-                                if (!'AttNetIncomeClosing'.equals(transSummary.acctgTransTypeEnumId)) postedDebitsNoClosing += (BigDecimal) transSummary.amount
+                                if (!('AttNetIncomeClosing' === transSummary.acctgTransTypeEnumId)) postedDebitsNoClosing += (BigDecimal) transSummary.amount
                             }
                         }
 

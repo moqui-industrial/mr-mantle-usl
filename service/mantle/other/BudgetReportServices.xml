@@ -69,7 +69,7 @@ along with this software (see the LICENSE.md file). If not, see
                               in-map="{parentPeriodId:budget.timePeriodId, timePeriodTypeId:budget.subTimePeriodTypeId, createMissing:true}"/>
                 <set field="subTimePeriodList" from="subPeriodOut.timePeriodList"/>
                 <set field="subTimePeriodIds" from="new ArrayList(subTimePeriodList*.timePeriodId)"/>
-                <set field="allTimePeriodIds" from="new ArrayList()"/>
+                <set field="allTimePeriodIds" from="[]"/>
                 <script>allTimePeriodIds.add(budget.timePeriodId)</script>
                 <script>allTimePeriodIds.addAll(subTimePeriodIds)</script>
             </if>
@@ -98,7 +98,7 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
 
             <script><![CDATA[
-                budgetItemsByGlId = new HashMap<String, ArrayList>()
+                budgetItemsByGlId = {}
                 for (Map curBi in budgetItemList) {
                     String glAccountId = curBi.glAccountId
                     ArrayList curBiList = budgetItemsByGlId.get(glAccountId)
@@ -116,7 +116,7 @@ along with this software (see the LICENSE.md file). If not, see
                     }
                 }
 
-                glaotpByGlId = new HashMap<String, ArrayList>()
+                glaotpByGlId = {}
                 for (Map curGlaotp in glaotpList) {
                     String glAccountId = curGlaotp.glAccountId
                     ArrayList curGltpList = glaotpByGlId.get(glAccountId)
@@ -217,7 +217,7 @@ along with this software (see the LICENSE.md file). If not, see
                               in-map="{parentPeriodId:budget.timePeriodId, timePeriodTypeId:budget.subTimePeriodTypeId, createMissing:true}"/>
                 <set field="subTimePeriodList" from="subPeriodOut.timePeriodList"/>
                 <set field="subTimePeriodIds" from="new ArrayList(subTimePeriodList*.timePeriodId)"/>
-                <set field="allTimePeriodIds" from="new ArrayList()"/>
+                <set field="allTimePeriodIds" from="[]"/>
                 <script>allTimePeriodIds.add(budget.timePeriodId)</script>
                 <script>allTimePeriodIds.addAll(subTimePeriodIds)</script>
             </if>
@@ -274,7 +274,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <script><![CDATA[
                 // structure BudgetItem records
-                budgetItemsByGlId = new HashMap<String, ArrayList>()
+                budgetItemsByGlId = {}
                 for (Map curBi in budgetItemList) {
                     String glAccountId = curBi.glAccountId
                     ArrayList curBiList = budgetItemsByGlId.get(glAccountId)
@@ -293,7 +293,7 @@ along with this software (see the LICENSE.md file). If not, see
                 }
 
                 // structure GlAccountOrgTimePeriod records
-                glaotpByGlId = new HashMap<String, ArrayList>()
+                glaotpByGlId = {}
                 for (Map curGlaotp in glaotpList) {
                     String glAccountId = curGlaotp.glAccountId
                     ArrayList curGltpList = glaotpByGlId.get(glAccountId)
@@ -307,9 +307,9 @@ along with this software (see the LICENSE.md file). If not, see
                 }
 
                 // structure BudgetItemDetail records
-                detailsByGlAssetOrFacility = new HashMap<String, ArrayList>()
-                assetIdsByGl = new HashMap<String, Set>()
-                facilityIdsByGl = new HashMap<String, Set>()
+                detailsByGlAssetOrFacility = {}
+                assetIdsByGl = {}
+                facilityIdsByGl = {}
                 for (Map curBid in budgetItemDetailList) {
                     String glAccountId = curBid.glAccountId
                     String assetId = curBid.assetId
@@ -346,7 +346,7 @@ along with this software (see the LICENSE.md file). If not, see
                 }
 
                 // structure InvoiceItemDetail records
-                iiDetailsByGlAssetOrFacility = new HashMap<String, ArrayList>()
+                iiDetailsByGlAssetOrFacility = {}
                 for (int subPeriodIdx = 0; subPeriodIdx <= subTimePeriodSize; subPeriodIdx++) {
                     List curIidtList = iidtListByPeriod.get(subPeriodIdx)
                     for (Map curIidt in curIidtList) {
@@ -379,7 +379,7 @@ along with this software (see the LICENSE.md file). If not, see
                 }
 
                 // create detailInfoList based on glAccountList plus assets and facilities for each
-                detailInfoList = new ArrayList<Map>()
+                detailInfoList = []
                 for (Map glAccount in glAccountList) {
                     String glAccountId = glAccount.glAccountId
 

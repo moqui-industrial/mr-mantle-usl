@@ -514,7 +514,7 @@ along with this software (see the LICENSE.md file). If not, see
 
                                     <if condition="(markupMultiplier != 0.0 || markupAmount != 0.0) &amp;&amp; shippingRateInfo.shippingTotal">
                                         <set field="shippingRateInfo.shippingTotal" from="shippingRateInfo.shippingTotal + markupAmount +
-                                                (markupMultiplier as BigDecimal).multiply(shippingRateInfo.shippingTotal).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+                                                (markupMultiplier == null ? null : toDecimal(markupMultiplier)).multiply(shippingRateInfo.shippingTotal).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
                                     </if>
 
                                     <script>newShipOptionList.add(shippingRateInfo)</script>

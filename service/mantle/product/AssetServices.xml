@@ -883,9 +883,9 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="singleLot" from="false"/>
                 <set field="newerInventory" from="false"/>
                 <if condition="orderPart.customerPartyId">
-                    <set field="singleLot" from="'BlY'.equals(ec.service.sync().name('mantle.party.PartyServices.get#PartySettingValue')
+                    <set field="singleLot" from="('BlY' === ec.service.sync().name('mantle.party.PartyServices.get#PartySettingValue')
                         .parameter('partySettingTypeId', 'CustomerSingleLot').parameter('partyId', orderPart.customerPartyId).call()?.get('settingValue'))"/>
-                    <set field="newerInventory" from="'BlY'.equals(ec.service.sync().name('mantle.party.PartyServices.get#PartySettingValue')
+                    <set field="newerInventory" from="('BlY' === ec.service.sync().name('mantle.party.PartyServices.get#PartySettingValue')
                         .parameter('partySettingTypeId', 'CustomerNewerInventory').parameter('partyId', orderPart.customerPartyId).call()?.get('settingValue'))"/>
                 </if>
 
