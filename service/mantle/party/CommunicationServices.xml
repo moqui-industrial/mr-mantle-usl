@@ -81,14 +81,14 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.party.communication.CommunicationEvent" value-field="parentCe">
                 <field-map field-name="communicationEventId" from="parentCommEventId"/>
             </entity-find-one>
-            <set field="rootCommEventId" from="parentCe?.rootCommEventId ?: parentCommEventId"/>
+            <set field="rootCommEventId" from="parentCe?.rootCommEventId || parentCommEventId"/>
             <!-- if the from Party for this reply is the from Party on this message, send it to the to Party instead -->
             <set field="toPartyId" from="parentCe.fromPartyId == fromPartyId ? parentCe.toPartyId : parentCe.fromPartyId"/>
             <service-call name="create#mantle.party.communication.CommunicationEvent" out-map="context"
-                    in-map="[communicationEventTypeId:'Comment', contactMechTypeEnumId:'CmtWebForm', statusId:statusId,
+                    in-map="{communicationEventTypeId:'Comment', contactMechTypeEnumId:'CmtWebForm', statusId:statusId,
                         parentCommEventId:parentCommEventId, rootCommEventId:rootCommEventId,
                         fromPartyId:fromPartyId, toPartyId:toPartyId, entryDate:ec.user.nowTimestamp,
-                        contentType:contentType, subject:subject, body:body]"/>
+                        contentType:contentType, subject:subject, body:body}"/>
         </actions>
     </service>
 
@@ -101,11 +101,11 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <actions>
             <service-call name="create#mantle.party.communication.CommunicationEvent" out-map="context"
-                    in-map="[communicationEventTypeId:'Comment', contactMechTypeEnumId:'CmtWebForm', statusId:'CeSent',
+                    in-map="{communicationEventTypeId:'Comment', contactMechTypeEnumId:'CmtWebForm', statusId:'CeSent',
                         fromPartyId:ec.user.userAccount.partyId, entryDate:ec.user.nowTimestamp,
-                        contentType:contentType, subject:subject, body:body]"/>
+                        contentType:contentType, subject:subject, body:body}"/>
             <service-call name="create#mantle.party.communication.WikiPageCommunicationEvent"
-                    in-map="[wikiPageId:wikiPageId, communicationEventId:communicationEventId]"/>
+                    in-map="{wikiPageId:wikiPageId, communicationEventId:communicationEventId}"/>
         </actions>
     </service>
 
@@ -127,7 +127,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find entity-name="mantle.party.communication.CommunicationEventContent" list="commEventContentList">
                     <econdition field-name="communicationEventId"/><econdition field-name="contentTypeEnumId"/>
                     <order-by field-name="-contentDate"/></entity-find>
-                <if condition="commEventContentList">
+                <if condition="(commEventContentList?.length > 0)">
                     <set field="communicationEventContent" from="commEventContentList[0]"/>
                     <break/>
                 </if>
@@ -162,7 +162,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
                 <entity-find-one entity-name="mantle.party.communication.CommunicationEventContent" value-field="communicationEventContent"/>
                 <service-call name="mantle.party.CommunicationServices.save#CommunicationEventContentFile" out-map="context"
-                              in-map="context + [communicationEventId:communicationEventContent.communicationEventId, saveContentLocation:false]"/>
+                              in-map="Object.assign({}, context, {communicationEventId:communicationEventContent.communicationEventId, saveContentLocation:false})"/>
             </if>
             <service-call name="update#mantle.party.communication.CommunicationEventContent" in-map="context"/>
         </actions>
@@ -179,9 +179,9 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <set field="filename" from="contentFile.getName()"/>
             <if condition="org.moqui.resource.ResourceReference.isTextFilename(filename)"><then>
-                <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') ?: 'dbresource://mantle/content'"/>
+                <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content'"/>
             </then><else>
-                <set field="contentRoot" from="ec.user.getPreference('mantle.content.large.root') ?: 'dbresource://mantle/content'"/>
+                <set field="contentRoot" from="ec.user.getPreference('mantle.content.large.root') || 'dbresource://mantle/content'"/>
             </else></if>
             <set field="contentLocation" value="${contentRoot}/CommunicationEvent/${communicationEventId}/content_${communicationEventContentId}/${filename}"/>
 
@@ -192,7 +192,7 @@ along with this software (see the LICENSE.md file). If not, see
             </script>
 
             <if condition="saveContentLocation"><service-call name="update#mantle.party.communication.CommunicationEventContent"
-                                                              in-map="[communicationEventContentId:communicationEventContentId, contentLocation:contentLocation]"/></if>
+                                                              in-map="{communicationEventContentId:communicationEventContentId, contentLocation:contentLocation}"/></if>
         </actions>
     </service>
 

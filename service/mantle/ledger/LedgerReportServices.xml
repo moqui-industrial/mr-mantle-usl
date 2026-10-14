@@ -34,12 +34,12 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="organizationName" from="organization.organizationName"/>
 
             <service-call name="mantle.ledger.LedgerServices.find#PartyAcctgPreference" out-map="context"
-                    in-map="[organizationPartyId:organizationPartyId]"/>
+                    in-map="{organizationPartyId:organizationPartyId}"/>
             <set field="currencyUomId" from="partyAcctgPreference?.baseCurrencyUomId"/>
 
             <if condition="childOrgPeriods">
                 <service-call name="mantle.ledger.LedgerServices.expand#ChildOrganizationList" out-map="expandResult"
-                        in-map="[organizationPartyId:organizationPartyId]"/>
+                        in-map="{organizationPartyId:organizationPartyId}"/>
                 <set field="childOrgIdList" from="expandResult.orgPartyIdList"/>
                 <script>childOrgIdList.remove(organizationPartyId)</script>
             </if>
@@ -64,13 +64,13 @@ along with this software (see the LICENSE.md file). If not, see
 
             <order-map-list list="timePeriodList"><order-by field-name="periodName"/></order-map-list>
             <set field="timePeriodIdList" from="[]"/>
-            <set field="timePeriodIdMap" from="[:]"/>
+            <set field="timePeriodIdMap" from="{}"/>
             <iterate list="timePeriodList" entry="timePeriod"><script>
                 timePeriodIdList.add(timePeriod.timePeriodId)
                 timePeriodIdMap.put(timePeriod.timePeriodId, timePeriod)
             </script></iterate>
 
-            <set field="glAccountCodeMask" from="partyAcctgPreference?.glAccountCodeMask ?: ec.user.getPreference('GlAccountCodeMask')"/>
+            <set field="glAccountCodeMask" from="partyAcctgPreference?.glAccountCodeMask || ec.user.getPreference('GlAccountCodeMask')"/>
             <set field="accountCodeFormatter" from="masker(glAccountCodeMask, '0')"/><!-- will be null if no mask -->
         </actions>
     </service>
@@ -96,33 +96,33 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="netOpIncomeClassIdList" from="['REVENUE', 'COST_OF_SALES', 'EXPENSE']"/>
             <set field="netNonOpIncomeClassIdList" from="['INCOME', 'NON_OP_EXPENSE']"/>
 
-            <set field="classInfoById" from="[:]"/>
+            <set field="classInfoById" from="{}"/>
             <iterate list="classIdList" entry="classId">
                 <service-call name="mantle.ledger.LedgerReportServices.get#GlAccountClassReportInfo"
-                        in-map="[organizationPartyId:organizationPartyId, timePeriodIdList:timePeriodIdList,
-                            classInfoById:classInfoById, negateDebit:true, glAccountClassEnumId:classId]"/>
+                        in-map="{organizationPartyId:organizationPartyId, timePeriodIdList:timePeriodIdList,
+                            classInfoById:classInfoById, negateDebit:true, glAccountClassEnumId:classId}"/>
             </iterate>
 
             <service-call name="mantle.ledger.LedgerReportServices.get#GlAccountClassInfoSums" out-map="grossProfitOnSalesOut"
-                    in-map="[classInfoById:classInfoById, classIdList:grossProfitClassIdList]"/>
+                    in-map="{classInfoById:classInfoById, classIdList:grossProfitClassIdList}"/>
             <set field="grossProfitOnSalesMap" from="grossProfitOnSalesOut.totalPostedNoClosing"/>
             <service-call name="mantle.ledger.LedgerReportServices.get#GlAccountClassInfoSums" out-map="netOperatingIncomeOut"
-                    in-map="[classInfoById:classInfoById, classIdList:netOpIncomeClassIdList]"/>
+                    in-map="{classInfoById:classInfoById, classIdList:netOpIncomeClassIdList}"/>
             <set field="netOperatingIncomeMap" from="netOperatingIncomeOut.totalPostedNoClosing"/>
             <service-call name="mantle.ledger.LedgerReportServices.get#GlAccountClassInfoSums" out-map="netNonOperatingIncomeOut"
-                    in-map="[classInfoById:classInfoById, classIdList:netNonOpIncomeClassIdList]"/>
+                    in-map="{classInfoById:classInfoById, classIdList:netNonOpIncomeClassIdList}"/>
             <set field="netNonOperatingIncomeMap" from="netNonOperatingIncomeOut.totalPostedNoClosing"/>
             <service-call name="mantle.ledger.LedgerReportServices.get#GlAccountClassInfoSums" out-map="netIncomeOut"
-                    in-map="[classInfoById:classInfoById, classIdList:classIdList]"/>
+                    in-map="{classInfoById:classInfoById, classIdList:classIdList}"/>
             <set field="netIncomeMap" from="netIncomeOut.totalPostedNoClosing"/>
 
-            <set field="topExpenseByTimePeriod" from="[:]"/>
+            <set field="topExpenseByTimePeriod" from="{}"/>
             <set field="expenseChildren" from="classInfoById.GEN_ADMIN_EXPENSE.childClassInfoList + classInfoById.SALES_EXPENSE.childClassInfoList"/>
             <iterate list="(['ALL'] + timePeriodIdList)" entry="timePeriodId">
                 <set field="allExpenseList" from="[]"/>
                 <iterate list="expenseChildren" entry="childInfo">
                     <set field="totalPosted" from="childInfo.totalPostedNoClosingByTimePeriod[timePeriodId]"/>
-                    <script>if (totalPosted &amp;&amp; totalPosted &lt; 0.0) allExpenseList.add([className:childInfo.className, amount:-totalPosted])</script>
+                    <script>if (totalPosted &amp;&amp; totalPosted &lt; 0.0) allExpenseList.add({className:childInfo.className, amount:-totalPosted})</script>
                 </iterate>
                 <order-map-list list="allExpenseList"><order-by field-name="-amount"/></order-map-list>
                 <script>topExpenseByTimePeriod.put(timePeriodId, allExpenseList.take(10))</script>
@@ -146,27 +146,27 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- includes: 'ASSET', 'LIABILITY', 'EQUITY', 'DISTRIBUTION' -->
 
-            <set field="classInfoById" from="[:]"/>
+            <set field="classInfoById" from="{}"/>
             <service-call name="mantle.ledger.LedgerReportServices.get#GlAccountClassReportInfo"
-                    in-map="[organizationPartyId:organizationPartyId, timePeriodIdList:timePeriodIdList,
-                        classInfoById:classInfoById, glAccountClassEnumId:'ASSET', negateCredit:true]"/>
+                    in-map="{organizationPartyId:organizationPartyId, timePeriodIdList:timePeriodIdList,
+                        classInfoById:classInfoById, glAccountClassEnumId:'ASSET', negateCredit:true}"/>
             <service-call name="mantle.ledger.LedgerReportServices.get#GlAccountClassReportInfo"
-                    in-map="[organizationPartyId:organizationPartyId, timePeriodIdList:timePeriodIdList,
-                        classInfoById:classInfoById, glAccountClassEnumId:'LIABILITY', negateDebit:true]"/>
+                    in-map="{organizationPartyId:organizationPartyId, timePeriodIdList:timePeriodIdList,
+                        classInfoById:classInfoById, glAccountClassEnumId:'LIABILITY', negateDebit:true}"/>
             <service-call name="mantle.ledger.LedgerReportServices.get#GlAccountClassReportInfo"
-                    in-map="[organizationPartyId:organizationPartyId, timePeriodIdList:timePeriodIdList,
-                        classInfoById:classInfoById, glAccountClassEnumId:'EQUITY', negateDebit:true]"/>
+                    in-map="{organizationPartyId:organizationPartyId, timePeriodIdList:timePeriodIdList,
+                        classInfoById:classInfoById, glAccountClassEnumId:'EQUITY', negateDebit:true}"/>
             <!-- Distribution accounts for extended equity section -->
             <service-call name="mantle.ledger.LedgerReportServices.get#GlAccountClassReportInfo"
-                    in-map="[organizationPartyId:organizationPartyId, timePeriodIdList:timePeriodIdList,
-                        classInfoById:classInfoById, glAccountClassEnumId:'DISTRIBUTION', negateDebit:true]"/>
+                    in-map="{organizationPartyId:organizationPartyId, timePeriodIdList:timePeriodIdList,
+                        classInfoById:classInfoById, glAccountClassEnumId:'DISTRIBUTION', negateDebit:true}"/>
 
             <service-call name="mantle.ledger.LedgerReportServices.get#GlAccountClassInfoSums" out-map="netAssetTotalMap"
-                    in-map="[classInfoById:classInfoById, classIdList:['ASSET']]"/>
+                    in-map="{classInfoById:classInfoById, classIdList:['ASSET']}"/>
             <service-call name="mantle.ledger.LedgerReportServices.get#GlAccountClassInfoSums" out-map="equityTotalMap"
-                    in-map="[classInfoById:classInfoById, classIdList:['EQUITY', 'DISTRIBUTION']]"/>
+                    in-map="{classInfoById:classInfoById, classIdList:['EQUITY', 'DISTRIBUTION']}"/>
             <service-call name="mantle.ledger.LedgerReportServices.get#GlAccountClassInfoSums" out-map="liabilityEquityTotalMap"
-                    in-map="[classInfoById:classInfoById, classIdList:['LIABILITY', 'EQUITY', 'DISTRIBUTION']]"/>
+                    in-map="{classInfoById:classInfoById, classIdList:['LIABILITY', 'EQUITY', 'DISTRIBUTION']}"/>
         </actions>
     </service>
 
@@ -231,19 +231,19 @@ along with this software (see the LICENSE.md file). If not, see
                                             'DISTRIBUTION', 'EQUITY', 'LONG_TERM_LIABILITY']"/>
             <iterate list="classIdList" entry="classId">
                 <service-call name="mantle.ledger.LedgerReportServices.get#GlAccountClassReportInfo"
-                        in-map="[organizationPartyId:organizationPartyId, timePeriodIdList:timePeriodIdList,
-                            classInfoById:classInfoById, glAccountClassEnumId:classId, negateDebit:true]"/>
+                        in-map="{organizationPartyId:organizationPartyId, timePeriodIdList:timePeriodIdList,
+                            classInfoById:classInfoById, glAccountClassEnumId:classId, negateDebit:true}"/>
             </iterate>
 
             <service-call name="mantle.ledger.LedgerReportServices.get#GlAccountClassInfoSums" out-map="netOperatingActivityOut"
-                    in-map="[classInfoById:classInfoById, classIdList:['REVENUE', 'COST_OF_SALES',
-                        'INCOME', 'EXPENSE', 'NON_OP_EXPENSE', 'CURRENT_ASSET', 'OTHER_ASSET', 'CURRENT_LIABILITY']]"/>
+                    in-map="{classInfoById:classInfoById, classIdList:['REVENUE', 'COST_OF_SALES',
+                        'INCOME', 'EXPENSE', 'NON_OP_EXPENSE', 'CURRENT_ASSET', 'OTHER_ASSET', 'CURRENT_LIABILITY']}"/>
             <set field="netOperatingActivityMap" from="netOperatingActivityOut.totalPosted"/>
             <service-call name="mantle.ledger.LedgerReportServices.get#GlAccountClassInfoSums" out-map="netInvestingActivityOut"
-                    in-map="[classInfoById:classInfoById, classIdList:['LONG_TERM_ASSET']]"/>
+                    in-map="{classInfoById:classInfoById, classIdList:['LONG_TERM_ASSET']}"/>
             <set field="netInvestingActivityMap" from="netInvestingActivityOut.totalPosted"/>
             <service-call name="mantle.ledger.LedgerReportServices.get#GlAccountClassInfoSums" out-map="netFinancingActivityOut"
-                    in-map="[classInfoById:classInfoById, classIdList:['DISTRIBUTION', 'EQUITY', 'LONG_TERM_LIABILITY']]"/>
+                    in-map="{classInfoById:classInfoById, classIdList:['DISTRIBUTION', 'EQUITY', 'LONG_TERM_LIABILITY']}"/>
             <set field="netFinancingActivityMap" from="netFinancingActivityOut.totalPosted"/>
         </actions>
     </service>
@@ -261,8 +261,8 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="classIdList" from="['RETAINED_EARNINGS', 'DISTRIBUTION']"/>
             <iterate list="classIdList" entry="classId">
                 <service-call name="mantle.ledger.LedgerReportServices.get#GlAccountClassReportInfo"
-                        in-map="[organizationPartyId:organizationPartyId, timePeriodIdList:timePeriodIdList,
-                            classInfoById:classInfoById, glAccountClassEnumId:classId, negateDebit:true]"/>
+                        in-map="{organizationPartyId:organizationPartyId, timePeriodIdList:timePeriodIdList,
+                            classInfoById:classInfoById, glAccountClassEnumId:classId, negateDebit:true}"/>
             </iterate>
         </actions>
     </service>
@@ -306,11 +306,11 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- Get info for all DEBIT and CREDIT accounts, we'll use them in various places -->
             <set field="classIdList" from="['DEBIT', 'CREDIT']"/>
-            <set field="classInfoById" from="[:]"/>
+            <set field="classInfoById" from="{}"/>
             <iterate list="classIdList" entry="classId">
                 <service-call name="mantle.ledger.LedgerReportServices.get#GlAccountClassReportInfo"
-                        in-map="[organizationPartyId:organizationPartyId, timePeriodIdList:timePeriodIdList,
-                            classInfoById:classInfoById, negateDebit:true, glAccountClassEnumId:classId]"/>
+                        in-map="{organizationPartyId:organizationPartyId, timePeriodIdList:timePeriodIdList,
+                            classInfoById:classInfoById, negateDebit:true, glAccountClassEnumId:classId}"/>
             </iterate>
 
             <!-- empty Maps for the various values -->
@@ -323,57 +323,57 @@ along with this software (see the LICENSE.md file). If not, see
                     'debtToEquityMap', 'timesInterestEarnedMap', 'cashCoverageMap', 'fixedChargeCoverageMap',
                     'equityMultiplierMap', 'grossProfitMarginMap', 'netProfitMarginMap', 'returnOnAssetsMap',
                     'returnOnEquityMap']"/>
-            <iterate list="metricMapNames" entry="mapName"><script>context.put(mapName, [:])</script></iterate>
-            <iterate list="classMapNames" entry="mapName"><script>context.put(mapName, [:])</script></iterate>
-            <iterate list="ratioMapNames" entry="mapName"><script>context.put(mapName, [:])</script></iterate>
+            <iterate list="metricMapNames" entry="mapName"><script>context.put(mapName, {})</script></iterate>
+            <iterate list="classMapNames" entry="mapName"><script>context.put(mapName, {})</script></iterate>
+            <iterate list="ratioMapNames" entry="mapName"><script>context.put(mapName, {})</script></iterate>
 
             <!-- get Net Income -->
             <set field="netIncomeClassIdList" from="['REVENUE', 'COST_OF_SALES', 'INCOME', 'EXPENSE', 'NON_OP_EXPENSE']"/>
             <service-call name="mantle.ledger.LedgerReportServices.get#GlAccountClassInfoSums" out-map="netIncomeOut"
-                    in-map="[classInfoById:classInfoById, classIdList:netIncomeClassIdList]"/>
+                    in-map="{classInfoById:classInfoById, classIdList:netIncomeClassIdList}"/>
             <set field="netIncomeMap" from="netIncomeOut.totalPosted"/>
 
             <iterate list="timePeriodIdList" entry="timePeriodId">
 
                 <!-- ========== GL Class Totals ========== -->
 
-                <set field="costOfSales" from="-(classInfoById.COST_OF_SALES.totalPostedByTimePeriod[timePeriodId] ?: 0.0)"/>
+                <set field="costOfSales" from="-(classInfoById.COST_OF_SALES.totalPostedByTimePeriod[timePeriodId] || 0.0)"/>
                 <script>costOfSalesMap.put(timePeriodId, costOfSales)</script>
-                <set field="cogs" from="-(classInfoById.COST_GOODS_SOLD.totalPostedByTimePeriod[timePeriodId] ?: 0.0)"/>
+                <set field="cogs" from="-(classInfoById.COST_GOODS_SOLD.totalPostedByTimePeriod[timePeriodId] || 0.0)"/>
                 <script>cogsMap.put(timePeriodId, cogs)</script>
 
                 <!-- Total Assets = ASSET -->
-                <set field="totalAssets" from="(classInfoById.ASSET.totalBalanceByTimePeriod[timePeriodId] ?: 0.0)"/>
+                <set field="totalAssets" from="(classInfoById.ASSET.totalBalanceByTimePeriod[timePeriodId] || 0.0)"/>
                 <script>totalAssetsMap.put(timePeriodId, totalAssets)</script>
-                <set field="netFixedAssets" from="(classInfoById.LONG_TERM_ASSET.totalBalanceByTimePeriod[timePeriodId] ?: 0.0)"/>
+                <set field="netFixedAssets" from="(classInfoById.LONG_TERM_ASSET.totalBalanceByTimePeriod[timePeriodId] || 0.0)"/>
                 <script>netFixedAssetsMap.put(timePeriodId, netFixedAssets)</script>
-                <set field="currentAssets" from="classInfoById.CURRENT_ASSET.totalBalanceByTimePeriod[timePeriodId] ?: 0.0"/>
+                <set field="currentAssets" from="classInfoById.CURRENT_ASSET.totalBalanceByTimePeriod[timePeriodId] || 0.0"/>
                 <script>currentAssetsMap.put(timePeriodId, currentAssets)</script>
-                <set field="currentLiabilities" from="-(classInfoById.CURRENT_LIABILITY.totalBalanceByTimePeriod[timePeriodId] ?: 0.0)"/>
+                <set field="currentLiabilities" from="-(classInfoById.CURRENT_LIABILITY.totalBalanceByTimePeriod[timePeriodId] || 0.0)"/>
                 <script>currentLiabilitiesMap.put(timePeriodId, currentLiabilities)</script>
-                <set field="inventory" from="classInfoById.INVENTORY_ASSET.totalBalanceByTimePeriod[timePeriodId] ?: 0.0"/>
+                <set field="inventory" from="classInfoById.INVENTORY_ASSET.totalBalanceByTimePeriod[timePeriodId] || 0.0"/>
                 <script>inventoryMap.put(timePeriodId, inventory)</script>
 
-                <set field="totalLiabilities" from="-(classInfoById.LIABILITY.totalBalanceByTimePeriod[timePeriodId] ?: 0.0)"/>
+                <set field="totalLiabilities" from="-(classInfoById.LIABILITY.totalBalanceByTimePeriod[timePeriodId] || 0.0)"/>
                 <script>totalLiabilitiesMap.put(timePeriodId, totalLiabilities)</script>
-                <set field="longTermDebt" from="-(classInfoById.LONG_TERM_LIABILITY.totalBalanceByTimePeriod[timePeriodId] ?: 0.0)"/>
+                <set field="longTermDebt" from="-(classInfoById.LONG_TERM_LIABILITY.totalBalanceByTimePeriod[timePeriodId] || 0.0)"/>
                 <script>longTermDebtMap.put(timePeriodId, longTermDebt)</script>
-                <set field="equity" from="classInfoById.EQUITY.totalBalanceByTimePeriod[timePeriodId] ?: 0.0"/>
+                <set field="equity" from="classInfoById.EQUITY.totalBalanceByTimePeriod[timePeriodId] || 0.0"/>
                 <script>equityMap.put(timePeriodId, equity)</script>
 
-                <set field="accountsReceivable" from="-(classInfoById.ACCOUNTS_RECEIVABLE.totalBalanceByTimePeriod[timePeriodId] ?: 0.0)"/>
+                <set field="accountsReceivable" from="-(classInfoById.ACCOUNTS_RECEIVABLE.totalBalanceByTimePeriod[timePeriodId] || 0.0)"/>
                 <script>accountsReceivableMap.put(timePeriodId, accountsReceivable)</script>
-                <set field="depreciation" from="-(classInfoById.DEPRECIATION.totalPostedByTimePeriod[timePeriodId] ?: 0.0)"/>
+                <set field="depreciation" from="-(classInfoById.DEPRECIATION.totalPostedByTimePeriod[timePeriodId] || 0.0)"/>
                 <script>depreciationMap.put(timePeriodId, depreciation)</script>
-                <set field="amortization" from="-(classInfoById.AMORTIZATION.totalPostedByTimePeriod[timePeriodId] ?: 0.0)"/>
+                <set field="amortization" from="-(classInfoById.AMORTIZATION.totalPostedByTimePeriod[timePeriodId] || 0.0)"/>
                 <script>amortizationMap.put(timePeriodId, amortization)</script>
-                <set field="interestExpense" from="-(classInfoById.INTEREST_EXPENSE.totalPostedByTimePeriod[timePeriodId] ?: 0.0)"/>
+                <set field="interestExpense" from="-(classInfoById.INTEREST_EXPENSE.totalPostedByTimePeriod[timePeriodId] || 0.0)"/>
                 <script>interestExpenseMap.put(timePeriodId, interestExpense)</script>
 
                 <!-- ========== Metrics ========== -->
 
                 <!-- Sales = REVENUE -->
-                <set field="sales" from="(classInfoById.REVENUE.totalPostedByTimePeriod[timePeriodId] ?: 0.0)"/>
+                <set field="sales" from="(classInfoById.REVENUE.totalPostedByTimePeriod[timePeriodId] || 0.0)"/>
                 <script>salesMap.put(timePeriodId, sales)</script>
                 <!-- Gross Profit = sales - costOfSales -->
                 <set field="grossProfit" from="sales - costOfSales"/>
@@ -385,15 +385,15 @@ along with this software (see the LICENSE.md file). If not, see
                  -->
 
                 <!-- Net Income = (standard Net Income from run#IncomeStatement service) -->
-                <set field="netIncome" from="netIncomeMap[timePeriodId] ?: 0"/>
+                <set field="netIncome" from="netIncomeMap[timePeriodId] || 0"/>
                 <!-- EBT = Net Income - INCOME_TAX_EXPENSE (negated, so adds back in) -->
-                <set field="ebt" from="netIncome - (classInfoById.INCOME_TAX_EXPENSE.totalPostedByTimePeriod[timePeriodId] ?: 0.0)"/>
+                <set field="ebt" from="netIncome - (classInfoById.INCOME_TAX_EXPENSE.totalPostedByTimePeriod[timePeriodId] || 0.0)"/>
                 <script>ebtMap.put(timePeriodId, ebt)</script>
                 <!-- IBIE = EBT - INTEREST_EXPENSE (negated, so adds back in) -->
-                <set field="ibie" from="ebt - (classInfoById.INTEREST_EXPENSE.totalPostedByTimePeriod[timePeriodId] ?: 0.0)"/>
+                <set field="ibie" from="ebt - (classInfoById.INTEREST_EXPENSE.totalPostedByTimePeriod[timePeriodId] || 0.0)"/>
                 <script>ibieMap.put(timePeriodId, ibie)</script>
                 <!-- EBIT = IBIE - INTEREST_INCOME -->
-                <set field="ebit" from="ibie - (classInfoById.INTEREST_INCOME.totalPostedByTimePeriod[timePeriodId] ?: 0.0)"/>
+                <set field="ebit" from="ibie - (classInfoById.INTEREST_INCOME.totalPostedByTimePeriod[timePeriodId] || 0.0)"/>
                 <script>ebitMap.put(timePeriodId, ebit)</script>
                 <!-- EBIT + interest income = IBIE; IBIE - interest expense = EBT; EBT - income taxes = Net Income -->
                 <!-- EBIT = Net Income + income taxes + interest expense - interest income -->
@@ -509,9 +509,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="totalBalance" type="Map"/>
         </out-parameters>
         <actions>
-            <set field="totalPosted" from="[:]"/>
-            <set field="totalPostedNoClosing" from="[:]"/>
-            <set field="totalBalance" from="[:]"/>
+            <set field="totalPosted" from="{}"/>
+            <set field="totalPostedNoClosing" from="{}"/>
+            <set field="totalBalance" from="{}"/>
             <iterate list="classIdList" entry="classId">
                 <set field="classInfo" from="classInfoById.get(classId)"/>
                 <if condition="!classInfo"><continue/></if>
@@ -544,7 +544,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="negate" from="false"/>
             <if condition="negateDebit || negateCredit">
                 <service-call name="mantle.ledger.LedgerServices.find#RootGlAccountClassEnum" out-map="context"
-                        in-map="[glAccountClassEnumId:glAccountClassEnumId]"/>
+                        in-map="{glAccountClassEnumId:glAccountClassEnumId}"/>
                 <set field="negate" from="(negateDebit &amp;&amp; (rootGlAccountClassEnumId == 'DEBIT' || (rootGlAccountClassEnumId == 'CREDIT' &amp;&amp; isContra == 'Y'))) ||
                         (negateCredit &amp;&amp; (rootGlAccountClassEnumId == 'CREDIT' || (rootGlAccountClassEnumId == 'DEBIT' &amp;&amp; isContra == 'Y')))"/>
             </if>
@@ -557,17 +557,17 @@ along with this software (see the LICENSE.md file). If not, see
                 <select-field field-name="timePeriodId,glAccountId,accountCode,accountName,isDebit"/>
                 <select-field field-name="beginningBalance,endingBalance,postedDebitsNoClosing,postedCreditsNoClosing"/>
             </entity-find>
-            <set field="balanceByTimePeriod" from="[:]"/>
-            <set field="postedByTimePeriod" from="[:]"/>
-            <set field="postedNoClosingByTimePeriod" from="[:]"/>
-            <set field="glAccountInfoMap" from="[:]"/>
+            <set field="balanceByTimePeriod" from="{}"/>
+            <set field="postedByTimePeriod" from="{}"/>
+            <set field="postedNoClosingByTimePeriod" from="{}"/>
+            <set field="glAccountInfoMap" from="{}"/>
             <iterate list="glAccountDetailList" entry="glAccountDetail">
                 <script>
                     boolean isDebit = glAccountDetail.isDebit.equals('Y')
-                    BigDecimal balance = glAccountDetail.endingBalance ?: 0.0
-                    BigDecimal posted = balance - (glAccountDetail.beginningBalance ?: 0.0)
-                    BigDecimal postedNoClosing = isDebit ? ((glAccountDetail.postedDebitsNoClosing ?: 0.0) - (glAccountDetail.postedCreditsNoClosing ?: 0.0)) :
-                            ((glAccountDetail.postedCreditsNoClosing ?: 0.0) - (glAccountDetail.postedDebitsNoClosing ?: 0.0))
+                    BigDecimal balance = glAccountDetail.endingBalance || 0.0
+                    BigDecimal posted = balance - (glAccountDetail.beginningBalance || 0.0)
+                    BigDecimal postedNoClosing = isDebit ? ((glAccountDetail.postedDebitsNoClosing || 0.0) - (glAccountDetail.postedCreditsNoClosing || 0.0)) :
+                            ((glAccountDetail.postedCreditsNoClosing || 0.0) - (glAccountDetail.postedDebitsNoClosing || 0.0))
                     if (negate) { balance = -balance; posted = -posted; postedNoClosing = -postedNoClosing }
 
                     addToBigDecimalInMap(glAccountDetail.timePeriodId, balance, balanceByTimePeriod)
@@ -579,9 +579,9 @@ along with this software (see the LICENSE.md file). If not, see
 
                     Map glAccountInfo = glAccountInfoMap.get(glAccountDetail.accountCode)
                     if (glAccountInfo == null) {
-                        glAccountInfo = [accountCode:glAccountDetail.accountCode, accountName:glAccountDetail.accountName,
-                                glAccountId:glAccountDetail.glAccountId, balanceByTimePeriod:[:], postedByTimePeriod:[:],
-                                postedNoClosingByTimePeriod:[:]]
+                        glAccountInfo = {accountCode:glAccountDetail.accountCode, accountName:glAccountDetail.accountName,
+                                glAccountId:glAccountDetail.glAccountId, balanceByTimePeriod:{}, postedByTimePeriod:{},
+                                postedNoClosingByTimePeriod:{}}
                         glAccountInfoMap.put(glAccountDetail.accountCode, glAccountInfo)
                     }
                     glAccountInfo.balanceByTimePeriod.put(glAccountDetail.timePeriodId, balance)
@@ -597,18 +597,18 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- find child classes and recurse... -->
             <set field="childClassInfoList" from="[]"/>
-            <set field="childBalanceByTimePeriod" from="[:]"/>
-            <set field="childPostedByTimePeriod" from="[:]"/>
-            <set field="childPostedNoClosingByTimePeriod" from="[:]"/>
+            <set field="childBalanceByTimePeriod" from="{}"/>
+            <set field="childPostedByTimePeriod" from="{}"/>
+            <set field="childPostedNoClosingByTimePeriod" from="{}"/>
             <entity-find entity-name="moqui.basic.Enumeration" list="childEnumList">
                 <econdition field-name="parentEnumId" from="glAccountClassEnumId"/>
                 <order-by field-name="sequenceNum,description"/>
             </entity-find>
             <iterate list="childEnumList" entry="childEnum">
                 <service-call name="mantle.ledger.LedgerReportServices.get#GlAccountClassReportInfo" out-map="childOut"
-                        in-map="[organizationPartyId:organizationPartyId, timePeriodIdList:timePeriodIdList,
+                        in-map="{organizationPartyId:organizationPartyId, timePeriodIdList:timePeriodIdList,
                             glAccountClassEnumId:childEnum.enumId, negateDebit:negateDebit, negateCredit:negateCredit,
-                            classInfoById:classInfoById]"/>
+                            classInfoById:classInfoById}"/>
                 <script>childClassInfoList.add(childOut.classInfoMap)</script>
                 <!-- add both the class balance and child balance to current class's child balance -->
                 <iterate list="timePeriodIdList" entry="timePeriodId">
@@ -627,9 +627,9 @@ along with this software (see the LICENSE.md file). If not, see
                 </iterate>
             </iterate>
 
-            <set field="totalBalanceByTimePeriod" from="[:]"/>
-            <set field="totalPostedByTimePeriod" from="[:]"/>
-            <set field="totalPostedNoClosingByTimePeriod" from="[:]"/>
+            <set field="totalBalanceByTimePeriod" from="{}"/>
+            <set field="totalPostedByTimePeriod" from="{}"/>
+            <set field="totalPostedNoClosingByTimePeriod" from="{}"/>
             <iterate list="timePeriodIdList" entry="timePeriodId">
                 <script>
                     addToBigDecimalInMap(timePeriodId, balanceByTimePeriod[timePeriodId], totalBalanceByTimePeriod)
@@ -646,13 +646,13 @@ along with this software (see the LICENSE.md file). If not, see
             </iterate>
 
             <!-- here is the full class info Map for reference in whatever uses the output -->
-            <set field="classInfoMap" from="[glAccountClassEnumId:glAccountClassEnumId, className:classEnum.description,
+            <set field="classInfoMap" from="{glAccountClassEnumId:glAccountClassEnumId, className:classEnum.description,
                     balanceByTimePeriod:balanceByTimePeriod, childBalanceByTimePeriod:childBalanceByTimePeriod,
                     postedByTimePeriod:postedByTimePeriod, childPostedByTimePeriod:childPostedByTimePeriod,
                     postedNoClosingByTimePeriod:postedNoClosingByTimePeriod, childPostedNoClosingByTimePeriod:childPostedNoClosingByTimePeriod,
                     totalBalanceByTimePeriod:totalBalanceByTimePeriod, totalPostedByTimePeriod:totalPostedByTimePeriod,
                     totalPostedNoClosingByTimePeriod:totalPostedNoClosingByTimePeriod, childClassInfoList:childClassInfoList,
-                    glAccountDetailList:glAccountDetailList, glAccountInfoList:glAccountInfoList]"/>
+                    glAccountDetailList:glAccountDetailList, glAccountInfoList:glAccountInfoList}"/>
 
             <if condition="classInfoById != null"><script>classInfoById.put(glAccountClassEnumId, classInfoMap)</script></if>
         </actions>
@@ -670,14 +670,14 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions>
             <service-call name="mantle.ledger.LedgerServices.find#PartyAcctgPreference" out-map="context"
-                    in-map="[organizationPartyId:organizationPartyId]"/>
+                    in-map="{organizationPartyId:organizationPartyId}"/>
             <if condition="!amountUomId"><set field="amountUomId" from="partyAcctgPreference.baseCurrencyUomId"/></if>
 
-            <set field="accountResultMap" from="[:]"/>
+            <set field="accountResultMap" from="{}"/>
             <service-call name="mantle.ledger.LedgerReportServices.get#PostedAmountSummarySide" out-map="context"
-                    in-map="context + [debitCreditFlag:'D']"/>
+                    in-map="Object.assign({}, context, {debitCreditFlag:'D'})"/>
             <service-call name="mantle.ledger.LedgerReportServices.get#PostedAmountSummarySide" out-map="context"
-                    in-map="context + [debitCreditFlag:'C']"/>
+                    in-map="Object.assign({}, context, {debitCreditFlag:'C'})"/>
 
             <set field="resultList" from="accountResultMap.values() as List"/>
             <order-map-list list="resultList"><order-by field-name="accountCode"/></order-map-list>
@@ -694,7 +694,7 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="accountResultMap" type="Map" required="true"/></out-parameters>
         <actions>
-            <if condition="accountResultMap == null"><set field="accountResultMap" from="[:]"/></if>
+            <if condition="accountResultMap == null"><set field="accountResultMap" from="{}"/></if>
 
             <entity-find entity-name="mantle.ledger.report.PostedAmountSummary" list="postedAmountSummaryList">
                 <econdition field-name="debitCreditFlag"/>
@@ -708,9 +708,9 @@ along with this software (see the LICENSE.md file). If not, see
             <iterate list="postedAmountSummaryList" entry="postedAmountSummary">
                 <set field="accountResult" from="accountResultMap.get(postedAmountSummary.glAccountId)"/>
                 <if condition="!accountResult">
-                    <set field="accountResult" from="[glAccountId:postedAmountSummary.glAccountId,
+                    <set field="accountResult" from="{glAccountId:postedAmountSummary.glAccountId,
                         accountName:postedAmountSummary.accountName, accountCode:postedAmountSummary.accountCode,
-                        glAccountClassEnumId:postedAmountSummary.glAccountClassEnumId]"/>
+                        glAccountClassEnumId:postedAmountSummary.glAccountClassEnumId}"/>
                     <script>accountResultMap.put(postedAmountSummary.glAccountId, accountResult)</script>
                 </if>
                 <if condition="debitCreditFlag == 'D'">
@@ -739,14 +739,14 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="entryInfoList" type="List"><parameter name="entryInfo" type="Map"/></parameter>
         </out-parameters>
         <actions>
-            <service-call name="mantle.party.TimeServices.get#TimePeriodInfo" in-map="[timePeriodId:timePeriodId]" out-map="context"/>
-            <set field="organizationPartyId" from="organizationPartyId ?: timePeriod.partyId"/>
+            <service-call name="mantle.party.TimeServices.get#TimePeriodInfo" in-map="{timePeriodId:timePeriodId}" out-map="context"/>
+            <set field="organizationPartyId" from="organizationPartyId || timePeriod.partyId"/>
 
             <entity-find-one entity-name="mantle.party.PartyDetail" value-field="orgDetail">
                 <field-map field-name="partyId" from="organizationPartyId"/></entity-find-one>
             <service-call name="mantle.ledger.LedgerServices.find#PartyAcctgPreference" out-map="context"
-                    in-map="[organizationPartyId:organizationPartyId]"/>
-            <set field="currencyUomId" from="partyAcctgPreference?.baseCurrencyUomId ?: 'USD'"/>
+                    in-map="{organizationPartyId:organizationPartyId}"/>
+            <set field="currencyUomId" from="partyAcctgPreference?.baseCurrencyUomId || 'USD'"/>
 
             <entity-find entity-name="mantle.ledger.account.GlAccountOrgTimePeriod" list="glAccountOrgTimePeriodList">
                 <econdition field-name="glAccountId" operator="in" from="glAccountIdList"/>
@@ -761,7 +761,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <field-map field-name="glAccountId"/></entity-find-one>
                 <set field="isDebitAccount" from="glAccount.isDebit.equals('Y')"/>
 
-                <set field="glAccountCodeMask" from="partyAcctgPreference?.glAccountCodeMask ?: ec.user.getPreference('GlAccountCodeMask')"/>
+                <set field="glAccountCodeMask" from="partyAcctgPreference?.glAccountCodeMask || ec.user.getPreference('GlAccountCodeMask')"/>
                 <set field="accountCodeFormatter" from="masker(glAccountCodeMask, '0')"/><!-- will be null if no mask -->
                 <set field="accountCode" from="accountCodeFormatter != null ? accountCodeFormatter.valueToString(glAccount.accountCode) : glAccount.accountCode"/>
 
@@ -785,9 +785,9 @@ along with this software (see the LICENSE.md file). If not, see
                 </entity-find>
 
                 <!-- prep the list -->
-                <set field="balance" from="glAccountOrgTimePeriod.beginningBalance ?: 0.0"/>
-                <script>entryInfoList.add([transactionDate:fromTimestamp, description:glAccount.accountName, accountCode:accountCode, balance:balance])</script>
-                <set field="totalsRow" from="[description:(' Totals (' + acctgTransEntryList.size() + ' transactions)'), accountCode:accountCode]"/>
+                <set field="balance" from="glAccountOrgTimePeriod.beginningBalance || 0.0"/>
+                <script>entryInfoList.add({transactionDate:fromTimestamp, description:glAccount.accountName, accountCode:accountCode, balance:balance})</script>
+                <set field="totalsRow" from="{description:(' Totals (' + acctgTransEntryList.size() + ' transactions)'), accountCode:accountCode}"/>
                 <iterate list="acctgTransEntryList" entry="acctgTransEntry">
                     <!-- if !showReverses and reversedByAcctgTransId || reverseOfAcctgTransId check for pair, if in list skip this -->
                     <if condition="!showReverses">
@@ -830,8 +830,8 @@ along with this software (see the LICENSE.md file). If not, see
                 </iterate>
                 <script>
                     entryInfoList.add(totalsRow)
-                    entryInfoList.add([transactionDate:thruTimestamp, description:glAccount.accountName, accountCode:accountCode, balance:balance])
-                    if (glAccountOrgTimePeriod_has_next) entryInfoList.add([:])
+                    entryInfoList.add({transactionDate:thruTimestamp, description:glAccount.accountName, accountCode:accountCode, balance:balance})
+                    if (glAccountOrgTimePeriod_has_next) entryInfoList.add({})
                 </script>
             </iterate>
         </actions>
@@ -902,7 +902,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="newNegateClasses" from="new HashSet()"/>
                     <iterate list="dataset.negateClasses" entry="glAccountClassEnumId">
                         <service-call name="org.moqui.impl.BasicServices.find#EnumerationByParent" out-map="childOut" out-map-add-to-existing="false"
-                                in-map="[parentEnumId:glAccountClassEnumId, includeNested:true]"/>
+                                in-map="{parentEnumId:glAccountClassEnumId, includeNested:true}"/>
                         <script>newNegateClasses.addAll(childOut.enumIdSet)</script>
                     </iterate>
                     <iterate list="newNegateClasses" entry="enumId">
@@ -911,11 +911,11 @@ along with this software (see the LICENSE.md file). If not, see
                 </else></if>
                 <iterate list="dataset.classes" entry="glAccountClassEnumId">
                     <service-call name="org.moqui.impl.BasicServices.find#EnumerationByParent" out-map="childOut" out-map-add-to-existing="false"
-                            in-map="[parentEnumId:glAccountClassEnumId, includeNested:true]"/>
+                            in-map="{parentEnumId:glAccountClassEnumId, includeNested:true}"/>
                     <script>dataset.classSet.addAll(childOut.enumIdSet); allClasses.addAll(childOut.enumIdSet)</script>
                     <if condition="dataset.negateCredit || dataset.negateDebit"><then>
                         <service-call name="mantle.ledger.LedgerServices.find#RootGlAccountClassEnum" out-map="rootOut" out-map-add-to-existing="false"
-                                in-map="[glAccountClassEnumId:glAccountClassEnumId]"/>
+                                in-map="{glAccountClassEnumId:glAccountClassEnumId}"/>
                         <if condition="(dataset.negateDebit &amp;&amp; (rootOut.rootGlAccountClassEnumId == 'DEBIT' || (rootOut.rootGlAccountClassEnumId == 'CREDIT' &amp;&amp; rootOut.isContra == 'Y'))) ||
                                 (dataset.negateCredit &amp;&amp; (rootOut.rootGlAccountClassEnumId == 'CREDIT' || (rootOut.rootGlAccountClassEnumId == 'DEBIT' &amp;&amp; rootOut.isContra == 'Y')))">
                             <script>dataset.negateClasses.addAll(childOut.enumIdSet)</script></if>
@@ -940,13 +940,13 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="enumGroupEnumId" from="dataset.classGroupEnumId"/></entity-find>
                     <iterate list="classMemberList" entry="classMember">
                         <service-call name="org.moqui.impl.BasicServices.find#EnumerationByParent" out-map="childOut" out-map-add-to-existing="false"
-                                in-map="[parentEnumId:classMember.enumId, includeNested:true]"/>
+                                in-map="{parentEnumId:classMember.enumId, includeNested:true}"/>
                         <script>dataset.classSet.addAll(childOut.enumIdSet); allClasses.addAll(childOut.enumIdSet)</script>
                         <if condition="'negate'.equalsIgnoreCase(classMember.memberInfo)"><then>
                             <script>dataset.negateClasses.addAll(childOut.enumIdSet)</script>
                         </then><else-if condition="dataset.negateCredit || dataset.negateDebit">
                             <service-call name="mantle.ledger.LedgerServices.find#RootGlAccountClassEnum" out-map="rootOut" out-map-add-to-existing="false"
-                                    in-map="[glAccountClassEnumId:classMember.enumId]"/>
+                                    in-map="{glAccountClassEnumId:classMember.enumId}"/>
                             <if condition="(dataset.negateDebit &amp;&amp; (rootOut.rootGlAccountClassEnumId == 'DEBIT' || (rootOut.rootGlAccountClassEnumId == 'CREDIT' &amp;&amp; rootOut.isContra == 'Y'))) ||
                                     (dataset.negateCredit &amp;&amp; (rootOut.rootGlAccountClassEnumId == 'CREDIT' || (rootOut.rootGlAccountClassEnumId == 'DEBIT' &amp;&amp; rootOut.isContra == 'Y')))">
                                 <script>dataset.negateClasses.addAll(childOut.enumIdSet)</script></if>
@@ -976,11 +976,11 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
 
             <!-- collate results -->
-            <set field="datasetsById" from="[:]"/>
+            <set field="datasetsById" from="{}"/>
             <iterate list="datasets" entry="dataset">
                 <set field="dataList" from="[]"/>
                 <set field="dataset.data" from="dataList"/>
-                <set field="byClassesList" from="periodClassSummaryList.cloneList().filterByAnd([glAccountClassEnumId:dataset.classSet])"/>
+                <set field="byClassesList" from="periodClassSummaryList.cloneList().filterByAnd({glAccountClassEnumId:dataset.classSet})"/>
                 <iterate list="timePeriodGroups" entry="timePeriodIds">
                     <set field="periodIdSet" from="new HashSet(timePeriodIds)"/>
                     <set field="negateClassIdSet" from="new HashSet(dataset.negateClasses)"/>
@@ -995,8 +995,8 @@ along with this software (see the LICENSE.md file). If not, see
                                 <set field="curAmount" from="gaotpSummary.endingBalance"/>
                             </else-if><else>
                                 <set field="curAmount" from="'Y'.equals(gaotpSummary.isDebit) ?
-                                        ((gaotpSummary.postedDebitsNoClosing ?: 0.0) - (gaotpSummary.postedCreditsNoClosing ?: 0.0)) :
-                                        ((gaotpSummary.postedCreditsNoClosing ?: 0.0) - (gaotpSummary.postedDebitsNoClosing ?: 0.0))"/>
+                                        ((gaotpSummary.postedDebitsNoClosing || 0.0) - (gaotpSummary.postedCreditsNoClosing || 0.0)) :
+                                        ((gaotpSummary.postedCreditsNoClosing || 0.0) - (gaotpSummary.postedDebitsNoClosing || 0.0))"/>
                             </else></if>
                             <!-- negate? -->
                             <if condition="negateClassIdSet.contains(gaotpSummary.glAccountClassEnumId)">

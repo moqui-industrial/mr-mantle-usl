@@ -52,7 +52,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <parameter name="packageInfo" type="Map"/></parameter>
             <!-- parameters for store insurance settings and product cost lookup -->
             <parameter name="productStoreId"/><parameter name="vendorPartyId"/>
-            <parameter name="currencyUomId" default="ec.user.getPreference('CurrencyDefault') ?: 'USD'"/>
+            <parameter name="currencyUomId" default="ec.user.getPreference('CurrencyDefault') || 'USD'"/>
         </in-parameters>
         <out-parameters>
             <parameter name="shippingRateInfoList" type="List">
@@ -174,7 +174,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="replacesContactMechId" from="contactMechId"/>
                         <select-field field-name="contactMechId"/><order-by field-name="contactMechId"/>
                     </entity-find>
-                    <if condition="replacesPcmiList"><set field="contactMechId" from="replacesPcmiList[0].contactMechId"/>
+                    <if condition="(replacesPcmiList?.length > 0)"><set field="contactMechId" from="replacesPcmiList[0].contactMechId"/>
                         <return/></if>
                 </then><else-if condition="facilityId">
                     <entity-find entity-name="mantle.facility.FacilityContactMechInfo" list="replacesFcmiList">
@@ -182,7 +182,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="replacesContactMechId" from="contactMechId"/>
                         <select-field field-name="contactMechId"/><order-by field-name="contactMechId"/>
                     </entity-find>
-                    <if condition="replacesFcmiList"><set field="contactMechId" from="replacesFcmiList[0].contactMechId"/>
+                    <if condition="(replacesFcmiList?.length > 0)"><set field="contactMechId" from="replacesFcmiList[0].contactMechId"/>
                         <return/></if>
                 </else-if></if>
             </if>
@@ -193,7 +193,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-one entity-name="mantle.party.Party" value-field="party"/>
                 <if condition="party?.ownerPartyId">
                     <service-call name="mantle.party.PartyServices.get#PartySettingValue" out-map="ptySettingOut"
-                            in-map="[partyId:party.ownerPartyId, partySettingTypeId:'ValidateAddressGatewayConfigId']"/>
+                            in-map="{partyId:party.ownerPartyId, partySettingTypeId:'ValidateAddressGatewayConfigId'}"/>
                     <set field="shippingGatewayConfigId" from="ptySettingOut?.settingValue"/>
                 </if>
             </if>
@@ -273,7 +273,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="validateCount &gt;= validateLimit"><break/></if>
 
                 <service-call name="mantle.shipment.CarrierServices.validate#PostalAddress" out-map="validateOut" transaction="force-new"
-                        in-map="[contactMechId:pcm.contactMechId, partyId:pcm.partyId, shippingGatewayConfigId:shippingGatewayConfigId]"/>
+                        in-map="{contactMechId:pcm.contactMechId, partyId:pcm.partyId, shippingGatewayConfigId:shippingGatewayConfigId}"/>
 
                 <set field="validateCount" from="validateCount + 1"/>
             </iterate>
@@ -303,8 +303,8 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="shippingTotal" from="0" type="BigDecimal"/>
             <iterate list="orderPartList" entry="orderPart">
                 <service-call name="mantle.shipment.CarrierServices.calculate#OrderPartShipping"
-                        in-map="context + [orderPartSeqId:orderPart.orderPartSeqId]" out-map="copsOut"/>
-                <set field="shippingTotal" from="shippingTotal + (copsOut.shippingTotal ?: 0)"/>
+                        in-map="Object.assign({}, context, {orderPartSeqId:orderPart.orderPartSeqId})" out-map="copsOut"/>
+                <set field="shippingTotal" from="shippingTotal + (copsOut.shippingTotal || 0)"/>
             </iterate>
         </actions>
     </service>
@@ -330,8 +330,8 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.order.OrderPart" value-field="orderPart"/>
 
             <set field="productStoreId" from="orderHeader.productStoreId"/>
-            <set field="carrierPartyId" from="carrierPartyId ?: orderPart.carrierPartyId"/>
-            <set field="shipmentMethodEnumId" from="shipmentMethodEnumId ?: orderPart.shipmentMethodEnumId"/>
+            <set field="carrierPartyId" from="carrierPartyId || orderPart.carrierPartyId"/>
+            <set field="shipmentMethodEnumId" from="shipmentMethodEnumId || orderPart.shipmentMethodEnumId"/>
 
             <entity-find-one entity-name="mantle.product.store.ProductStore" value-field="productStore" cache="true"/>
 
@@ -381,11 +381,11 @@ along with this software (see the LICENSE.md file). If not, see
 
             <if condition="productStore?.markupOrderShipLabels == 'Y' || ec.user.getPreference('AllStoresMarkupLabelOrder') == 'true'">
                 <service-call name="mantle.shipment.CarrierServices.get#ShipLabelMarkup" out-map="markupOut" out-map-add-to-existing="false"
-                        in-map="[productStoreId:productStore.productStoreId, carrierPartyId:carrierPartyId,
-                                        shipmentMethodEnumId:shipmentMethodEnumId]"/>
+                        in-map="{productStoreId:productStore.productStoreId, carrierPartyId:carrierPartyId,
+                                        shipmentMethodEnumId:shipmentMethodEnumId}"/>
 
-                <set field="markupAmount" from="markupOut?.markupAmount ?: 0.0"/>
-                <set field="markupMultiplier" from="markupOut?.markupMultiplier ?: 0.0"/>
+                <set field="markupAmount" from="markupOut?.markupAmount || 0.0"/>
+                <set field="markupMultiplier" from="markupOut?.markupMultiplier || 0.0"/>
 
                 <if condition="(markupMultiplier != 0.0 || markupAmount != 0.0)">
                     <if condition="shippingTotal">
@@ -443,7 +443,7 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.product.store.ProductStore" value-field="productStore" cache="true"/>
 
             <!-- if no options requested get all on store -->
-            <if condition="!carrierShipmentMethodList">
+            <if condition="!carrierShipmentMethodList?.length">
                 <entity-find entity-name="mantle.product.store.ProductStoreShipOption" list="carrierShipmentMethodList" cache="true">
                     <econdition field-name="productStoreId"/><order-by field-name="sequenceNum"/></entity-find>
             </if>
@@ -452,7 +452,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="carrierIdSet" from="new HashSet(carrierShipmentMethodList*.carrierPartyId)"/>
             <entity-find entity-name="mantle.product.store.ProductStoreShippingGateway" list="storeGatewayList">
                 <econdition field-name="productStoreId"/><econdition field-name="carrierPartyId" operator="in" from="carrierIdSet"/></entity-find>
-            <set field="carriersByGateway" from="[:]"/>
+            <set field="carriersByGateway" from="{}"/>
             <iterate list="storeGatewayList" entry="storeGateway">
                 <script>addToSetInMap(storeGateway.shippingGatewayConfigId, storeGateway.carrierPartyId, carriersByGateway)</script></iterate>
 
@@ -503,28 +503,28 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="originFacilityId" from="orderPart.facilityId"/>
                     <if condition="!originFacilityId"><continue/></if>
                     <service-call name="mantle.facility.ContactServices.get#FacilityDefaultShipOrigin" out-map="facOriginOut"
-                            in-map="[facilityId:originFacilityId]"/>
+                            in-map="{facilityId:originFacilityId}"/>
                     <if condition="!facOriginOut.postalContactMechId"><continue/></if>
 
                     <!-- use postalContactMechId set from previous iteration (in case updated from validation) or orderPart.postalContactMechId -->
-                    <set field="destPostalContactMechId" from="postalContactMechId ?: orderPart.postalContactMechId"/>
+                    <set field="destPostalContactMechId" from="postalContactMechId || orderPart.postalContactMechId"/>
                     <if condition="!destPostalContactMechId"><continue/></if>
 
                     <service-call name="${shippingGatewayConfig.getShippingRatesBulkName}" out-map="bulkOut" out-map-add-to-existing="false"
-                            in-map="[shippingGatewayConfigId:shippingGatewayConfigId, carrierShipmentMethodList:bulkCarrierMethodList,
+                            in-map="{shippingGatewayConfigId:shippingGatewayConfigId, carrierShipmentMethodList:bulkCarrierMethodList,
                                     fromPartyId:fromPartyId, toPartyId:toPartyId, originFacilityId:originFacilityId,
                                     originPostalContactMechId:facOriginOut.postalContactMechId,
                                     destPostalContactMechId:destPostalContactMechId, packageInfoList:packageInfoList,
                                     productStoreId:productStoreId, vendorPartyId:orderPart.vendorPartyId,
-                                    currencyUomId:orderHeader.currencyUomId]"/>
+                                    currencyUomId:orderHeader.currencyUomId}"/>
                     <iterate list="bulkOut.shippingRateInfoList" entry="shippingRateInfo">
                         <if condition="productStore?.markupOrderShipLabels == 'Y' || ec.user.getPreference('AllStoresMarkupLabelOrder') == 'true'">
                             <service-call name="mantle.shipment.CarrierServices.get#ShipLabelMarkup" out-map="markupOut" out-map-add-to-existing="false"
-                                    in-map="[productStoreId:productStore.productStoreId, carrierPartyId:shippingRateInfo.carrierPartyId,
-                                        shipmentMethodEnumId:shippingRateInfo.shipmentMethodEnumId]"/>
+                                    in-map="{productStoreId:productStore.productStoreId, carrierPartyId:shippingRateInfo.carrierPartyId,
+                                        shipmentMethodEnumId:shippingRateInfo.shipmentMethodEnumId}"/>
 
-                            <set field="markupAmount" from="markupOut?.markupAmount ?: 0.0"/>
-                            <set field="markupMultiplier" from="markupOut?.markupMultiplier ?: 0.0"/>
+                            <set field="markupAmount" from="markupOut?.markupAmount || 0.0"/>
+                            <set field="markupMultiplier" from="markupOut?.markupMultiplier || 0.0"/>
 
                             <if condition="(markupMultiplier != 0.0 || markupAmount != 0.0) &amp;&amp; shippingRateInfo.shippingTotal">
                                 <set field="shippingRateInfo.shippingTotal" from="shippingRateInfo.shippingTotal + markupAmount +
@@ -539,8 +539,8 @@ along with this software (see the LICENSE.md file). If not, see
                     <if condition="!postalContactMechId &amp;&amp; bulkOut.destPostalContactMechId &amp;&amp; bulkOut.destPostalContactMechId != orderPart.postalContactMechId">
                         <set field="orderPart.postalContactMechId" from="bulkOut.destPostalContactMechId"/>
                         <!-- use entity auto service to update postalContactMechId (and ONLY postalContactMechId) -->
-                        <service-call name="update#mantle.order.OrderPart" in-map="[orderId:orderId,
-                                orderPartSeqId:orderPartSeqId, postalContactMechId:bulkOut.destPostalContactMechId]"/>
+                        <service-call name="update#mantle.order.OrderPart" in-map="{orderId:orderId,
+                                orderPartSeqId:orderPartSeqId, postalContactMechId:bulkOut.destPostalContactMechId}"/>
                     </if>
                     <!-- set global postalContactMechId for next iteration -->
                     <set field="postalContactMechId" from="bulkOut.destPostalContactMechId"/>
@@ -548,10 +548,10 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="singleCarrierMethodList">
                     <iterate list="singleCarrierMethodList" entry="curCarrierMethod">
                         <service-call name="${shippingGatewayConfig.getOrderRateServiceName}" out-map="singleOut" out-map-add-to-existing="false"
-                                in-map="[orderId:orderId, orderPartSeqId:orderPartSeqId, shippingGatewayConfigId:shippingGatewayConfigId,
+                                in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId, shippingGatewayConfigId:shippingGatewayConfigId,
                                     createOrderItem:false, carrierPartyId:curCarrierMethod.carrierPartyId,
                                     shipmentMethodEnumId:curCarrierMethod.shipmentMethodEnumId,
-                                    postalContactMechId:postalContactMechId, packageInfoList:packageInfoList]"/>
+                                    postalContactMechId:postalContactMechId, packageInfoList:packageInfoList}"/>
                         <!-- <log message="${shippingGatewayConfigId} - ${shippingGatewayConfig.getOrderRateServiceName} singleOut ${singleOut}"/> -->
                         <script>shippingRateInfoList.add(singleOut + [carrierPartyId:curCarrierMethod.carrierPartyId,
                                 shipmentMethodEnumId:curCarrierMethod.shipmentMethodEnumId])</script>
@@ -593,9 +593,9 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="!requestLabelsServiceName"><log level="error" message="No ShippingGatewayConfig with ID ${shippingGatewayConfigId} has no requestLabelsServiceName, not validating address"/><return/></if>
 
             <service-call name="${requestLabelsServiceName}" out-map="context"
-                    in-map="[shipmentId:shipmentId, shipmentRouteSegmentSeqId:shipmentRouteSegmentSeqId,
+                    in-map="{shipmentId:shipmentId, shipmentRouteSegmentSeqId:shipmentRouteSegmentSeqId,
                         shipmentPackageSeqId:shipmentPackageSeqId, shippingGatewayConfigId:shippingGatewayConfigId,
-                        shipmentMethodEnumId:shipmentMethodEnumId, getReturnLabels:getReturnLabels]"/>
+                        shipmentMethodEnumId:shipmentMethodEnumId, getReturnLabels:getReturnLabels}"/>
 
             <!-- if Shipment has productStoreId and store has a label markup setting apply it now -->
             <entity-find-one entity-name="mantle.shipment.Shipment" value-field="shipment"/>
@@ -615,9 +615,9 @@ along with this software (see the LICENSE.md file). If not, see
 
                 <iterate list="srsList" entry="routeSegment">
                     <service-call name="mantle.shipment.CarrierServices.get#ShipLabelMarkup" out-map="markupOut" out-map-add-to-existing="false"
-                            in-map="[productStoreId:productStore.productStoreId, carrierPartyId:routeSegment.carrierPartyId, shipmentMethodEnumId:routeSegment.shipmentMethodEnumId]"/>
-                    <set field="markupAmount" from="markupOut?.markupAmount ?: 0.0"/>
-                    <set field="markupMultiplier" from="markupOut?.markupMultiplier ?: 0.0"/>
+                            in-map="{productStoreId:productStore.productStoreId, carrierPartyId:routeSegment.carrierPartyId, shipmentMethodEnumId:routeSegment.shipmentMethodEnumId}"/>
+                    <set field="markupAmount" from="markupOut?.markupAmount || 0.0"/>
+                    <set field="markupMultiplier" from="markupOut?.markupMultiplier || 0.0"/>
 
                     <if condition="markupMultiplier != 0.0 || markupAmount != 0.0">
                         <filter-map-list list="allPackageRouteSegList" to-list="packageRouteSegList">
@@ -681,10 +681,10 @@ along with this software (see the LICENSE.md file). If not, see
                 <field-map field-name="shipmentMethodEnumId"/>
             </entity-find-one>
             <if condition="productStoreShipOption?.markupPercent != null || productStoreShipOption?.markupAmount != null"><then>
-                <set field="markupPercent" from="productStoreShipOption.markupPercent ?: 0.0"/>
-                <set field="markupAmount" from="productStoreShipOption.markupAmount ?: 0.0"/>
+                <set field="markupPercent" from="productStoreShipOption.markupPercent || 0.0"/>
+                <set field="markupAmount" from="productStoreShipOption.markupAmount || 0.0"/>
             </then><else>
-                <set field="markupPercent" from="labelMarkupPercent ?: 0.0"/>
+                <set field="markupPercent" from="labelMarkupPercent || 0.0"/>
                 <set field="markupAmount" from="0.0"/>
             </else></if>
 
@@ -709,8 +709,8 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="!refundLabelsServiceName"><log level="error" message="No ShippingGatewayConfig with ID ${shippingGatewayConfigId} has no refundLabelsServiceName, not validating address"/><return/></if>
 
             <service-call name="${refundLabelsServiceName}" out-map="context"
-                    in-map="[shipmentId:shipmentId, shipmentRouteSegmentSeqId:shipmentRouteSegmentSeqId,
-                        shipmentPackageSeqId:shipmentPackageSeqId, shippingGatewayConfigId:shippingGatewayConfigId]"/>
+                    in-map="{shipmentId:shipmentId, shipmentRouteSegmentSeqId:shipmentRouteSegmentSeqId,
+                        shipmentPackageSeqId:shipmentPackageSeqId, shippingGatewayConfigId:shippingGatewayConfigId}"/>
         </actions>
     </service>
     <service verb="track" noun="ShipmentLabels">
@@ -725,8 +725,8 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="!trackLabelsServiceName"><log level="error" message="No ShippingGatewayConfig with ID ${shippingGatewayConfigId} has no trackLabelsServiceName, not validating address"/><return/></if>
 
             <service-call name="${trackLabelsServiceName}" out-map="context"
-                    in-map="[shipmentId:shipmentId, shipmentRouteSegmentSeqId:shipmentRouteSegmentSeqId,
-                        shipmentPackageSeqId:shipmentPackageSeqId, shippingGatewayConfigId:shippingGatewayConfigId]"/>
+                    in-map="{shipmentId:shipmentId, shipmentRouteSegmentSeqId:shipmentRouteSegmentSeqId,
+                        shipmentPackageSeqId:shipmentPackageSeqId, shippingGatewayConfigId:shippingGatewayConfigId}"/>
         </actions>
     </service>
     <service verb="get" noun="ShipmentGatewayDetails">
@@ -768,7 +768,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-one entity-name="mantle.shipment.Shipment" value-field="shipment"/>
                 <if condition="shipment?.fromPartyId">
                     <service-call name="mantle.party.PartyServices.get#PartySettingValue" out-map="ptySettingOut"
-                            in-map="[partyId:shipment.fromPartyId, partySettingTypeId:'DefaultShipmentGatewayConfigId']"/>
+                            in-map="{partyId:shipment.fromPartyId, partySettingTypeId:'DefaultShipmentGatewayConfigId'}"/>
                     <set field="shippingGatewayConfigId" from="ptySettingOut?.settingValue"/>
                 </if>
             </if>
@@ -844,7 +844,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <if condition="shipment == null"><entity-find-one entity-name="mantle.shipment.Shipment" value-field="shipment"/></if>
 
-            <set field="quantityByProductId" from="[:]"/>
+            <set field="quantityByProductId" from="{}"/>
             <entity-find entity-name="mantle.shipment.ShipmentPackageContent" list="packageContentList">
                 <econdition field-name="shipmentId"/>
                 <econdition field-name="shipmentPackageSeqId"/>
@@ -854,8 +854,8 @@ along with this software (see the LICENSE.md file). If not, see
             </iterate>
 
             <service-call name="mantle.shipment.CarrierServices.get#GeneralPackageRequiresInsurance" out-map="context"
-                    in-map="[quantityByProductId:quantityByProductId, insurancePackageThreshold:insurancePackageThreshold,
-                        currencyUomId:shipment.costUomId, productStoreId:shipment.productStoreId, vendorPartyId:shipment.fromPartyId]"/>
+                    in-map="{quantityByProductId:quantityByProductId, insurancePackageThreshold:insurancePackageThreshold,
+                        currencyUomId:shipment.costUomId, productStoreId:shipment.productStoreId, vendorPartyId:shipment.fromPartyId}"/>
         </actions>
     </service>
     <service verb="get" noun="GeneralPackageRequiresInsurance">
@@ -885,10 +885,10 @@ along with this software (see the LICENSE.md file). If not, see
 
                 <!-- NOTE: PptAverage = Average Cost -->
                 <service-call name="mantle.product.PriceServices.get#ProductPriceByType" out-map="costOut"
-                        in-map="[productId:productId, priceTypeEnumId:'PptAverage', priceUomId:currencyUomId,
-                            productStoreId:productStoreId, vendorPartyId:vendorPartyId]"/>
+                        in-map="{productId:productId, priceTypeEnumId:'PptAverage', priceUomId:currencyUomId,
+                            productStoreId:productStoreId, vendorPartyId:vendorPartyId}"/>
                 <if condition="costOut.price"><then>
-                    <set field="packageTotalCost" from="packageTotalCost + ((costOut.price ?: 0.0) * (quantity ?: 0.0))"/>
+                    <set field="packageTotalCost" from="packageTotalCost + ((costOut.price || 0.0) * (quantity || 0.0))"/>
                 </then><else-if condition="product.shippingInsuranceReqd == 'Y'">
                     <log level="warn" message="Product ${productId} has shippingInsuranceReqd=Y but no ${currencyUomId} Cost (ProductPrice type PptAverage)"/>
                 </else-if></if>
@@ -932,12 +932,12 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <entity-find-one entity-name="mantle.shipment.carrier.ShippingGatewayConfig" value-field="shippingGatewayConfig" cache="true"/>
 
-            <set field="carrierPartyId" from="carrierPartyId ?: orderPart.carrierPartyId"/>
-            <set field="shipmentMethodEnumId" from="shipmentMethodEnumId ?: orderPart.shipmentMethodEnumId"/>
+            <set field="carrierPartyId" from="carrierPartyId || orderPart.carrierPartyId"/>
+            <set field="shipmentMethodEnumId" from="shipmentMethodEnumId || orderPart.shipmentMethodEnumId"/>
 
-            <set field="postalContactMechId" from="postalContactMechId ?: orderPart.postalContactMechId"/>
+            <set field="postalContactMechId" from="postalContactMechId || orderPart.postalContactMechId"/>
             <service-call name="mantle.party.ContactServices.get#PostalAddressGeoIdSet" out-map="context"
-                    in-map="[contactMechId:postalContactMechId]"/>
+                    in-map="{contactMechId:postalContactMechId}"/>
 
             <set field="itemCount" from="0.0" type="BigDecimal"/>
             <set field="totalQuantity" from="0.0" type="BigDecimal"/>
@@ -950,8 +950,8 @@ along with this software (see the LICENSE.md file). If not, see
                         product?.productTypeEnumId in ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly']">
                     <set field="itemCount" from="itemCount + 1.0"/>
 
-                    <set field="totalQuantity" from="totalQuantity + (orderItem.quantity ?: 1.0)"/>
-                    <set field="totalAmount" from="totalAmount + ((orderItem.quantity ?: 1.0) * (orderItem.unitAmount ?: 0.0))"/>
+                    <set field="totalQuantity" from="totalQuantity + (orderItem.quantity || 1.0)"/>
+                    <set field="totalAmount" from="totalAmount + ((orderItem.quantity || 1.0) * (orderItem.unitAmount || 0.0))"/>
 
                     <entity-find-one entity-name="mantle.product.ProductDimension" value-field="shippingWeight">
                         <field-map field-name="productId" from="orderItem.productId"/>
@@ -959,7 +959,7 @@ along with this software (see the LICENSE.md file). If not, see
                     </entity-find-one>
                     <!-- TODO: this assumes all weights are the same unit, add some unit conversion to a standard like WT_lb -->
                     <!-- NOTE: this defaults to 1, maybe make this configurable somehow -->
-                    <set field="totalWeight" from="totalWeight + ((shippingWeight?.value ?: 1.0) * orderItem.quantity)"/>
+                    <set field="totalWeight" from="totalWeight + ((shippingWeight?.value || 1.0) * orderItem.quantity)"/>
                 </if>
             </iterate>
 
@@ -983,8 +983,8 @@ along with this software (see the LICENSE.md file). If not, see
                         <field-map field-name="enumId" from="orderPart.shipmentMethodEnumId"/></entity-find-one>
                     <set field="carrierName" value="${ec.resource.expand('PartyNameTemplate','',carrierDetail)}"/>
                     <set field="itemDescription" value="${orderPart.carrierPartyId == '_NA_' ? '' : (carrierName + ' - ') }${shipmentMethodEnum.description}"/>
-                    <service-call name="create#mantle.order.OrderItem" in-map="[orderId:orderId, orderPartSeqId:orderPartSeqId,
-                            itemTypeEnumId:'ItemShipping', quantity:1, unitAmount:shippingTotal, itemDescription:itemDescription]"
+                    <service-call name="create#mantle.order.OrderItem" in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId,
+                            itemTypeEnumId:'ItemShipping', quantity:1, unitAmount:shippingTotal, itemDescription:itemDescription}"
                             out-map="context"/>
                 </if>
             </if>

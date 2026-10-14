@@ -131,7 +131,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="deepClone">
                 <set field="passThroughParms" from="['clearDates', 'copyAssetAssign', 'copyAssetNeeded', 'copyAssoc', 'copyCommEvent',
                     'copyContactMech', 'copyContent', 'copyNote', 'copyParty', 'copyProduct', 'copySkillStandard', 'idPrefix', 'baseIdPrefix']"/>
-                <set field="subMap" from="[deepClone:true, deepIdIsPrefix:false]"/>
+                <set field="subMap" from="{deepClone:true, deepIdIsPrefix:false}"/>
                 <iterate list="passThroughParms" entry="parmName"><script>subMap.put(parmName, context.get(parmName))</script></iterate>
 
                 <!-- for cloning from a root set the rootWorkEffortId for all descendants -->
@@ -181,15 +181,15 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="parentWorkEffortId" from="workEffortId"/>
                 </econditions>
             </entity-find>
-            <if condition="childWorkEfforts &amp;&amp; !deleteChildWorkEfforts">
+            <if condition="(childWorkEfforts?.length > 0) &amp;&amp; !deleteChildWorkEfforts">
                 <message error="true">Cannot delete work effort ${workEffortId}. Found child Work Efforts.</message></if>
             <entity-find entity-name="mantle.work.time.TimeEntry" list="timeEntries">
                 <econdition field-name="workEffortId"/></entity-find>
-            <if condition="timeEntries &amp;&amp; !deleteTimeEntries">
+            <if condition="(timeEntries?.length > 0) &amp;&amp; !deleteTimeEntries">
                 <message error="true">Cannot delete work effort ${workEffortId}. Found Time Entries.</message></if>
             <entity-find entity-name="mantle.work.effort.WorkEffortParty" list="workEffortParties">
                 <econdition field-name="workEffortId"/></entity-find>
-            <if condition="workEffortParties &amp;&amp; !deleteWorkEffortParties">
+            <if condition="(workEffortParties?.length > 0) &amp;&amp; !deleteWorkEffortParties">
                 <message error="true">Cannot delete work effort ${workEffortId}. Found Work Efforty Parties.</message></if>
 
             <set field="relatedValues" from="workEffort.findRelatedFk(new HashSet(
@@ -200,17 +200,16 @@ along with this software (see the LICENSE.md file). If not, see
 
             <iterate list="childWorkEfforts" entry="childWorkEffort">
                 <service-call name="mantle.work.WorkEffortServices.delete#WorkEffort" ignore-error="true"
-                              in-map="context +
-                                          [workEffortId:childWorkEffort.workEffortId, parentWorkEffortId:workEffortId]"/></iterate>
+                              in-map="Object.assign({}, context, {workEffortId:childWorkEffort.workEffortId, parentWorkEffortId:workEffortId})"/></iterate>
 
             <iterate list="timeEntries" entry="timeEntry">
                 <service-call name="mantle.work.TimeServices.delete#TimeEntry" ignore-error="true"
-                              in-map="[timeEntryId:timeEntry.timeEntryId,deleteChildTimeEntries:true]"/></iterate>
+                              in-map="{timeEntryId:timeEntry.timeEntryId,deleteChildTimeEntries:true}"/></iterate>
 
             <iterate list="workEffortParties" entry="workEffortParty">
                 <service-call name="delete#mantle.work.effort.WorkEffortParty" ignore-error="true"
-                              in-map="[workEffortId:workEffortId,partyId:workEffortParty.partyId,
-                                           roleTypeId:workEffortParty.roleTypeId,fromDate:workEffortParty.fromDate]"/></iterate>
+                              in-map="{workEffortId:workEffortId,partyId:workEffortParty.partyId,
+                                           roleTypeId:workEffortParty.roleTypeId,fromDate:workEffortParty.fromDate}"/></iterate>
 
             <service-call name="delete#mantle.work.effort.WorkEffort" in-map="context"/>
         </actions>
@@ -236,7 +235,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="roleTypeId"/>
                 <order-by field-name="-fromDate"/>
             </entity-find>
-            <if condition="wepList"><then>
+            <if condition="(wepList?.length > 0)"><then>
                 <set field="fromDate" from="wepList[0].fromDate"/>
             </then><else>
                 <set field="fromDate" from="ec.user.nowTimestamp"/>
@@ -284,8 +283,8 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
             </iterate>
             <if condition="!foundExisting">
-                <service-call name="create#mantle.work.effort.WorkEffortParty" in-map="[workEffortId:workEffortId,
-                    partyId:newPartyId, roleTypeId:roleTypeId, fromDate:ec.user.nowTimestamp, statusId:statusId]"/>
+                <service-call name="create#mantle.work.effort.WorkEffortParty" in-map="{workEffortId:workEffortId,
+                    partyId:newPartyId, roleTypeId:roleTypeId, fromDate:ec.user.nowTimestamp, statusId:statusId}"/>
             </if>
         </actions>
     </service>
@@ -302,9 +301,9 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find entity-name="mantle.work.effort.WorkEffortProduct" list="existingWepList">
                 <date-filter/><econdition field-name="workEffortId"/><econdition field-name="productId"/>
                 <econdition field-name="typeEnumId"/></entity-find>
-            <if condition="existingWepList">
+            <if condition="(existingWepList?.length > 0)">
                 <set field="existingWep" from="existingWepList[0]"/>
-                <set field="estimatedQuantity" from="(estimatedQuantity ?: 0) + (existingWep.estimatedQuantity ?: 0)"/>
+                <set field="estimatedQuantity" from="(estimatedQuantity || 0) + (existingWep.estimatedQuantity || 0)"/>
                 <entity-set value-field="existingWep" include="nonpk"/>
                 <entity-update value-field="existingWep"/>
 
@@ -328,13 +327,13 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="workEffort == null"><entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="workEffort"/></if>
 
             <set field="allDay" from="false"/>
-            <set field="startDate" from="workEffort.actualStartDate ?: workEffort.estimatedStartDate"/>
+            <set field="startDate" from="workEffort.actualStartDate || workEffort.estimatedStartDate"/>
             <if condition="startDate == null &amp;&amp; workEffort.allDayStart != null">
                 <set field="startDate" from="ec.l10n.parseTimestamp(workEffort.allDayStart.toString() + ' 00:00:00.000', 'yyyy-MM-dd HH:mm:ss.SSS')"/>
                 <set field="allDay" from="true"/>
             </if>
 
-            <set field="endDate" from="workEffort.actualCompletionDate ?: workEffort.estimatedCompletionDate"/>
+            <set field="endDate" from="workEffort.actualCompletionDate || workEffort.estimatedCompletionDate"/>
             <if condition="endDate == null">
                 <if condition="workEffort.allDayEnd != null"><then>
                     <set field="endDate" from="ec.l10n.parseTimestamp(workEffort.allDayEnd.toString() + ' 23:59:59.999', 'yyyy-MM-dd HH:mm:ss.SSS')"/>
@@ -344,12 +343,12 @@ along with this software (see the LICENSE.md file). If not, see
                 </else-if></if>
             </if>
             <if condition="endDate == null">
-                <set field="duration" from="(workEffort.actualWorkDuration ?: workEffort.estimatedWorkDuration) ?: workEffort.estimatedWorkTime"/>
+                <set field="duration" from="(workEffort.actualWorkDuration || workEffort.estimatedWorkDuration) || workEffort.estimatedWorkTime"/>
                 <if condition="duration">
                     <!-- convert to minutes because Java Calendar class take an integer and we may have something like 2.5 hours -->
                     <service-call name="org.moqui.impl.BasicServices.convert#Uom" out-map="convertDurOut"
-                            in-map="[uomId:(workEffort.timeUomId ?: 'TF_hr'), toUomId:'TF_min', amount:duration]"/>
-                    <set field="durationMinutes" from="(convertDurOut.convertedAmount ?: 60) as int"/>
+                            in-map="{uomId:(workEffort.timeUomId || 'TF_hr'), toUomId:'TF_min', amount:duration}"/>
+                    <set field="durationMinutes" from="(convertDurOut.convertedAmount || 60) as int"/>
                     <script>
                         Calendar endCal = ec.user.getCalendarSafe()
                         endCal.setTimeInMillis(startDate.time)
@@ -379,7 +378,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find entity-name="mantle.work.effort.WorkEffortContent" list="workEffortContentList">
                     <econdition field-name="workEffortId"/><econdition field-name="contentTypeEnumId"/>
                     <order-by field-name="-contentDate"/></entity-find>
-                <if condition="workEffortContentList">
+                <if condition="(workEffortContentList?.length > 0)">
                     <set field="workEffortContent" from="workEffortContentList[0]"/>
                     <break/>
                 </if>
@@ -413,7 +412,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
                 <entity-find-one entity-name="mantle.work.effort.WorkEffortContent" value-field="workEffortContent"/>
                 <service-call name="mantle.work.WorkEffortServices.save#WorkEffortContentFile" out-map="context"
-                        in-map="context + [workEffortId:workEffortContent.workEffortId, saveContentLocation:false]"/>
+                        in-map="Object.assign({}, context, {workEffortId:workEffortContent.workEffortId, saveContentLocation:false})"/>
             </if>
             <service-call name="update#mantle.work.effort.WorkEffortContent" in-map="context"/>
         </actions>
@@ -429,9 +428,9 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <set field="filename" from="contentFile.getName()"/>
             <if condition="org.moqui.resource.ResourceReference.isTextFilename(filename)"><then>
-                <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') ?: 'dbresource://mantle/content'"/>
+                <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content'"/>
             </then><else>
-                <set field="contentRoot" from="ec.user.getPreference('mantle.content.large.root') ?: 'dbresource://mantle/content'"/>
+                <set field="contentRoot" from="ec.user.getPreference('mantle.content.large.root') || 'dbresource://mantle/content'"/>
             </else></if>
             <set field="contentLocation" value="${contentRoot}/work/${workEffortId}/content_${workEffortContentId}/${filename}"/>
 
@@ -442,7 +441,7 @@ along with this software (see the LICENSE.md file). If not, see
             </script>
 
             <if condition="saveContentLocation"><service-call name="update#mantle.work.effort.WorkEffortContent"
-                    in-map="[workEffortContentId:workEffortContentId, contentLocation:contentLocation]"/></if>
+                    in-map="{workEffortContentId:workEffortContentId, contentLocation:contentLocation}"/></if>
         </actions>
     </service>
 </services>

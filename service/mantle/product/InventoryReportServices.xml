@@ -76,62 +76,62 @@ along with this software (see the LICENSE.md file). If not, see
 
             String estThruDateStr = estThruDate ? (estThruDate.getTime() as String) : null
             // consolidate the results into a single Map by productId
-            infoByProductId = [:] as Map<String, Map>
+            infoByProductId = {} as Map<String, Map>
 
             if (getOrderItemData) {
-                List andList = [[terms:[productId: productIdList]],
-                                [bool:[must_not:[terms:[partStatusId: ['OrderCompleted', 'OrderRejected', 'OrderCancelled']]]]]]
-                if (facilityId) andList.add([term: [facilityId: facilityId]])
-                if (estThruDateStr) andList.add([or: [[missing: [field: 'requiredByDate']],
-                                                      [range: [requiredByDate: [lte: estThruDateStr, format: 'epoch_millis']]]]])
+                List andList = [{terms:{productId: productIdList}},
+                                {bool:{must_not:{terms:{partStatusId: ['OrderCompleted', 'OrderRejected', 'OrderCancelled']}}}}]
+                if (facilityId) andList.add({term: {facilityId: facilityId}})
+                if (estThruDateStr) andList.add({or: [{missing: {field: 'requiredByDate'}},
+                                                      {range: {requiredByDate: {lte: estThruDateStr, format: 'epoch_millis'}}}]})
 
                 ElasticSearchUtil.simpleAggSearch((String) indexName, [(String) orderItemDocumentName], maxResults,
-                        [bool:[filter:andList]], "productId",
-                        [orderQuantitySum:'orderQuantity', quantityReservedSum:'reservations.quantityReserved',
-                              quantityNotAvailableSum:'reservations.quantityNotAvailable', quantityNotIssuedSum:'reservations.quantityNotIssued'],
+                        {bool:{filter:andList}}, "productId",
+                        {orderQuantitySum:'orderQuantity', quantityReservedSum:'reservations.quantityReserved',
+                              quantityNotAvailableSum:'reservations.quantityNotAvailable', quantityNotIssuedSum:'reservations.quantityNotIssued'},
                         infoByProductId, ec)
             }
 
             if (getProdEstimateData) {
-                List andList = [[terms:[productId:productIdList]], [range:[readyDate:[gte:'now/d', lte:estThruDateStr, format:'epoch_millis']]]]
-                if (facilityId) andList.add([term:[facilityId:facilityId]])
+                List andList = [{terms:{productId:productIdList}}, {range:{readyDate:{gte:'now/d', lte:estThruDateStr, format:'epoch_millis'}}}]
+                if (facilityId) andList.add({term:{facilityId:facilityId}})
 
                 ElasticSearchUtil.simpleAggSearch((String) indexName, [(String) prodEstimateDocumentName], maxResults,
-                        [bool:[filter:andList]], "productId", [prodEstQuantitySum:'prodEstQuantity'],
+                        {bool:{filter:andList}}, "productId", {prodEstQuantitySum:'prodEstQuantity'},
                         infoByProductId, ec)
             }
 
             if (getAssetData) {
-                List andList = [[terms:[productId:productIdList]], [term:[statusId:'AstAvailable']]]
-                if (facilityId) andList.add([term:[facilityId:facilityId]])
+                List andList = [{terms:{productId:productIdList}}, {term:{statusId:'AstAvailable'}}]
+                if (facilityId) andList.add({term:{facilityId:facilityId}})
 
                 ElasticSearchUtil.simpleAggSearch((String) indexName, [(String) assetDocumentName], maxResults,
-                        [bool:[filter:andList]], "productId",
-                        [availableToPromiseTotalSum:'availableToPromiseTotal', quantityOnHandTotalSum:'quantityOnHandTotal'],
+                        {bool:{filter:andList}}, "productId",
+                        {availableToPromiseTotalSum:'availableToPromiseTotal', quantityOnHandTotalSum:'quantityOnHandTotal'},
                         infoByProductId, ec)
             }
 
             if (getRunConsumeData) {
-                List andList = [[terms:[productId:productIdList]], [bool:[must_not:[terms:[statusId:['WeComplete','WeClosed','WeCancelled']]]]]]
-                if (facilityId) andList.add([term: [facilityId:facilityId]])
-                if (estThruDateStr) andList.add([or: [[missing:[field:'estimatedStartDate']],
-                                                      [range:[estimatedStartDate:[lte:estThruDateStr, format:'epoch_millis']]]]])
+                List andList = [{terms:{productId:productIdList}}, {bool:{must_not:{terms:{statusId:['WeComplete','WeClosed','WeCancelled']}}}}]
+                if (facilityId) andList.add({term: {facilityId:facilityId}})
+                if (estThruDateStr) andList.add({or: [{missing:{field:'estimatedStartDate'}},
+                                                      {range:{estimatedStartDate:{lte:estThruDateStr, format:'epoch_millis'}}}]})
 
                 ElasticSearchUtil.simpleAggSearch((String) indexName, [(String) runConsumeDocumentName], maxResults,
-                        [bool:[filter:andList]], "productId",
-                        [estimatedConsumeQuantitySum:'estimatedConsumeQuantity', consumeQuantitySum:'issuances.consumeQuantity'],
+                        {bool:{filter:andList}}, "productId",
+                        {estimatedConsumeQuantitySum:'estimatedConsumeQuantity', consumeQuantitySum:'issuances.consumeQuantity'},
                         infoByProductId, ec)
             }
 
             if (getRunProduceData) {
-                List andList = [[terms:[productId:productIdList]], [bool:[must_not:[terms:[statusId:['WeComplete','WeClosed','WeCancelled']]]]]]
-                if (facilityId) andList.add([term:[facilityId:facilityId]])
-                if (estThruDateStr) andList.add([or: [[missing:[field:'estimatedStartDate']],
-                                                      [range:[estimatedStartDate:[lte:estThruDateStr, format:'epoch_millis']]]]])
+                List andList = [{terms:{productId:productIdList}}, {bool:{must_not:{terms:{statusId:['WeComplete','WeClosed','WeCancelled']}}}}]
+                if (facilityId) andList.add({term:{facilityId:facilityId}})
+                if (estThruDateStr) andList.add({or: [{missing:{field:'estimatedStartDate'}},
+                                                      {range:{estimatedStartDate:{lte:estThruDateStr, format:'epoch_millis'}}}]})
 
                 ElasticSearchUtil.simpleAggSearch((String) indexName, [(String) runProduceDocumentName], maxResults,
-                        [bool:[filter:andList]], "productId",
-                        [estimatedProduceQuantitySum:'estimatedProduceQuantity', produceQuantitySum:'receipts.produceQuantity'],
+                        {bool:{filter:andList}}, "productId",
+                        {estimatedProduceQuantitySum:'estimatedProduceQuantity', produceQuantitySum:'receipts.produceQuantity'},
                         infoByProductId, ec)
             }
 
@@ -193,11 +193,11 @@ along with this software (see the LICENSE.md file). If not, see
             String fromDateStr = fromDate ? (fromDate.getTime() as String) : null
             String thruDateStr = thruDate.getTime() as String
 
-            List andList = [[terms: [productId: productIdList]], [bool: [must_not: [terms: [partStatusId: ['OrderRejected', 'OrderCancelled']]]]]]
-            if (facilityId) andList.add([term: [facilityId: facilityId]])
+            List andList = [{terms: {productId: productIdList}}, {bool: {must_not: {terms: {partStatusId: ['OrderRejected', 'OrderCancelled']}}}}]
+            if (facilityId) andList.add({term: {facilityId: facilityId}})
             // alternative to allow placedDate to be null: if (fromDateStr) andList.add([or: [[missing:[field:'placedDate']], [range:['placedDate':[gte:fromDateStr]]]]])
-            if (fromDateStr) andList.add([range: ['placedDate': [gte: fromDateStr, format: 'epoch_millis']]])
-            andList.add([range: ['placedDate': [lte: thruDateStr, format: 'epoch_millis']]])
+            if (fromDateStr) andList.add({range: {'placedDate': {gte: fromDateStr, format: 'epoch_millis'}}})
+            andList.add({range: {'placedDate': {lte: thruDateStr, format: 'epoch_millis'}}})
 
             AggregationBuilder aggBuilder = AggregationBuilders.terms("products").field("productId").size(maxResults)
                     .subAggregation(AggregationBuilders.sum("orderQuantitySum").field("orderQuantity"))
@@ -206,10 +206,10 @@ along with this software (see the LICENSE.md file). If not, see
                     .subAggregation(AggregationBuilders.sum("weightedAmountSum").field("orderItemTotal"))
 
             SearchResponse searchResponse = ElasticSearchUtil.aggregationSearch((String) indexName, [(String) orderItemDocumentName],
-                    maxResults, [bool: [filter: andList]], aggBuilder, ec)
+                    maxResults, {bool: {filter: andList}}, aggBuilder, ec)
 
             // consolidate the results into a single Map by productId
-            infoByProductId = [:]
+            infoByProductId = {}
             for (def bucket in searchResponse.getAggregations().get('products').getBuckets()) {
                 String productId = bucket.getKey()
                 BigDecimal orderQuantitySum = bucket.getAggregations().get('orderQuantitySum').getValue()

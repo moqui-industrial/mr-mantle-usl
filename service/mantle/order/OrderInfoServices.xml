@@ -219,7 +219,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </entity-find>
                 <set field="orderItemNoParentCount" from="orderItemList.count({it.parentItemSeqId == null})"/>
             </else></if>
-            <if condition="!orderItemList"><script>placeWarnings.add(ec.resource.expand('OrderPlaceNoItems', null))</script></if>
+            <if condition="!orderItemList?.length"><script>placeWarnings.add(ec.resource.expand('OrderPlaceNoItems', null))</script></if>
             <!-- put items with parentItemSeqId in the list after their parent -->
             <script><![CDATA[
                 orderItemWithChildrenSet = new HashSet()
@@ -227,8 +227,8 @@ along with this software (see the LICENSE.md file). If not, see
                 for (orderItem in reverseList) {
                     if (orderItem.parentItemSeqId) {
                         orderItemWithChildrenSet.add(orderItem.parentItemSeqId)
-                        orderItemList.move(orderItemList.indexMatching([orderItemSeqId:orderItem.orderItemSeqId]),
-                                orderItemList.indexMatching([orderItemSeqId:orderItem.parentItemSeqId])+1)
+                        orderItemList.move(orderItemList.indexMatching({orderItemSeqId:orderItem.orderItemSeqId}),
+                                orderItemList.indexMatching({orderItemSeqId:orderItem.parentItemSeqId})+1)
                     }
                 }
             ]]></script>
@@ -254,13 +254,13 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="statusId" operator="not-equals" value="SisCancelled"/>
             </entity-find>
             <set field="shipmentIdSet" from="new TreeSet()"/>
-            <set field="quantityNotShippedByItem" from="[:]"/>
-            <set field="quantityNotShippedByPart" from="[:]"/>
+            <set field="quantityNotShippedByItem" from="{}"/>
+            <set field="quantityNotShippedByPart" from="{}"/>
             <script>
                 for (orderItem in orderItemList) {
                     if (!productItemTypes.contains(orderItem.itemTypeEnumId)) continue
                     if (!(orderItem.product?.productTypeEnumId in ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'])) continue
-                    def orderItemQuantity = (orderItem.quantity != null ? orderItem.quantity : 1.0) * (orderItem.selectedAmount ?: 1.0)
+                    def orderItemQuantity = (orderItem.quantity != null ? orderItem.quantity : 1.0) * (orderItem.selectedAmount || 1.0)
                     addToBigDecimalInMap(orderItem.orderItemSeqId, orderItemQuantity, quantityNotShippedByItem)
                     addToBigDecimalInMap(orderItem.orderPartSeqId, orderItemQuantity, quantityNotShippedByPart)
                 }
@@ -279,12 +279,12 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find entity-name="mantle.order.OrderItemBilling" list="orderItemBillingList">
                 <econdition field-name="orderId"/><order-by field-name="orderItemSeqId"/></entity-find>
             <set field="invoiceIdSet" from="new TreeSet()"/>
-            <set field="quantityNotBilledByItem" from="[:]"/>
-            <set field="totalNotBilledByItem" from="[:]"/>
-            <set field="quantityNotBilledByPart" from="[:]"/>
+            <set field="quantityNotBilledByItem" from="{}"/>
+            <set field="totalNotBilledByItem" from="{}"/>
+            <set field="quantityNotBilledByPart" from="{}"/>
             <iterate list="orderItemList" entry="orderItem"><script><![CDATA[
-                def orderItemQuantity = (orderItem.quantity != null ? orderItem.quantity : 1.0) * (orderItem.selectedAmount ?: 1.0)
-                def orderItemTotal = ec.l10n.roundCurrency(orderItemQuantity * (orderItem.unitAmount as BigDecimal ?: 0.0), orderHeader.currencyUomId)
+                def orderItemQuantity = (orderItem.quantity != null ? orderItem.quantity : 1.0) * (orderItem.selectedAmount || 1.0)
+                def orderItemTotal = ec.l10n.roundCurrency(orderItemQuantity * (orderItem.unitAmount as BigDecimal || 0.0), orderHeader.currencyUomId)
                 addToBigDecimalInMap(orderItem.orderItemSeqId, orderItemQuantity, quantityNotBilledByItem)
                 addToBigDecimalInMap(orderItem.orderItemSeqId, orderItemTotal, totalNotBilledByItem)
                 addToBigDecimalInMap(orderItem.orderPartSeqId, orderItemQuantity, quantityNotBilledByPart)
@@ -298,7 +298,7 @@ along with this software (see the LICENSE.md file). If not, see
                     addToBigDecimalInMap(curOrderItem.orderPartSeqId, -billedQuantity, quantityNotBilledByPart)
                     // need to do query to get InvoiceItem for actual amount
                     def curInvoiceItem = orderItemBilling.invoiceItem
-                    def billedTotal = ec.l10n.roundCurrency(billedQuantity * (curInvoiceItem?.amount ?: 0.0), orderHeader.currencyUomId)
+                    def billedTotal = ec.l10n.roundCurrency(billedQuantity * (curInvoiceItem?.amount || 0.0), orderHeader.currencyUomId)
                     addToBigDecimalInMap(curOrderItem.orderItemSeqId, -billedTotal, totalNotBilledByItem)
                 }
             ]]></script></iterate>
@@ -338,8 +338,8 @@ along with this software (see the LICENSE.md file). If not, see
                 <select-field field-name="systemMessageId"/>
             </entity-find>
             <set field="systemMessageIdSet" from="new HashSet()"/>
-            <if condition="directSysMsgList"><script>systemMessageIdSet.addAll(directSysMsgList*.systemMessageId)</script></if>
-            <if condition="orderSysMsgList"><script>systemMessageIdSet.addAll(orderSysMsgList*.systemMessageId)</script></if>
+            <if condition="(directSysMsgList?.length > 0)"><script>systemMessageIdSet.addAll(directSysMsgList*.systemMessageId)</script></if>
+            <if condition="(orderSysMsgList?.length > 0)"><script>systemMessageIdSet.addAll(orderSysMsgList*.systemMessageId)</script></if>
             <if condition="systemMessageIdSet">
                 <entity-find entity-name="moqui.service.message.SystemMessage" list="systemMessageList">
                     <econdition field-name="systemMessageId" operator="in" from="systemMessageIdSet"/>
@@ -376,11 +376,11 @@ along with this software (see the LICENSE.md file). If not, see
                         .condition("partyId", orderPart.vendorPartyId).condition("roleTypeId", "OrgInternal").one() as boolean
 
                 EntityList orderPartPartyList = ec.entity.find("mantle.order.OrderPartPartyDetail")
-                        .condition([orderId:orderPart.orderId, orderPartSeqId:orderPart.orderPartSeqId]).orderBy("description").list()
+                        .condition({orderId:orderPart.orderId, orderPartSeqId:orderPart.orderPartSeqId}).orderBy("description").list()
                 EntityValue customerShipToDetail = orderPartPartyList.find({ it.roleTypeId == 'CustomerShipTo' })
                 EntityValue customerBillToDetail = orderPartPartyList.find({ it.roleTypeId == 'CustomerBillTo' })
-                String shipToPartyId = customerShipToDetail?.partyId ?: orderPart.customerPartyId
-                String billToPartyId = customerBillToDetail?.partyId ?: orderPart.customerPartyId
+                String shipToPartyId = customerShipToDetail?.partyId || orderPart.customerPartyId
+                String billToPartyId = customerBillToDetail?.partyId || orderPart.customerPartyId
 
                 String customerEmail = null
                 if (orderPart.customerPartyId) {
@@ -403,18 +403,18 @@ along with this software (see the LICENSE.md file). If not, see
                 if (orderPart.carrierPartyId && orderPart.carrierPartyId != "_NA_")
                     carrierPartyDetail = ec.entity.find("mantle.party.PartyDetail").condition("partyId", orderPart.carrierPartyId).one()
 
-                def partPaymentList = paymentList.cloneList().filterByAnd([orderPartSeqId:orderPart.orderPartSeqId])
+                def partPaymentList = paymentList.cloneList().filterByAnd({orderPartSeqId:orderPart.orderPartSeqId})
                 def partPaymentInfoList = []
                 BigDecimal paymentsTotal = 0
                 for (EntityValue partPayment in partPaymentList) {
                     if (!(((String) partPayment.statusId) in ['PmntCancelled', 'PmntVoid', 'PmntDeclined'])) {
                         // NOTE: supports OrderPartParty override for roleTypeId=CustomerBillTo via billToPartyId
                         if (partPayment.fromPartyId == billToPartyId)
-                            paymentsTotal += (partPayment.amount ?: 0.0)
+                            paymentsTotal += (partPayment.amount || 0.0)
                         else if (partPayment.toPartyId == billToPartyId)
-                            paymentsTotal -= (partPayment.amount ?: 0.0)
+                            paymentsTotal -= (partPayment.amount || 0.0)
                     }
-                    Map partPaymentInfo = [partPayment:partPayment, statusItem:partPayment.status]
+                    Map partPaymentInfo = {partPayment:partPayment, statusItem:partPayment.status}
                     EntityValue paymentMethod = (EntityValue) partPayment.method
                     if (paymentMethod != null) {
                         partPaymentInfo.paymentMethod = paymentMethod
@@ -432,16 +432,16 @@ along with this software (see the LICENSE.md file). If not, see
                     partPaymentInfo.paymentTypeEnum = partPayment.type
                     partPaymentInfoList.add(partPaymentInfo)
                 }
-                BigDecimal partTotalUnpaid = (orderPart.partTotal ?: 0.0) - (paymentsTotal ?: 0.0)
+                BigDecimal partTotalUnpaid = (orderPart.partTotal || 0.0) - (paymentsTotal || 0.0)
 
-                if (!orderPart.vendorPartyId) placeWarnings.add(ec.resource.expand('OrderPlacePartNoVendor', null, [orderPart:orderPart]))
-                if (!orderPart.customerPartyId) placeWarnings.add(ec.resource.expand('OrderPlacePartNoCustomer', null, [orderPart:orderPart]))
+                if (!orderPart.vendorPartyId) placeWarnings.add(ec.resource.expand('OrderPlacePartNoVendor', null, {orderPart:orderPart}))
+                if (!orderPart.customerPartyId) placeWarnings.add(ec.resource.expand('OrderPlacePartNoCustomer', null, {orderPart:orderPart}))
                 if (paymentsTotal < (BigDecimal) orderPart.partTotal)
-                    placeWarnings.add(ec.resource.expand('OrderPlacePartPaymentIncomplete', null, [orderPart:orderPart]))
+                    placeWarnings.add(ec.resource.expand('OrderPlacePartPaymentIncomplete', null, {orderPart:orderPart}))
                 if (!isCustomerInternalOrg && !orderPart.postalContactMechId)
-                    placeWarnings.add(ec.resource.expand('OrderPlacePartNoShippingAddress', null, [orderPart:orderPart]))
+                    placeWarnings.add(ec.resource.expand('OrderPlacePartNoShippingAddress', null, {orderPart:orderPart}))
                 if (!isCustomerInternalOrg && !orderPart.shipmentMethodEnumId)
-                    placeWarnings.add(ec.resource.expand('OrderPlacePartNoShippingMethod', null, [orderPart:orderPart]))
+                    placeWarnings.add(ec.resource.expand('OrderPlacePartNoShippingMethod', null, {orderPart:orderPart}))
 
                 List orderItemSeqIdList = partOrderItemList*.orderItemSeqId
                 List partShipmentItemSourceList = []
@@ -460,8 +460,8 @@ along with this software (see the LICENSE.md file). If not, see
                     Map facShipOut = ec.service.sync().name("mantle.facility.ContactServices.get#FacilityDefaultShipDest")
                             .parameter("facilityId", orderPart.facilityId).call()
                     facilityContactInfo = ec.service.sync().name("mantle.facility.ContactServices.get#FacilityContactInfo")
-                            .parameters([facilityId:orderPart.facilityId, postalContactMechId:facShipOut.postalContactMechId,
-                                         telecomContactMechId:facShipOut.telecomContactMechId]).call()
+                            .parameters({facilityId:orderPart.facilityId, postalContactMechId:facShipOut.postalContactMechId,
+                                         telecomContactMechId:facShipOut.telecomContactMechId}).call()
                 }
 
                 // find duplicate orders by customerPartyId and otherPartyOrderId
@@ -474,9 +474,9 @@ along with this software (see the LICENSE.md file). If not, see
 
                 // find applicable open returns
                 Map openReturnsResult = ec.service.sync().name("mantle.order.ReturnServices.find#OrderOpenReturns")
-                        .parameters([orderId:orderPart.orderId, orderPartSeqId:orderPart.orderPartSeqId]).call()
+                        .parameters({orderId:orderPart.orderId, orderPartSeqId:orderPart.orderPartSeqId}).call()
 
-                orderPartInfoList.add([orderPart:orderPart, partEditable:editableStatusIds.contains(orderPart.statusId),
+                orderPartInfoList.add({orderPart:orderPart, partEditable:editableStatusIds.contains(orderPart.statusId),
                         partStatusItem:partStatusItem, partSettlementTerm:partSettlementTerm,
                         partOrderItemList:partOrderItemList, partNoParentOrderItemList:partNoParentOrderItemList,
                         partNoParentOrderItemCount:partNoParentOrderItemCount,
@@ -492,7 +492,7 @@ along with this software (see the LICENSE.md file). If not, see
                         orderPartPartyList:orderPartPartyList, customerShipToDetail:customerShipToDetail,
                         customerBillToDetail:customerBillToDetail, partShipmentItemSourceList:partShipmentItemSourceList,
                         partShipmentIdSet:partShipmentIdSet, duplicateOrderPartList:duplicateOrderPartList,
-                        openReturnList:openReturnsResult.openReturnList])
+                        openReturnList:openReturnsResult.openReturnList})
             }
             ]]></script>
             <set field="firstPartInfo" from="orderPartInfoList ? orderPartInfoList[0] : null"/>
@@ -508,13 +508,13 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="settingTypeEnumId" value="Psst${templateSettingSuffix}"/>
                     <order-by field-name="-fromDate"/>
                 </entity-find>
-                <if condition="productStoreSettingList">
+                <if condition="(productStoreSettingList?.length > 0)">
                     <set field="templateLocation" from="productStoreSettingList[0].settingValue"/></if>
             </if>
             <!-- if no template setting for store look for PartySetting on Shipment.fromPartyId -->
             <if condition="!templateLocation &amp;&amp; firstPart.vendorPartyId">
                 <service-call name="mantle.party.PartyServices.get#PartySettingValue" out-map="ptySettingOut"
-                        in-map="[partyId:firstPart.vendorPartyId, partySettingTypeId:('Org' + templateSettingSuffix)]"/>
+                        in-map="{partyId:firstPart.vendorPartyId, partySettingTypeId:('Org' + templateSettingSuffix)}"/>
                 <set field="templateLocation" from="ptySettingOut?.settingValue"/>
             </if>
         </actions>
@@ -617,14 +617,14 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-one entity-name="moqui.basic.Enumeration" value-field="changeReasonEnum">
                     <field-map field-name="enumId" from="auditLog.changeReason"/></entity-find-one>
                 <if condition="auditLog.changedFieldName == 'quantity'"><then>
-                    <script>itemQuantityAuditList.add([auditLog:auditLog, userAccount:userAccount, changeReasonEnum:changeReasonEnum])</script>
+                    <script>itemQuantityAuditList.add({auditLog:auditLog, userAccount:userAccount, changeReasonEnum:changeReasonEnum})</script>
                 </then><else>
-                    <script>itemUnitAmountAuditList.add([auditLog:auditLog, userAccount:userAccount, changeReasonEnum:changeReasonEnum])</script>
+                    <script>itemUnitAmountAuditList.add({auditLog:auditLog, userAccount:userAccount, changeReasonEnum:changeReasonEnum})</script>
                 </else></if>
             </iterate>
 
             <service-call name="mantle.order.OrderServices.get#OrderItemTotal"
-                    in-map="[orderItem:orderItem, getChildrenTotals:true]" out-map="orderItemTotalOut"/>
+                    in-map="{orderItem:orderItem, getChildrenTotals:true}" out-map="orderItemTotalOut"/>
 
             <set field="orderItemQuantity" from="orderItemTotalOut.combinedQuantity"/>
             <set field="orderItemTotal" from="orderItemTotalOut.itemTotal"/>
@@ -650,7 +650,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="itemQuantityBilled" from="itemQuantityBilled + billedQuantity"/>
 
                 <set field="curInvoiceItem" from="orderItemBilling.invoiceItem"/>
-                <set field="itemAmountBilled" from="itemAmountBilled + ((billedQuantity * (curInvoiceItem?.amount ?: 0.0)).setScale(2, BigDecimal.ROUND_HALF_UP))"/>
+                <set field="itemAmountBilled" from="itemAmountBilled + ((billedQuantity * (curInvoiceItem?.amount || 0.0)).setScale(2, BigDecimal.ROUND_HALF_UP))"/>
             </iterate>
 
             <set field="itemQuantityNotBilled" from="orderItemQuantity - itemQuantityBilled"/>
@@ -676,7 +676,7 @@ along with this software (see the LICENSE.md file). If not, see
                         if (assetLot?.lotId) lotIdSet.add(assetLot.lotId)
                         if (assetLot?.expirationDate != null && (oldestLotExpire == null || assetLot.expirationDate < oldestLotExpire))
                             oldestLotExpire = assetLot.expirationDate
-                        resInfoList.add([existingRes:existingRes, assetLot:assetLot])
+                        resInfoList.add({existingRes:existingRes, assetLot:assetLot})
                     ]]></script>
                 </iterate>
 
@@ -689,8 +689,8 @@ along with this software (see the LICENSE.md file). If not, see
                         <select-field field-name="expirationDate,expectedEndOfLife"/>
                         <order-by field-name="-issuedDate"/>
                     </entity-find>
-                    <if condition="issuanceLotList">
-                        <set field="newerThanExpireDate" from="issuanceLotList[0].expirationDate ?: issuanceLotList[0].expectedEndOfLife"/></if>
+                    <if condition="(issuanceLotList?.length > 0)">
+                        <set field="newerThanExpireDate" from="issuanceLotList[0].expirationDate || issuanceLotList[0].expectedEndOfLife"/></if>
                 </if>
             </if>
 
@@ -702,7 +702,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <order-by field-name="orderItemSeqId"/>
             </entity-find>
             <service-call name="mantle.order.ReturnServices.calculate#OrderItemReturnable" out-map="returnableOut"
-                    in-map="[orderId:orderItem.orderId, orderItemSeqId:orderItem.orderItemSeqId, orderItemBillingList:orderItemBillingList, returnItemList:returnItemList]"/>
+                    in-map="{orderId:orderItem.orderId, orderItemSeqId:orderItem.orderItemSeqId, orderItemBillingList:orderItemBillingList, returnItemList:returnItemList}"/>
             <set field="returnIdSet" from="new TreeSet()"/>
             <iterate list="returnItemList" entry="returnItem">
                 <if condition="returnItem.orderItemSeqId != orderItemSeqId"><continue/></if>
@@ -747,7 +747,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="orderId"/><econdition field-name="orderPartSeqId"/>
                 <econdition field-name="contactMechPurposeId" value="PostalBilling"/>
             </entity-find>
-            <if condition="opcmList"><script>postalContactMechIdList.addAll(opcmList*.contactMechId)</script></if>
+            <if condition="(opcmList?.length > 0)"><script>postalContactMechIdList.addAll(opcmList*.contactMechId)</script></if>
 
             <!-- Payment/PaymentMethod -->
             <if condition="!postalContactMechIdList">
@@ -755,7 +755,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="orderId"/><econdition field-name="orderPartSeqId"/>
                     <econdition field-name="paymentMethodId" operator="is-not-null"/>
                 </entity-find>
-                <if condition="paymentList">
+                <if condition="(paymentList?.length > 0)">
                     <entity-find entity-name="mantle.account.method.PaymentMethod" list="paymentMethodList">
                         <econdition field-name="paymentMethodId" operator="in" from="paymentList*.paymentMethodId"/>
                         <econdition field-name="postalContactMechId" operator="is-not-null"/>
@@ -771,7 +771,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="orderId"/><econdition field-name="orderPartSeqId"/>
                         <econdition field-name="roleTypeId" value="CustomerBillTo"/>
                     </entity-find>
-                    <if condition="oppList"><set field="billToPartyId" from="oppList[0].partyId"/></if>
+                    <if condition="(oppList?.length > 0)"><set field="billToPartyId" from="oppList[0].partyId"/></if>
                 </if>
                 <if condition="!billToPartyId">
                     <entity-find-one entity-name="mantle.order.OrderPart" value-field="orderPart"/>
@@ -784,15 +784,15 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="contactMechPurposeId" value="PostalBilling"/>
                         <order-by field-name="-fromDate"/>
                     </entity-find>
-                    <if condition="!postalPcmList">
+                    <if condition="!postalPcmList?.length">
                         <entity-find entity-name="mantle.party.contact.PartyContactMech" list="postalPcmList">
                             <date-filter/><econdition field-name="partyId" from="billToPartyId"/>
                             <econdition field-name="contactMechPurposeId" value="PostalPrimary"/>
                             <order-by field-name="-fromDate"/>
                         </entity-find>
-                        <if condition="postalPcmList"><set field="postalContactMechPurposeId" value="PostalPrimary"/></if>
+                        <if condition="(postalPcmList?.length > 0)"><set field="postalContactMechPurposeId" value="PostalPrimary"/></if>
                     </if>
-                    <if condition="postalPcmList"><script>postalContactMechIdList.add(postalPcmList[0].contactMechId)</script></if>
+                    <if condition="(postalPcmList?.length > 0)"><script>postalContactMechIdList.add(postalPcmList[0].contactMechId)</script></if>
                 </if>
             </if>
         </actions>
@@ -845,10 +845,10 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="paymentMethodIdSet" from="new HashSet()"/>
             <iterate list="paymentList" entry="payment">
                 <if condition="payment.statusId in ['PmntAuthorized', 'PmntDelivered', 'PmntConfirmed']"><then>
-                    <set field="totalPromised" from="totalPromised + (payment.amount ?: 0.0)"/>
-                    <set field="totalAuthorized" from="totalAuthorized + (payment.amount ?: 0.0)"/>
+                    <set field="totalPromised" from="totalPromised + (payment.amount || 0.0)"/>
+                    <set field="totalAuthorized" from="totalAuthorized + (payment.amount || 0.0)"/>
                 </then><else-if condition="payment.statusId == 'PmntPromised'">
-                    <set field="totalPromised" from="totalPromised + (payment.amount ?: 0.0)"/>
+                    <set field="totalPromised" from="totalPromised + (payment.amount || 0.0)"/>
                 </else-if></if>
                 <if condition="payment.paymentMethodId &amp;&amp; !(payment.statusId in ['PmntCancelled', 'PmntVoid', 'PmntDeclined'])">
                     <script>paymentMethodIdSet.add(payment.paymentMethodId)</script></if>
@@ -945,13 +945,13 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- check shipping address (for each part) present and valid -->
                 <iterate list="orderPartList" entry="orderPart">
                     <if condition="!orderPart.postalContactMechId &amp;&amp; !'false'.equals(storeSettingList.find({'PsstOrdApproveAddrMissing'.equals(it.settingTypeEnumId)})?.settingValue)">
-                        <script>approveWarnings.add(ec.resource.expand('OrderPlacePartNoShippingAddress', null, [orderPart:orderPart]))</script>
+                        <script>approveWarnings.add(ec.resource.expand('OrderPlacePartNoShippingAddress', null, {orderPart:orderPart}))</script>
                         <continue/>
                     </if>
                     <if condition="!'false'.equals(storeSettingList.find({'PsstOrdApproveAddrNotValid'.equals(it.settingTypeEnumId)})?.settingValue)">
                         <entity-find-one entity-name="mantle.party.contact.ContactMechPostalAddress" value-field="postalCm">
                             <field-map field-name="contactMechId" from="orderPart.postalContactMechId"/></entity-find-one>
-                        <set field="trustLevelEnumId" from="postalCm.trustLevelEnumId ?: 'CmtlNew'"/>
+                        <set field="trustLevelEnumId" from="postalCm.trustLevelEnumId || 'CmtlNew'"/>
                         <if condition="!'CmtlValid'.equals(trustLevelEnumId) &amp;&amp; !'CmtlVerified'.equals(trustLevelEnumId)">
                             <entity-find-one entity-name="moqui.basic.Enumeration" value-field="trustLevelEnum">
                                 <field-map field-name="enumId" from="trustLevelEnumId"/></entity-find-one>
@@ -991,8 +991,8 @@ along with this software (see the LICENSE.md file). If not, see
                     <entity-find-one entity-name="mantle.party.PartyDetail" value-field="customerParty">
                         <field-map field-name="partyId" from="customerPartyId"/></entity-find-one>
                     <iterate list="paymentMethodList" entry="paymentMethod">
-                        <set field="combinedCustName" value="${customerParty.organizationName?.trim()?:''}${customerParty.firstName?.trim()?:''}${customerParty.middleName ? ' ' + customerParty.middleName.trim() : ''}${customerParty.lastName ? ' ' + customerParty.lastName.trim() : ''}"/>
-                        <set field="combinedPmPersonName" value="${paymentMethod.firstNameOnAccount?.trim()?:''}${paymentMethod.middleNameOnAccount ? ' ' + paymentMethod.middleNameOnAccount.trim() : ''}${paymentMethod.lastNameOnAccount ? ' ' + paymentMethod.lastNameOnAccount.trim() : ''}"/>
+                        <set field="combinedCustName" value="${customerParty.organizationName?.trim()||''}${customerParty.firstName?.trim()||''}${customerParty.middleName ? ' ' + customerParty.middleName.trim() : ''}${customerParty.lastName ? ' ' + customerParty.lastName.trim() : ''}"/>
+                        <set field="combinedPmPersonName" value="${paymentMethod.firstNameOnAccount?.trim()||''}${paymentMethod.middleNameOnAccount ? ' ' + paymentMethod.middleNameOnAccount.trim() : ''}${paymentMethod.lastNameOnAccount ? ' ' + paymentMethod.lastNameOnAccount.trim() : ''}"/>
                         <if condition="customerParty.organizationName"><then>
                             <if condition="customerParty.organizationName.trim().toLowerCase() != paymentMethod.companyNameOnAccount?.trim()?.toLowerCase() &amp;&amp;
                                     customerParty.organizationName != combinedPmPersonName?.toLowerCase()">
@@ -1032,9 +1032,9 @@ along with this software (see the LICENSE.md file). If not, see
 
                         <!-- if current address not black/greylisted then look for others in system (generally more likely/useful) -->
                         <service-call name="mantle.party.DuplicateServices.find#PostalAddresses" out-map="blacklistAddrOut" out-map-add-to-existing="false"
-                                in-map="[partyId:customerPartyId, address1:addr.address1, unitNumber:addr.unitNumber, postalCode:addr.postalCode,
+                                in-map="{partyId:customerPartyId, address1:addr.address1, unitNumber:addr.unitNumber, postalCode:addr.postalCode,
                                     postalCodeExt:addr.postalCodeExt, countryGeoId:addr.countryGeoId,
-                                    trustLevelEnumId:'CmtlGreylisted,CmtlBlacklisted']"/>
+                                    trustLevelEnumId:'CmtlGreylisted,CmtlBlacklisted'}"/>
                         <if condition="blacklistAddrOut.postalAddressList">
                             <set field="firstMatch" from="blacklistAddrOut.postalAddressList[0]"/>
                             <entity-find-one entity-name="moqui.basic.Enumeration" value-field="trustLevelEnum">
@@ -1055,9 +1055,9 @@ along with this software (see the LICENSE.md file). If not, see
                         </if>
                         <!-- if current address not black/greylisted then look for others in system (generally more likely/useful) -->
                         <service-call name="mantle.party.DuplicateServices.find#PostalAddresses" out-map="blacklistAddrOut" out-map-add-to-existing="false"
-                                in-map="[partyId:customerPartyId, address1:addr.address1, unitNumber:addr.unitNumber, postalCode:addr.postalCode,
+                                in-map="{partyId:customerPartyId, address1:addr.address1, unitNumber:addr.unitNumber, postalCode:addr.postalCode,
                                     postalCodeExt:addr.postalCodeExt, countryGeoId:addr.countryGeoId,
-                                    trustLevelEnumId:'CmtlGreylisted,CmtlBlacklisted']"/>
+                                    trustLevelEnumId:'CmtlGreylisted,CmtlBlacklisted'}"/>
                         <if condition="blacklistAddrOut.postalAddressList">
                             <set field="firstMatch" from="blacklistAddrOut.postalAddressList[0]"/>
                             <entity-find-one entity-name="moqui.basic.Enumeration" value-field="trustLevelEnum">
@@ -1074,7 +1074,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
 
                 <!-- is this a large order? -->
-                <set field="settingLargeOrderAmount" from="storeSettingList.find({'PsstOrdApproveLargeOrder'.equals(it.settingTypeEnumId)})?.settingValue ?: '0.0'"/>
+                <set field="settingLargeOrderAmount" from="storeSettingList.find({'PsstOrdApproveLargeOrder'.equals(it.settingTypeEnumId)})?.settingValue || '0.0'"/>
                 <set field="largeOrderAmountBd" from="settingLargeOrderAmount.isBigDecimal() ? (settingLargeOrderAmount as BigDecimal) : 0.0"/>
                 <if condition="largeOrderAmountBd &amp;&amp; orderHeader.grandTotal &gt; largeOrderAmountBd"><script>approveWarnings.add(ec.resource.expand(
                         'Large Order: total ${ec.l10n.format(orderHeader.grandTotal, "#,##0.00")} is greater than ${ec.l10n.format(largeOrderAmountBd, "#,##0.00")}', null))
@@ -1082,7 +1082,7 @@ along with this software (see the LICENSE.md file). If not, see
 
                 <!-- is this a large Web order? -->
                 <if condition="orderHeader.salesChannelEnumId in ['ScWeb', 'ScWebExternal']">
-                    <set field="settingLargeWebOrderAmount" from="storeSettingList.find({'PsstOrdApproveLargeWebOrder'.equals(it.settingTypeEnumId)})?.settingValue ?: '0.0'"/>
+                    <set field="settingLargeWebOrderAmount" from="storeSettingList.find({'PsstOrdApproveLargeWebOrder'.equals(it.settingTypeEnumId)})?.settingValue || '0.0'"/>
                     <set field="largeWebOrderAmountBd" from="settingLargeWebOrderAmount.isBigDecimal() ? (settingLargeWebOrderAmount as BigDecimal) : 0.0"/>
                     <if condition="largeWebOrderAmountBd &amp;&amp; orderHeader.grandTotal &gt; largeWebOrderAmountBd"><script>approveWarnings.add(ec.resource.expand(
                             'Large Web Order: total ${ec.l10n.format(orderHeader.grandTotal, "#,##0.00")} is greater than ${ec.l10n.format(largeWebOrderAmountBd, "#,##0.00")}', null))
@@ -1091,7 +1091,7 @@ along with this software (see the LICENSE.md file). If not, see
 
                 <!-- is this order much larger than past orders? (by part if 3 or more; avg + 3 std devs) -->
                 <if condition="otherPartCount &gt;= 3">
-                    <set field="settingStdDevTotal" from="storeSettingList.find({'PsstOrdApproveStdDevTotal'.equals(it.settingTypeEnumId)})?.settingValue ?: '3.0'"/>
+                    <set field="settingStdDevTotal" from="storeSettingList.find({'PsstOrdApproveStdDevTotal'.equals(it.settingTypeEnumId)})?.settingValue || '3.0'"/>
                     <set field="stdDevTotalBd" from="settingStdDevTotal.isBigDecimal() ? (settingStdDevTotal as BigDecimal) : 0.0"/>
                     <if condition="stdDevTotalBd">
                         <set field="partMaxTotal" from="stdDevMaxFromMapField(otherPartList, 'partTotal', stdDevTotalBd)?.maximum"/>
@@ -1103,7 +1103,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
 
                 <!-- is this order much larger than past orders? (by product if 3 or more; avg + 3 std devs) -->
-                <set field="settingStdDevProdQty" from="storeSettingList.find({'PsstOrdApproveStdDevProdQty'.equals(it.settingTypeEnumId)})?.settingValue ?: '3.0'"/>
+                <set field="settingStdDevProdQty" from="storeSettingList.find({'PsstOrdApproveStdDevProdQty'.equals(it.settingTypeEnumId)})?.settingValue || '3.0'"/>
                 <set field="stdDevProdQtyBd" from="settingStdDevProdQty.isBigDecimal() ? (settingStdDevProdQty as BigDecimal) : 0.0"/>
                 <if condition="stdDevProdQtyBd">
                     <iterate list="orderItemList" entry="orderItem">
@@ -1129,7 +1129,7 @@ along with this software (see the LICENSE.md file). If not, see
 
                 <!-- are there any unavailable reservations? -->
                 <if condition="!'false'.equals(storeSettingList.find({'PsstOrdApproveInventoryNotAvail'.equals(it.settingTypeEnumId)})?.settingValue)">
-                    <set field="arUnavailableMap" from="[:]"/>
+                    <set field="arUnavailableMap" from="{}"/>
                     <iterate list="assetResList" entry="assetRes">
                         <if condition="assetRes.quantityNotAvailable">
                             <script>addToBigDecimalInMap(assetRes.orderItemSeqId, assetRes.quantityNotAvailable, arUnavailableMap)</script></if>
@@ -1147,8 +1147,8 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="newerInventory" from="'BlY'.equals(ec.service.sync().name('mantle.party.PartyServices.get#PartySettingValue')
                         .parameter('partySettingTypeId', 'CustomerNewerInventory').parameter('partyId', orderPart.customerPartyId).call()?.get('settingValue'))"/>
 
-                <set field="lotIdSetByItemSeqId" from="[:]"/>
-                <set field="oldestLotExpireByItemSeqId" from="[:]"/>
+                <set field="lotIdSetByItemSeqId" from="{}"/>
+                <set field="oldestLotExpireByItemSeqId" from="{}"/>
                 <iterate list="assetResList" entry="assetRes">
                     <set field="orderItemSeqId" from="assetRes.orderItemSeqId"/>
 
@@ -1187,8 +1187,8 @@ along with this software (see the LICENSE.md file). If not, see
                             <select-field field-name="expirationDate,expectedEndOfLife"/>
                             <order-by field-name="-issuedDate"/>
                         </entity-find>
-                        <if condition="issuanceLotList">
-                            <set field="newerThanExpireDate" from="issuanceLotList[0].expirationDate ?: issuanceLotList[0].expectedEndOfLife"/></if>
+                        <if condition="(issuanceLotList?.length > 0)">
+                            <set field="newerThanExpireDate" from="issuanceLotList[0].expirationDate || issuanceLotList[0].expectedEndOfLife"/></if>
                         <if condition="newerThanExpireDate == null"><continue/></if>
                         <if condition="oldestLotExpire &lt; newerThanExpireDate"><script>approveWarnings.add(ec.resource.expand(
                             'In item ${orderItem.orderItemSeqId} oldest lot ${ec.l10n.format(oldestLotExpire, "yyyy-MM-dd")} older than last lot expire ${ec.l10n.format(newerThanExpireDate, "yyyy-MM-dd")}', null))</script></if>
@@ -1196,7 +1196,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
 
                 <!-- is this a large order by percentage of available inventory? more than quantity 10 and 20% of available -->
-                <set field="settingPercAvailInv" from="storeSettingList.find({'PsstOrdApprovePercAvailInv'.equals(it.settingTypeEnumId)})?.settingValue ?: '20.0'"/>
+                <set field="settingPercAvailInv" from="storeSettingList.find({'PsstOrdApprovePercAvailInv'.equals(it.settingTypeEnumId)})?.settingValue || '20.0'"/>
                 <set field="bdPercAvailInv" from="settingPercAvailInv.isBigDecimal() ? settingPercAvailInv as BigDecimal : 0.0"/>
                 <if condition="bdPercAvailInv">
                     <set field="productIdSet" from="new HashSet()"/><!-- prep this for similar order check below -->
@@ -1216,7 +1216,7 @@ along with this software (see the LICENSE.md file). If not, see
                             <having-econditions><econdition field-name="availableToPromiseTotal" operator="greater" from="0.0"/></having-econditions>
                             <select-field field-name="availableToPromiseTotal"/>
                         </entity-find>
-                        <if condition="!atpList"><continue/></if>
+                        <if condition="!atpList?.length"><continue/></if>
                         <set field="availableToPromiseTotal" from="atpList[0].availableToPromiseTotal"/>
                         <if condition="!availableToPromiseTotal"><continue/></if><!-- if null or zero ATP -->
                         <set field="curLimit" from="(quantity + availableToPromiseTotal) * (bdPercAvailInv/100.0)"/>
@@ -1258,14 +1258,14 @@ along with this software (see the LICENSE.md file). If not, see
                         <set field="unitAmount" from="orderItem.unitAmount"/>
 
                         <service-call name="mantle.product.PriceServices.get#ProductPriceByType" out-map="minOut"
-                                in-map="[productId:orderItem.productId, quantity:orderItem.quantity, validDate:placedDate,
+                                in-map="{productId:orderItem.productId, quantity:orderItem.quantity, validDate:placedDate,
                                 priceUomId:currencyUomId, productStoreId:productStoreId, vendorPartyId:vendorPartyId,
-                                customerPartyId:customerPartyId, priceTypeEnumId:'PptMinimum']"/>
+                                customerPartyId:customerPartyId, priceTypeEnumId:'PptMinimum'}"/>
                         <set field="minPrice" from="minOut.price"/>
                         <service-call name="mantle.product.PriceServices.get#ProductPriceByType" out-map="maxOut"
-                                in-map="[productId:orderItem.productId, quantity:orderItem.quantity, validDate:placedDate,
+                                in-map="{productId:orderItem.productId, quantity:orderItem.quantity, validDate:placedDate,
                                 priceUomId:currencyUomId, productStoreId:productStoreId, vendorPartyId:vendorPartyId,
-                                customerPartyId:customerPartyId, priceTypeEnumId:'PptMaximum']"/>
+                                customerPartyId:customerPartyId, priceTypeEnumId:'PptMaximum'}"/>
                         <set field="maxPrice" from="maxOut.price"/>
 
                         <if condition="minPrice &amp;&amp; unitAmount &lt; minPrice"><script>approveWarnings.add(ec.resource.expand(
@@ -1323,7 +1323,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <field-map field-name="productStoreId"/></entity-find-one>
             <entity-find entity-name="mantle.product.store.ProductStoreEmail" list="storeEmailList">
                 <date-filter/><econdition field-name="productStoreId"/><econdition field-name="emailTypeEnumId"/></entity-find>
-            <if condition="storeEmailList">
+            <if condition="(storeEmailList?.length > 0)">
                 <!-- assume one OrderPart or all order parts have same customerPartyId -->
                 <set field="orderPartList" from="orderHeader.parts"/>
                 <set field="customerPartyId" from="orderPartList[0].customerPartyId"/>
@@ -1331,12 +1331,12 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- get customer email address -->
                 <if condition="!toAddresses &amp;&amp; customerPartyId">
                     <service-call name="mantle.party.ContactServices.get#PartyContactInfo" out-map="emailInfo"
-                            in-map="[partyId:customerPartyId, emailContactMechPurposeId:'EmailOrder', defaultToPrimaryPurpose:true]"/>
+                            in-map="{partyId:customerPartyId, emailContactMechPurposeId:'EmailOrder', defaultToPrimaryPurpose:true}"/>
                     <set field="toAddresses" from="emailInfo.emailAddress"/>
                     <!-- get customer userId for toUserId -->
                     <entity-find entity-name="moqui.security.UserAccount" list="userAccountList" limit="1">
                         <econdition field-name="partyId" from="customerPartyId"/></entity-find>
-                    <if condition="userAccountList"><set field="toUserId" from="userAccountList[0].userId"/></if>
+                    <if condition="(userAccountList?.length > 0)"><set field="toUserId" from="userAccountList[0].userId"/></if>
                 </if>
                 <if condition="!toAddresses"><return message="Not sending email for order ${orderId}, no to address specified or found for customer ${customerPartyId}"/></if>
 
@@ -1352,7 +1352,7 @@ along with this software (see the LICENSE.md file). If not, see
                             <econdition field-name="statusId" operator="in" value="ES_SENT,ES_RECEIVED,ES_VIEWED"/>
                             <select-field field-name="emailMessageId"/>
                         </entity-find>
-                        <if condition="existingMessages">
+                        <if condition="(existingMessages?.length > 0)">
                             <message type="warning">Not sending ${emailTypeEnumId} email for order ${orderId}, found messages: ${existingMessages*.emailMessageId}</message>
                             <continue/>
                         </if>
@@ -1361,13 +1361,13 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="bccAddresses" from="orderHeader.salesChannelEnumId in ['ScWeb', 'ScWebExternal'] ? storeEmail.webOrderBcc : null"/>
 
                     <!-- simple bodyParameters, let the screen do data prep -->
-                    <set field="bodyParameters" from="[orderId:orderId, storeDomain:productStore.storeDomain,
+                    <set field="bodyParameters" from="{orderId:orderId, storeDomain:productStore.storeDomain,
                         profileUrlPath:productStore.profileUrlPath, headerImagePath:storeEmail.headerImagePath,
-                        detailLinkPath:storeEmail.detailLinkPath]"/>
+                        detailLinkPath:storeEmail.detailLinkPath}"/>
 
                     <service-call name="org.moqui.impl.EmailServices.send#EmailTemplate" out-map="sendOut" out-map-add-to-existing="false"
-                            in-map="[emailTemplateId:storeEmail.emailTemplateId, emailTypeEnumId:emailTypeEnumId, toAddresses:toAddresses,
-                                bccAddresses:bccAddresses, bodyParameters:bodyParameters, toUserId:toUserId]"/>
+                            in-map="{emailTemplateId:storeEmail.emailTemplateId, emailTypeEnumId:emailTypeEnumId, toAddresses:toAddresses,
+                                bccAddresses:bccAddresses, bodyParameters:bodyParameters, toUserId:toUserId}"/>
                     <script>if (sendOut.emailMessageId) { ec.service.sync().name("create#mantle.order.OrderEmailMessage").parameter("orderId", orderId)
                         .parameter("emailMessageId", sendOut.emailMessageId).parameter("orderRevision", orderHeader.orderRevision).disableAuthz().call() }</script>
                     <message>Email sent to ${toAddresses}${sendOut.emailMessageId ? ', message ID ' + sendOut.emailMessageId : ''}</message>
@@ -1394,7 +1394,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="title" from="'High Priority Order ${orderId}:${orderPartSeqId} - Priority ${priority}'"/>
                 <script><![CDATA[
                     def nm = ec.makeNotificationMessage().topic((String) notificationTopic)
-                            .message([orderId:orderId, orderPartSeqId:orderPart.orderPartSeqId, priority:orderPart.priority])
+                            .message({orderId:orderId, orderPartSeqId:orderPart.orderPartSeqId, priority:orderPart.priority})
                     nm.send()
                 ]]></script>
             </iterate>

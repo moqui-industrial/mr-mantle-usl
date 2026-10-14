@@ -56,7 +56,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <entity-find entity-name="mantle.ledger.account.GlAccountEnumAppl" list="glAccountEnumApplList">
                 <econdition field-name="glAccountId"/></entity-find>
-            <if condition="glAccountEnumApplList">
+            <if condition="(glAccountEnumApplList?.length > 0)">
                 <set field="enumIdSet" from="new HashSet(glAccountEnumApplList*.enumId)"/>
                 <entity-find entity-name="mantle.facility.FacilityAndParty" list="facilityList">
                     <econdition field-name="facilityTypeEnumId" operator="in" from="enumIdSet"/>
@@ -115,7 +115,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="!currencyUomId">
                 <entity-find-one entity-name="mantle.party.time.TimePeriod" value-field="timePeriod"/>
                 <service-call name="mantle.ledger.LedgerServices.find#PartyAcctgPreference" out-map="context"
-                              in-map="[organizationPartyId:timePeriod.partyId]"/>
+                              in-map="{organizationPartyId:timePeriod.partyId}"/>
                 <set field="currencyUomId" from="partyAcctgPreference?.baseCurrencyUomId"/>
             </if>
             <if condition="!currencyUomId"><set field="currencyUomId" value="USD"/></if>
@@ -161,9 +161,9 @@ along with this software (see the LICENSE.md file). If not, see
 
             <if condition="timePeriod?.partyId">
                 <service-call name="mantle.ledger.LedgerServices.find#PartyAcctgPreference" out-map="context"
-                        in-map="[organizationPartyId:timePeriod.partyId]"/>
+                        in-map="{organizationPartyId:timePeriod.partyId}"/>
                 <if condition="partyAcctgPreference?.glAccountCodeMask">
-                    <set field="glAccountCodeMask" from="partyAcctgPreference?.glAccountCodeMask ?: ec.user.getPreference('GlAccountCodeMask')"/>
+                    <set field="glAccountCodeMask" from="partyAcctgPreference?.glAccountCodeMask || ec.user.getPreference('GlAccountCodeMask')"/>
                     <set field="accountCodeFormatter" from="masker(glAccountCodeMask, '0')"/><!-- will be null if no mask -->
                 </if>
             </if>
@@ -173,14 +173,14 @@ along with this software (see the LICENSE.md file). If not, see
 
             <if condition="budget.timePeriodId &amp;&amp; budget.subTimePeriodTypeId">
                 <service-call name="mantle.party.TimeServices.get#DescendantPeriods" out-map="subPeriodOut"
-                        in-map="[parentPeriodId:budget.timePeriodId, timePeriodTypeId:budget.subTimePeriodTypeId, createMissing:true]"/>
+                        in-map="{parentPeriodId:budget.timePeriodId, timePeriodTypeId:budget.subTimePeriodTypeId, createMissing:true}"/>
                 <set field="subTimePeriodList" from="subPeriodOut.timePeriodList"/>
                 <set field="subTimePeriodIds" from="new ArrayList(subTimePeriodList*.timePeriodId)"/>
             </if>
-            <set field="subTimePeriodSize" from="subTimePeriodList?.size() ?: 0"/>
+            <set field="subTimePeriodSize" from="subTimePeriodList?.size() || 0"/>
 
             <service-call name="org.moqui.impl.BasicServices.find#EnumerationByParent" out-map="expenseClassOut"
-                    in-map="[parentEnumId:'EXPENSE', includeNested:true]"/>
+                    in-map="{parentEnumId:'EXPENSE', includeNested:true}"/>
             <set field="expenseClassEnumIds" from="expenseClassOut.enumIdSet"/>
 
             <script><![CDATA[
@@ -223,7 +223,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="budgetId"/><econdition field-name="glAccountId"/></entity-find>
 
             <service-call name="mantle.party.TimeServices.get#DescendantPeriods" out-map="subPeriodOut"
-                          in-map="[parentPeriodId:budget.timePeriodId, timePeriodTypeId:budget.subTimePeriodTypeId, createMissing:true]"/>
+                          in-map="{parentPeriodId:budget.timePeriodId, timePeriodTypeId:budget.subTimePeriodTypeId, createMissing:true}"/>
             <set field="subTimePeriodList" from="subPeriodOut.timePeriodList"/>
             <set field="subTimePeriodIds" from="new ArrayList(subTimePeriodList*.timePeriodId)"/>
 
@@ -270,7 +270,7 @@ along with this software (see the LICENSE.md file). If not, see
             </while>
             <set field="budgetItem" from="budgetItems ? budgetItems.get(0) : null"/>
             <set field="budgetItemSeqId" from="budgetItem?.budgetItemSeqId"/>
-            <set field="amountMain" from="amountMain ?: subAmountTotal ?: null"/>
+            <set field="amountMain" from="amountMain || subAmountTotal || null"/>
             <if condition="amountMain != null"><then>
                 <set field="amount" from="amountMain"/>
                 <if condition="budgetItem != null"><then>
@@ -331,7 +331,7 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
 
             <service-call name="mantle.party.TimeServices.get#DescendantPeriods" out-map="subPeriodOut"
-                          in-map="[parentPeriodId:budget.timePeriodId, timePeriodTypeId:budget.subTimePeriodTypeId, createMissing:true]"/>
+                          in-map="{parentPeriodId:budget.timePeriodId, timePeriodTypeId:budget.subTimePeriodTypeId, createMissing:true}"/>
             <set field="subTimePeriodList" from="subPeriodOut.timePeriodList"/>
             <set field="subTimePeriodIds" from="new ArrayList(subTimePeriodList*.timePeriodId)"/>
 
@@ -358,7 +358,7 @@ along with this software (see the LICENSE.md file). If not, see
                     </else-if></if>
                 </then><else-if condition="amount != null">
                     <service-call name="create#mantle.other.budget.BudgetItem" out-map="budgetItemOut" out-map-add-to-existing="false"
-                                  in-map="[budgetId:budgetId, glAccountId:glAccountId, subTimePeriodId:subTimePeriodId, amount:amount]"/>
+                                  in-map="{budgetId:budgetId, glAccountId:glAccountId, subTimePeriodId:subTimePeriodId, amount:amount}"/>
                     <set field="budgetItemSeqId" from="budgetItemOut.budgetItemSeqId"/>
                     <set field="budgetItemDetailId" from="null"/>
                     <service-call name="create#mantle.other.budget.BudgetItemDetail" in-map="context"/>
@@ -373,7 +373,7 @@ along with this software (see the LICENSE.md file). If not, see
             </while>
             <set field="budgetItem" from="budgetItems ? budgetItems.get(0) : null"/>
             <set field="budgetItemSeqId" from="budgetItem?.budgetItemSeqId"/>
-            <set field="amount" from="amountMain ?: subAmountTotal ?: null"/>
+            <set field="amount" from="amountMain || subAmountTotal || null"/>
 
             <if condition="budgetItemSeqId"><then>
                 <set field="budgetItemDetail" from="budgetItemDetailList.find({ it.budgetItemSeqId == budgetItemSeqId })"/>
@@ -392,7 +392,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </else-if></if>
             </then><else-if condition="amount != null">
                 <service-call name="create#mantle.other.budget.BudgetItem" out-map="budgetItemOut" out-map-add-to-existing="false"
-                              in-map="[budgetId:budgetId, glAccountId:glAccountId, subTimePeriodId:subTimePeriodId]"/>
+                              in-map="{budgetId:budgetId, glAccountId:glAccountId, subTimePeriodId:subTimePeriodId}"/>
                 <set field="budgetItemSeqId" from="budgetItemOut.budgetItemSeqId"/>
                 <set field="budgetItemDetailId" from="null"/>
                 <service-call name="create#mantle.other.budget.BudgetItemDetail" in-map="context"/>

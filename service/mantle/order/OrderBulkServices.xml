@@ -99,16 +99,16 @@ along with this software (see the LICENSE.md file). If not, see
                     <then>
                         <!-- create new Party -->
                         <service-call name="mantle.party.PartyServices.create#Organization" out-map="createOrgOut"
-                                in-map="[organizationName:party.organizationName, roleTypeId:roleTypeId]"/>
+                                in-map="{organizationName:party.organizationName, roleTypeId:roleTypeId}"/>
                         <set field="partyId" from="createOrgOut.partyId"/>
                         <!-- add the PartyIdentification -->
                         <service-call name="create#mantle.party.PartyIdentification"
-                                in-map="[partyId:partyId, partyIdTypeEnumId:party.partyIdTypeEnumId, idValue:party.idValue]"/>
+                                in-map="{partyId:partyId, partyIdTypeEnumId:party.partyIdTypeEnumId, idValue:party.idValue}"/>
                     </then>
                     <else>
                         <!-- have a Party, make sure it has the role -->
                         <service-call name="mantle.party.PartyServices.ensure#PartyRole"
-                                in-map="[partyId:partyId, roleTypeId:party.roleTypeId]"/>
+                                in-map="{partyId:partyId, roleTypeId:party.roleTypeId}"/>
                     </else>
                 </if>
 
@@ -177,8 +177,8 @@ along with this software (see the LICENSE.md file). If not, see
                 </then>
                 <else>
                     <log message="============ ${existingOrder.externalRevision},  ${header.externalRevision}\n${existingOrder}"/>
-                    <set field="curRevision" from="ec.l10n.parseNumber(existingOrder.externalRevision ?: '1', '')"/>
-                    <set field="newRevision" from="ec.l10n.parseNumber(header.externalRevision ?: '1', '')"/>
+                    <set field="curRevision" from="ec.l10n.parseNumber(existingOrder.externalRevision || '1', '')"/>
+                    <set field="newRevision" from="ec.l10n.parseNumber(header.externalRevision || '1', '')"/>
                     <if condition="newRevision &lt;= curRevision">
                         <return error="true" message="Newer or same revision (${existingOrder.externalRevision}) order ${orderId} found for customer ID ${header.customerPartyId}, other party order ID ${header.otherPartyOrderId}, external order ID ${header.externalId}; attempted revision ${header.externalRevision}"/>
                     </if>
@@ -227,8 +227,8 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- add OrderPartParty records for all parties -->
             <iterate list="parties" entry="party">
-                <set field="oppMap" from="[orderId:orderId, orderPartSeqId:orderPartSeqId,
-                        partyId:party.partyId, roleTypeId:party.roleTypeId]"/>
+                <set field="oppMap" from="{orderId:orderId, orderPartSeqId:orderPartSeqId,
+                        partyId:party.partyId, roleTypeId:party.roleTypeId}"/>
                 <if condition="!isCreate">
                     <entity-find-one entity-name="mantle.order.OrderPartParty" value-field="existingOpp" auto-field-map="oppMap"/></if>
                 <if condition="isCreate || !existingOpp"><service-call name="create#mantle.order.OrderPartParty" in-map="oppMap"/></if>
@@ -244,9 +244,9 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="noteText" from="note.noteText"/>
                     </entity-find>
                 </if>
-                <if condition="isCreate || !existingNoteList">
-                    <service-call name="create#mantle.order.OrderNote" in-map="[orderId:orderId,
-                            noteDate:new Timestamp(curNoteTime), noteText:note.noteText]"/>
+                <if condition="isCreate || !existingNoteList?.length">
+                    <service-call name="create#mantle.order.OrderNote" in-map="{orderId:orderId,
+                            noteDate:new Timestamp(curNoteTime), noteText:note.noteText}"/>
                     <!-- have to make sure we have a unique timestamp, add 1 second (1000ms) -->
                     <set field="curNoteTime" from="curNoteTime + 1000"/>
                 </if>
@@ -287,13 +287,13 @@ along with this software (see the LICENSE.md file). If not, see
 
             <log message="Doing bulk OrderPart status change to ${toStatusId} from statuses ${partStatusId}"/>
 
-            <set field="itemTypeEnumId" from="inputFieldsMap.salesItemTypeEnumId ?: inputFieldsMap.purchaseItemTypeEnumId"/>
+            <set field="itemTypeEnumId" from="inputFieldsMap.salesItemTypeEnumId || inputFieldsMap.purchaseItemTypeEnumId"/>
             <if condition="!itemTypeEnumId">
                 <entity-find entity-name="moqui.basic.EnumGroupMember" list="productItemTypeEgms" cache="true">
                     <econdition field-name="enumGroupEnumId" value="EngItemsProduct"/></entity-find>
                 <set field="itemTypeEnumId" from="productItemTypeEgms*.enumId.join(',')"/>
             </if>
-            <set field="orderType" from="inputFieldsMap.orderType ?: 'Any'"/>
+            <set field="orderType" from="inputFieldsMap.orderType || 'Any'"/>
 
             <entity-find entity-name="mantle.order.OrderPartFindView" list="orderPartList" limit="100">
                 <search-form-inputs input-fields-map="inputFieldsMap"
@@ -317,19 +317,19 @@ along with this software (see the LICENSE.md file). If not, see
             <iterate list="orderPartList" entry="orderPart">
                 <if condition="toStatusId == 'OrderPlaced'"><then>
                     <service-call name="mantle.order.OrderServices.place#Order"
-                            in-map="[orderId:orderPart.orderId, orderPartSeqId:orderPart.orderPartSeqId, requireInventory:false]"/>
+                            in-map="{orderId:orderPart.orderId, orderPartSeqId:orderPart.orderPartSeqId, requireInventory:false}"/>
                 </then><else-if condition="toStatusId == 'OrderApproved'">
                     <service-call name="mantle.order.OrderServices.approve#Order"
-                            in-map="[orderId:orderPart.orderId, orderPartSeqId:orderPart.orderPartSeqId]"/>
+                            in-map="{orderId:orderPart.orderId, orderPartSeqId:orderPart.orderPartSeqId}"/>
                 </else-if><else-if condition="toStatusId == 'OrderCompleted'">
                     <service-call name="mantle.order.OrderServices.complete#OrderPart"
-                            in-map="[orderId:orderPart.orderId, orderPartSeqId:orderPart.orderPartSeqId]"/>
+                            in-map="{orderId:orderPart.orderId, orderPartSeqId:orderPart.orderPartSeqId}"/>
                 </else-if><else-if condition="toStatusId == 'OrderCancelled'">
                     <service-call name="mantle.order.OrderServices.cancel#OrderPart"
-                            in-map="[orderId:orderPart.orderId, orderPartSeqId:orderPart.orderPartSeqId]"/>
+                            in-map="{orderId:orderPart.orderId, orderPartSeqId:orderPart.orderPartSeqId}"/>
                 </else-if><else>
                     <service-call name="mantle.order.OrderServices.update#OrderStatus"
-                            in-map="[orderId:orderId, statusId:toStatusId]"/>
+                            in-map="{orderId:orderId, statusId:toStatusId}"/>
                 </else></if>
             </iterate>
         </actions>

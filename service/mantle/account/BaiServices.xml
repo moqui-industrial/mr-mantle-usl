@@ -55,7 +55,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="baiString" required="true" allow-html="any"/>
         </in-parameters>
         <actions>
-            <set field="typeMap" from="[
+            <set field="typeMap" from="{
                 '108' : 'PMTT_CREDIT',
                 '409' : 'PMTT_DEBIT',
                 '475' : 'PMTT_CHECK',
@@ -64,7 +64,7 @@ along with this software (see the LICENSE.md file). If not, see
                 '142' : 'PMTT_PAYMENT', '451' : 'PMTT_PAYMENT',
                 '174' : 'PMTT_OTHER',
                 '277' : 'PMTT_ZBA_CRTR', '577' : 'PMTT_ZBA_DBTR'
-            ]"/>
+            }"/>
             <entity-find-one entity-name="mantle.account.method.PaymentMethod" value-field="paymentMethod"/>
             <entity-find-one entity-name="mantle.account.method.BankAccount" value-field="bankAccount"/>
             <script><![CDATA[
@@ -75,7 +75,7 @@ along with this software (see the LICENSE.md file). If not, see
                 def routingNumber
                 def accountNumber
                 def postedDate
-                def paymentTransaction = [:]
+                def paymentTransaction = {}
                 def statusCodes = new HashMap()
 
                 transactionTotalAmount = 0
@@ -101,7 +101,7 @@ along with this software (see the LICENSE.md file). If not, see
                         routingNumber = fields[1]
                         if (routingNumber != bankAccount.routingNumber) {
                             ec.message.addError(ec.resource.expand('BAI originator ID ${originatorId} does not match routing number ${routingNumber} on Bank Account ${paymentMethodId}', '',
-                                    [originatorId: routingNumber, routingNumber: bankAccount.routingNumber, paymentMethodId: paymentMethodId]))
+                                    {originatorId: routingNumber, routingNumber: bankAccount.routingNumber, paymentMethodId: paymentMethodId}))
                             routingNumber = null
                         }
 
@@ -120,7 +120,7 @@ along with this software (see the LICENSE.md file). If not, see
                         accountNumber = fields[1]
                         if (accountNumber != bankAccount.accountNumber) {
                             ec.message.addError(ec.resource.expand('Customer account number ${customerAccountNumber} does not match account number ${bankAccount.accountNumber} on Bank Account ${paymentMethodId}', '',
-                                    [customerAccountNumber: accountNumber, accountNumber: bankAccount.accountNumber, paymentMethodId: paymentMethodId]))
+                                    {customerAccountNumber: accountNumber, accountNumber: bankAccount.accountNumber, paymentMethodId: paymentMethodId}))
                             accountNumber = null
                         }
 
@@ -151,7 +151,7 @@ along with this software (see the LICENSE.md file). If not, see
                             paymentTransaction.fitId = ec.entity.sequencedIdPrimary("mantle.account.method.PaymentMethodTrans." + paymentMethodId, 1, 10)
                             // create the record
                             ec.service.sync().name("create#mantle.account.method.PaymentMethodTrans").parameters(paymentTransaction).call()
-                            paymentTransaction = [:]
+                            paymentTransaction = {}
                         }
                     }
 
@@ -164,7 +164,7 @@ along with this software (see the LICENSE.md file). If not, see
                             String transDetailType = fields[1]
                             paymentTransaction.transCode = transDetailType
 
-                            transType = typeMap.get(transDetailType) ?: transDetailType
+                            transType = typeMap.get(transDetailType) || transDetailType
                             paymentTransaction.transType = transType
 
                             String amountString = fields[2]
@@ -238,8 +238,8 @@ along with this software (see the LICENSE.md file). If not, see
                 closingAvailable = statusCodes.get("045")
                 if (postedDate && (!paymentMethod.balanceDate || postedDate > paymentMethod.balanceDate)) {
                     ec.service.sync().name("mantle.account.PaymentMethodServices.update#PaymentMethodMutable")
-                            .parameters([paymentMethodId:paymentMethodId, ledgerBalance:closingLedger,
-                            availableBalance:closingAvailable, balanceDate:postedDate]).call()
+                            .parameters({paymentMethodId:paymentMethodId, ledgerBalance:closingLedger,
+                            availableBalance:closingAvailable, balanceDate:postedDate}).call()
                 }
 
             ]]></script>

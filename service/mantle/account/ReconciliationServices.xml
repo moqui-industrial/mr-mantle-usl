@@ -49,7 +49,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- find matching Payment, ignore certain transType values for payments -->
                 <if condition="!bankAccountTrans.paymentId &amp;&amp; !ignoreTypeSet.contains(bankAccountTrans.transType)">
                     <!-- only look for Payments not yet reconciled -->
-                    <set field="findPmt" from="[reconcileStatusId:'PmtrNot']"/>
+                    <set field="findPmt" from="{reconcileStatusId:'PmtrNot'}"/>
 
                     <!-- if transType is DEBIT PaymentMethod.ownerPartyId is fromPartyId, if CREDIT then is toPartyId;
                         OR just look at sign of transAmount? (- fromPartyId, + toPartyId) -->
@@ -70,7 +70,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <!-- TODO: what if we match on this and amounts differ... handle differently? -->
                         <entity-find entity-name="mantle.account.payment.Payment" list="paymentList">
                             <econdition-object field="findPmt"/>
-                            <econdition field-name="paymentRefNum" from="bankAccountTrans.checkNumber ?: bankAccountTrans.refNumber"/>
+                            <econdition field-name="paymentRefNum" from="bankAccountTrans.checkNumber || bankAccountTrans.refNumber"/>
                         </entity-find>
                         <set field="payment" from="paymentList ? paymentList[0] : null"/>
                     </if>
@@ -147,10 +147,10 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
                 <if condition="payment || acctgTransAndEntry">
                     <service-call name="mantle.account.ReconciliationServices.reconcile#PaymentMethodTrans"
-                            in-map="[paymentMethodId:paymentMethodId, fitId:bankAccountTrans.fitId,
+                            in-map="{paymentMethodId:paymentMethodId, fitId:bankAccountTrans.fitId,
                                 bankAccountTrans:bankAccountTrans, paymentId:payment?.paymentId, payment:payment,
                                 acctgTransId:acctgTransAndEntry?.acctgTransId,
-                                acctgTransEntrySeqId:acctgTransAndEntry?.acctgTransEntrySeqId, acctgTransEntry:acctgTransEntry]"/>
+                                acctgTransEntrySeqId:acctgTransAndEntry?.acctgTransEntrySeqId, acctgTransEntry:acctgTransEntry}"/>
                 </if>
             </iterate>
         </actions>
@@ -286,7 +286,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="reversedByAcctgTransId" from="null"/>
                         <econdition field-name="reverseOfAcctgTransId" from="null"/>
                     </entity-find>
-                    <if condition="existingTransList"><set field="acctgTransId" from="existingTransList[0].acctgTransId"/></if>
+                    <if condition="(existingTransList?.length > 0)"><set field="acctgTransId" from="existingTransList[0].acctgTransId"/></if>
                 </if>
             </if>
 
@@ -298,7 +298,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="glAccountId" from="paymentMethod.glAccountId"/>
                         <order-by field-name="acctgTransEntrySeqId"/>
                     </entity-find>
-                    <if condition="ateList">
+                    <if condition="(ateList?.length > 0)">
                         <set field="acctgTransEntry" from="ateList[0]"/>
                         <set field="acctgTransEntrySeqId" from="acctgTransEntry.acctgTransEntrySeqId"/>
                     </if>
@@ -386,7 +386,7 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <iterate list="existingTransList" entry="existingTrans">
                 <service-call name="mantle.account.ReconciliationServices.unreconcile#PaymentMethodTrans"
-                        in-map="[paymentMethodId:existingTrans.paymentMethodId, fitId:existingTrans.fitId]"/>
+                        in-map="{paymentMethodId:existingTrans.paymentMethodId, fitId:existingTrans.fitId}"/>
             </iterate>
         </actions>
     </service>

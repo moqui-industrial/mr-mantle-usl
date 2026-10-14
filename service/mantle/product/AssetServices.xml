@@ -85,7 +85,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <script>facilityIdSet.add(productStore.inventoryFacilityId)</script></if>
                     <entity-find entity-name="mantle.product.store.ProductStoreFacility" list="productStoreFacilityList">
                         <date-filter/><econdition field-name="productStoreId"/></entity-find>
-                    <if condition="productStoreFacilityList">
+                    <if condition="(productStoreFacilityList?.length > 0)">
                         <script>facilityIdSet.addAll(productStoreFacilityList*.facilityId)</script></if>
                 </if>
             </if>
@@ -106,7 +106,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- compile set of assetPoolId values -->
             <service-call name="mantle.product.AssetServices.get#AssetPools" out-map="poolsOut"
-                    in-map="[productStoreId:productStoreId, vendorPartyId:vendorPartyId, customerPartyId:customerPartyId]"/>
+                    in-map="{productStoreId:productStoreId, vendorPartyId:vendorPartyId, customerPartyId:customerPartyId}"/>
             <set field="assetPoolIdSet" from="poolsOut.assetPoolIdSet"/>
 
             <set field="availableToPromiseTotal" from="0.0"/>
@@ -137,11 +137,11 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="availableFromComponents" from="0.0"/>
                     <iterate list="assocList" entry="assoc">
                         <service-call name="mantle.product.AssetServices.get#AvailableInventory" out-map="compAvailOut" out-map-add-to-existing="false"
-                                in-map="[productId:assoc.toProductId, facilityId:facilityId, productStoreId:productStoreId,
-                                    vendorPartyId:vendorPartyId, customerPartyId:customerPartyId]"/>
+                                in-map="{productId:assoc.toProductId, facilityId:facilityId, productStoreId:productStoreId,
+                                    vendorPartyId:vendorPartyId, customerPartyId:customerPartyId}"/>
                         <!-- NOTE: digits to round? asset qty can be non-integer, but most products are and we want that -->
                         <set field="compScale" from="assoc.quantity != null ? assoc.quantity.scale() : 0"/>
-                        <set field="componentAvailable" from="(compAvailOut.availableToPromiseTotal ?: 0.0).divide((assoc.quantity ?: 1.0), compScale, BigDecimal.ROUND_FLOOR)"/>
+                        <set field="componentAvailable" from="(compAvailOut.availableToPromiseTotal || 0.0).divide((assoc.quantity || 1.0), compScale, BigDecimal.ROUND_FLOOR)"/>
                         <!-- <log level="warn" message="comp prod ${assoc.toProductId} ATP ${compAvailOut.availableToPromiseTotal} comp qty ${assoc.quantity} (scale ${compScale}) calc avail ${componentAvailable}"/> -->
                         <if condition="availableFromComponents == 0.0 || availableFromComponents &gt; componentAvailable">
                             <set field="availableFromComponents" from="componentAvailable"/></if>
@@ -171,8 +171,8 @@ along with this software (see the LICENSE.md file). If not, see
                 <return type="warning" message="Cannot get available inventory for order ${orderId} part ${orderPartSeqId}, no facility on order part and no store on header"/></if>
 
             <service-call name="mantle.product.AssetServices.get#AvailableInventory" out-map="context"
-                    in-map="[productId:productId, facilityId:orderPart.facilityId, productStoreId:orderHeader.productStoreId,
-                        vendorPartyId:orderPart.vendorPartyId, customerPartyId:orderPart.customerPartyId]"/>
+                    in-map="{productId:productId, facilityId:orderPart.facilityId, productStoreId:orderHeader.productStoreId,
+                        vendorPartyId:orderPart.vendorPartyId, customerPartyId:orderPart.customerPartyId}"/>
 
             <!-- get current quantity reserved (for updates) -->
             <if condition="orderItemSeqId">
@@ -185,7 +185,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="resSumList.size() &gt; 0">
                     <set field="resQuantity" from="resSumList[0].quantity"/>
                     <set field="resQuantityNotAvailable" from="resSumList[0].quantityNotAvailable"/>
-                    <set field="availableToPromiseTotal" from="(availableToPromiseTotal ?: 0.0) + (resQuantity ?: 0.0) - (resQuantityNotAvailable ?: 0.0)"/>
+                    <set field="availableToPromiseTotal" from="(availableToPromiseTotal || 0.0) + (resQuantity || 0.0) - (resQuantityNotAvailable || 0.0)"/>
                 </if>
 
                 <!-- if Product is a Pick Assembly (productTypeEnumId=PtPickAssembly) adjust by reserve qty and qty not available from BOM components -->
@@ -208,8 +208,8 @@ along with this software (see the LICENSE.md file). If not, see
                         <set field="curResSum" from="allResSumList.find({ it.productId == assoc.toProductId })"/>
                         <!-- NOTE: digits to round? asset qty can be non-integer, but most products are and we want that -->
                         <set field="compScale" from="assoc.quantity != null ? assoc.quantity.scale() : 0"/>
-                        <set field="resQuantity" from="(curResSum.quantity ?: 0.0).divide((assoc.quantity ?: 1.0), compScale, BigDecimal.ROUND_FLOOR)"/>
-                        <set field="resQuantityNotAvailable" from="(curResSum.quantityNotAvailable ?: 0.0).divide((assoc.quantity ?: 1.0), compScale, BigDecimal.ROUND_FLOOR)"/>
+                        <set field="resQuantity" from="(curResSum.quantity || 0.0).divide((assoc.quantity || 1.0), compScale, BigDecimal.ROUND_FLOOR)"/>
+                        <set field="resQuantityNotAvailable" from="(curResSum.quantityNotAvailable || 0.0).divide((assoc.quantity || 1.0), compScale, BigDecimal.ROUND_FLOOR)"/>
 
                         <log level="warn" message="order item ${orderId}:${orderItemSeqId} comp prod ${assoc.toProductId} res qty ${curResSum.quantity} not avail ${curResSum.quantityNotAvailable} comp qty ${assoc.quantity} (scale ${compScale}) resQuantity ${resQuantity} resQuantityNotAvailable ${resQuantityNotAvailable}"/>
 
@@ -219,7 +219,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <if condition="reservedNotAvailFromComponents &lt; resQuantityNotAvailable">
                             <set field="reservedNotAvailFromComponents" from="resQuantityNotAvailable"/></if>
                     </iterate>
-                    <set field="availableToPromiseTotal" from="(availableToPromiseTotal ?: 0.0) + reservedFromComponents - reservedNotAvailFromComponents"/>
+                    <set field="availableToPromiseTotal" from="(availableToPromiseTotal || 0.0) + reservedFromComponents - reservedNotAvailFromComponents"/>
                 </if>
             </if>
         </actions>
@@ -249,7 +249,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="productCategoryId" operator="in" from="productCategoryIds"/>
                     <select-field field-name="productId"/>
                 </entity-find>
-                <if condition="pcmList"><script>productIdSet.addAll(pcmList*.productId)</script></if>
+                <if condition="(pcmList?.length > 0)"><script>productIdSet.addAll(pcmList*.productId)</script></if>
             </if>
             <if condition="expandVariants">
                 <set field="newProductIdSet" from="new HashSet()"/>
@@ -262,7 +262,7 @@ along with this software (see the LICENSE.md file). If not, see
                             <econdition field-name="productId"/>
                             <econdition field-name="productAssocTypeEnumId" value="PatVariant"/>
                         </entity-find>
-                        <if condition="variantAssocList">
+                        <if condition="(variantAssocList?.length > 0)">
                             <script>newProductIdSet.addAll(variantAssocList*.toProductId)</script></if>
                     </then><else>
                         <script>newProductIdSet.add(productId)</script>
@@ -285,7 +285,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <script>facilityIdSet.add(productStore.inventoryFacilityId)</script></if>
                     <entity-find entity-name="mantle.product.store.ProductStoreFacility" list="productStoreFacilityList">
                         <date-filter/><econdition field-name="productStoreId"/></entity-find>
-                    <if condition="productStoreFacilityList">
+                    <if condition="(productStoreFacilityList?.length > 0)">
                         <script>facilityIdSet.addAll(productStoreFacilityList*.facilityId)</script></if>
                 </if>
             </if>
@@ -306,11 +306,11 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- compile set of assetPoolId values -->
             <service-call name="mantle.product.AssetServices.get#AssetPools" out-map="poolsOut"
-                    in-map="[productStoreId:productStoreId, vendorPartyId:vendorPartyId, customerPartyId:customerPartyId]"/>
+                    in-map="{productStoreId:productStoreId, vendorPartyId:vendorPartyId, customerPartyId:customerPartyId}"/>
             <set field="assetPoolIdSet" from="poolsOut.assetPoolIdSet"/>
 
             <!-- prep the output Map -->
-            <set field="availableByProductId" from="[:]"/>
+            <set field="availableByProductId" from="{}"/>
             <!-- to support assetAllowOtherOwner may need to do query per Facility... -->
             <iterate list="facilityIdSet" entry="facilityId">
                 <entity-find-one entity-name="mantle.facility.Facility" value-field="facility" cache="true"/>
@@ -350,11 +350,11 @@ along with this software (see the LICENSE.md file). If not, see
                         <set field="availableFromComponents" from="0.0"/>
                         <iterate list="assocList" entry="assoc">
                             <service-call name="mantle.product.AssetServices.get#AvailableInventory" out-map="compAvailOut" out-map-add-to-existing="false"
-                                    in-map="[productId:assoc.toProductId, facilityId:facilityId, productStoreId:productStoreId,
-                                    vendorPartyId:vendorPartyId, customerPartyId:customerPartyId]"/>
+                                    in-map="{productId:assoc.toProductId, facilityId:facilityId, productStoreId:productStoreId,
+                                    vendorPartyId:vendorPartyId, customerPartyId:customerPartyId}"/>
                             <!-- NOTE: digits to round? asset qty can be non-integer, but most products are and we want that -->
                             <set field="compScale" from="assoc.quantity != null ? assoc.quantity.scale() : 0"/>
-                            <set field="componentAvailable" from="(compAvailOut.availableToPromiseTotal ?: 0.0).divide((assoc.quantity ?: 1.0), compScale, BigDecimal.ROUND_FLOOR)"/>
+                            <set field="componentAvailable" from="(compAvailOut.availableToPromiseTotal || 0.0).divide((assoc.quantity || 1.0), compScale, BigDecimal.ROUND_FLOOR)"/>
                             <!-- <log level="warn" message="multi comp prod ${assoc.toProductId} ATP ${compAvailOut.availableToPromiseTotal} comp qty ${assoc.quantity} (scale ${compScale}) calc avail ${componentAvailable}"/> -->
                             <if condition="availableFromComponents == 0.0 || availableFromComponents &gt; componentAvailable">
                                 <set field="availableFromComponents" from="componentAvailable"/></if>
@@ -400,7 +400,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="ownerPartyId"><set field="asset.ownerPartyId" from="ownerPartyId"/></if>
             <entity-update value-field="asset"/>
 
-            <service-call name="mantle.ledger.AssetAutoPostServices.repost#Asset" in-map="[assetId:assetId]"/>
+            <service-call name="mantle.ledger.AssetAutoPostServices.repost#Asset" in-map="{assetId:assetId}"/>
             <!-- TODO: consider re-evaluating all reservations if ownerPartyId changes, may need to bump or inventory may be available for not available reservations -->
         </actions>
     </service>
@@ -425,9 +425,9 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <iterate list="assetList" entry="asset">
                 <service-call name="mantle.product.AssetServices.update#AssetAcquireCost"
-                        in-map="[assetId:asset.assetId, acquireCost:acquireCost, ownerPartyId:ownerPartyId]"/>
+                        in-map="{assetId:asset.assetId, acquireCost:acquireCost, ownerPartyId:ownerPartyId}"/>
             </iterate>
-            <message>Updated Acquire Cost to ${acquireCost?.toPlainString()} on ${assetList.size()} Asset records for Product ${productId}, Facility ${facilityId?:'*'}, Received From ${receivedDate_from?:'*'} Thru ${receivedDate_thru?:'*'}</message>
+            <message>Updated Acquire Cost to ${acquireCost?.toPlainString()} on ${assetList.size()} Asset records for Product ${productId}, Facility ${facilityId||'*'}, Received From ${receivedDate_from||'*'} Thru ${receivedDate_thru||'*'}</message>
         </actions>
     </service>
 
@@ -447,8 +447,8 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- View queries won't work with transaction cache (for data updated within the tx), so if active use different approach -->
             <if condition="ec.transaction.isTransactionCacheActive()"><then>
                 <!-- incremental update -->
-                <set field="asset.availableToPromiseTotal" from="(asset.availableToPromiseTotal ?: 0.0) + (availableToPromiseDiff ?: 0.0)"/>
-                <set field="asset.quantityOnHandTotal" from="(asset.quantityOnHandTotal ?: 0.0) + (quantityOnHandDiff ?: 0.0)"/>
+                <set field="asset.availableToPromiseTotal" from="(asset.availableToPromiseTotal || 0.0) + (availableToPromiseDiff || 0.0)"/>
+                <set field="asset.quantityOnHandTotal" from="(asset.quantityOnHandTotal || 0.0) + (quantityOnHandDiff || 0.0)"/>
             </then><else>
                 <!-- sum all records, update with new totals -->
                 <entity-find entity-name="mantle.product.asset.AssetDetailSummary" list="assetDetailSummaryList">
@@ -457,11 +457,11 @@ along with this software (see the LICENSE.md file). If not, see
                 </entity-find>
                 <if condition="assetDetailSummaryList.size() &gt; 0"><then>
                     <set field="assetDetailSummary" from="assetDetailSummaryList[0]"/>
-                    <set field="asset.availableToPromiseTotal" from="assetDetailSummary.availableToPromiseTotal ?: 0.0"/>
-                    <set field="asset.quantityOnHandTotal" from="assetDetailSummary.quantityOnHandTotal ?: 0.0"/>
+                    <set field="asset.availableToPromiseTotal" from="assetDetailSummary.availableToPromiseTotal || 0.0"/>
+                    <set field="asset.quantityOnHandTotal" from="assetDetailSummary.quantityOnHandTotal || 0.0"/>
                 </then><else>
-                    <set field="asset.availableToPromiseTotal" from="(asset.availableToPromiseTotal ?: 0.0) + (availableToPromiseDiff ?: 0.0)"/>
-                    <set field="asset.quantityOnHandTotal" from="(asset.quantityOnHandTotal ?: 0.0) + (quantityOnHandDiff ?: 0.0)"/>
+                    <set field="asset.availableToPromiseTotal" from="(asset.availableToPromiseTotal || 0.0) + (availableToPromiseDiff || 0.0)"/>
+                    <set field="asset.quantityOnHandTotal" from="(asset.quantityOnHandTotal || 0.0) + (quantityOnHandDiff || 0.0)"/>
                 </else></if>
             </else></if>
 
@@ -471,9 +471,9 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- NOTE: this may be better to do at a higher level in some cases, but this will make sure -->
             <if condition="asset.quantityOnHandTotal &lt; 0">
                 <service-call name="mantle.product.AssetServices.record#PhysicalInventoryChange"
-                        in-map="[productId:asset.productId, facilityId:asset.facilityId, locationSeqId:asset.locationSeqId,
+                        in-map="{productId:asset.productId, facilityId:asset.facilityId, locationSeqId:asset.locationSeqId,
                             quantityChange:-asset.quantityOnHandTotal, varianceReasonEnumId:'InVrFound',
-                            assetList:[asset]]"/>
+                            assetList:[asset]}"/>
             </if>
 
             <!-- <set field="message" from="'========== end update#AssetFromDetail ' + assetId + ': ' + availableToPromiseDiff + '/' + quantityOnHandDiff + ' :: ' + asset.availableToPromiseTotal + '/' + asset.quantityOnHandTotal"/><log message="${message}"/> -->
@@ -495,7 +495,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <set field="recordsChecked" from="assetList.size()"/>
             <set field="recordsUpdated" from="0"/>
-            <message>Checking ${recordsChecked} Asset record totals for Product ${productId?:'*'} Facility ${facilityId?:'*'}</message>
+            <message>Checking ${recordsChecked} Asset record totals for Product ${productId||'*'} Facility ${facilityId||'*'}</message>
 
             <iterate list="assetList" entry="asset">
                 <entity-find entity-name="mantle.product.asset.AssetDetailSummary" list="assetDetailSummaryList">
@@ -504,8 +504,8 @@ along with this software (see the LICENSE.md file). If not, see
                 </entity-find>
                 <if condition="assetDetailSummaryList.size() &gt; 0"><then>
                     <set field="assetDetailSummary" from="assetDetailSummaryList[0]"/>
-                    <set field="calcAtp" from="assetDetailSummary.availableToPromiseTotal ?: 0.0"/>
-                    <set field="calcQoh" from="assetDetailSummary.quantityOnHandTotal ?: 0.0"/>
+                    <set field="calcAtp" from="assetDetailSummary.availableToPromiseTotal || 0.0"/>
+                    <set field="calcQoh" from="assetDetailSummary.quantityOnHandTotal || 0.0"/>
                     <if condition="asset.availableToPromiseTotal != calcAtp || asset.quantityOnHandTotal != calcQoh">
                         <log message="Asset ${asset.assetId} Product ${asset.productId} Facility ${asset.facilityId} has incorrect totals: ATP is ${asset.availableToPromiseTotal}, should be ${calcAtp}; QOH is ${asset.quantityOnHandTotal}, should be ${calcQoh}; updating"/>
                         <set field="recordsUpdated" from="recordsUpdated + 1"/>
@@ -528,7 +528,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <service-call name="mantle.product.AssetServices.check#AssetReservations" in-map="[assetId:asset.assetId]"/> -->
             </iterate>
 
-            <message>Checking ${recordsChecked} Asset record totals for Product ${productId?:'*'} Facility ${facilityId?:'*'}, updated ${recordsUpdated} with incorrect totals</message>
+            <message>Checking ${recordsChecked} Asset record totals for Product ${productId||'*'} Facility ${facilityId||'*'}, updated ${recordsUpdated} with incorrect totals</message>
         </actions>
     </service>
 
@@ -550,7 +550,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="productStoreId">
                 <entity-find entity-name="mantle.product.asset.AssetPoolStore" list="assetPoolStoreList" cache="true">
                     <econdition field-name="productStoreId"/></entity-find>
-                <if condition="assetPoolStoreList">
+                <if condition="(assetPoolStoreList?.length > 0)">
                     <script>assetPoolIdSet.addAll(assetPoolStoreList*.assetPoolId)</script></if>
             </if>
             <if condition="vendorPartyId">
@@ -558,7 +558,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="partyId" from="vendorPartyId"/></entity-find>
                 <!-- filter by role or null after for better caching -->
                 <set field="vendorPoolPartyList" from="vendorPoolPartyList.findAll({ it.roleTypeId == null || it.roleTypeId == 'Vendor' })"/>
-                <if condition="vendorPoolPartyList">
+                <if condition="(vendorPoolPartyList?.length > 0)">
                     <script>assetPoolIdSet.addAll(vendorPoolPartyList*.assetPoolId)</script></if>
             </if>
             <if condition="customerPartyId">
@@ -566,7 +566,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="partyId" from="customerPartyId"/></entity-find>
                 <!-- filter by role or null after for better caching -->
                 <set field="customerPoolPartyList" from="customerPoolPartyList.findAll({ it.roleTypeId == null || it.roleTypeId == 'Customer' })"/>
-                <if condition="customerPoolPartyList">
+                <if condition="(customerPoolPartyList?.length > 0)">
                     <script>assetPoolIdSet.addAll(customerPoolPartyList*.assetPoolId)</script></if>
             </if>
         </actions>
@@ -606,7 +606,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <iterate list="orderPartList" entry="orderPart">
                 <!-- check OrderPart.reservationAutoEnumId vs current status -->
-                <set field="reservationAutoEnumId" from="orderPart.reservationAutoEnumId ?: productStore?.reservationAutoEnumId ?: 'AsResAutoPlaced'"/>
+                <set field="reservationAutoEnumId" from="orderPart.reservationAutoEnumId || productStore?.reservationAutoEnumId || 'AsResAutoPlaced'"/>
                 <if condition="!forceReserve &amp;&amp; reservationAutoEnumId == 'AsResAutoNone'"><continue/></if>
                 <if condition="!forceReserve &amp;&amp; reservationAutoEnumId == 'AsResAutoApproved'"><then>
                     <set field="resStatusList" from="['OrderApproved', 'OrderSent']"/>
@@ -624,7 +624,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </entity-find>
                 <iterate list="orderItemList" entry="orderItem">
                     <service-call name="mantle.product.AssetServices.reserve#AssetForOrderItem"
-                            in-map="[orderId:orderId, orderItemSeqId:orderItem.orderItemSeqId, productStore:productStore, forceReserve:forceReserve]"/>
+                            in-map="{orderId:orderId, orderItemSeqId:orderItem.orderItemSeqId, productStore:productStore, forceReserve:forceReserve}"/>
                 </iterate>
             </iterate>
 
@@ -647,10 +647,10 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- regardless of settings only skip reservation update if there are no reservations (if reservations update for quantity changes, etc) -->
             <entity-find entity-name="mantle.product.issuance.AssetReservation" list="existingResList">
                 <econdition field-name="orderId"/><econdition field-name="orderItemSeqId"/></entity-find>
-            <if condition="!existingResList">
+            <if condition="!existingResList?.length">
                 <!-- only do this automatically if order placed or later but not completed/cancelled/etc -->
                 <!-- check OrderPart.reservationAutoEnumId vs current status -->
-                <set field="reservationAutoEnumId" from="orderPart.reservationAutoEnumId ?: productStore?.reservationAutoEnumId ?: 'AsResAutoPlaced'"/>
+                <set field="reservationAutoEnumId" from="orderPart.reservationAutoEnumId || productStore?.reservationAutoEnumId || 'AsResAutoPlaced'"/>
                 <if condition="reservationAutoEnumId == 'AsResAutoNone'"><return/></if>
                 <if condition="reservationAutoEnumId == 'AsResAutoApproved'"><then>
                     <set field="resStatusList" from="['OrderApproved', 'OrderSent']"/>
@@ -697,7 +697,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="componentProductId"><log level="warn" message="Component Product ${componentProductId} reserve ${componentQuantity} for OrderItem ${orderId}:${orderItemSeqId} product ${orderItem.productId}"/></if>
 
             <!-- first check the OrderItem, make sure we have a productId otherwise don't reserve -->
-            <set field="productId" from="componentProductId ?: orderItem.productId"/>
+            <set field="productId" from="componentProductId || orderItem.productId"/>
             <if condition="!productId"><return/></if>
 
             <!-- see if Product is a physical item -->
@@ -757,7 +757,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="quantityToDeduct" from="-quantityRemaining"/>
                 <iterate list="existingResList" entry="existingRes">
                     <service-call name="mantle.product.AssetServices.reduce#AssetReservation" out-map="reduceArOut" out-map-add-to-existing="false"
-                            in-map="[assetReservationId:existingRes.assetReservationId, quantityToDeduct:quantityToDeduct, reserveIncreasedAsset:true]"/>
+                            in-map="{assetReservationId:existingRes.assetReservationId, quantityToDeduct:quantityToDeduct, reserveIncreasedAsset:true}"/>
                     <set field="quantityToDeduct" from="quantityToDeduct - reduceArOut.quantityDeducted"/>
                     <if condition="quantityToDeduct == 0"><break/></if>
                 </iterate>
@@ -780,18 +780,18 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- if store setup for no reservation return now -->
             <if condition="productStore?.reservationOrderEnumId == 'AsResOrdNoRes'"><return/></if>
             <!-- otherwise set assetOrderBy field based on reservationOrderEnumId -->
-            <set field="reservationOrderEnumId" from="productStore?.reservationOrderEnumId ?: 'AsResOrdFifoRec'"/>
+            <set field="reservationOrderEnumId" from="productStore?.reservationOrderEnumId || 'AsResOrdFifoRec'"/>
             <entity-find-one entity-name="moqui.basic.Enumeration" value-field="resOrderEnum">
                 <field-map field-name="enumId" from="reservationOrderEnumId"/></entity-find-one>
-            <set field="assetOrderBy" from="resOrderEnum?.enumCode ?: 'receivedDate'"/><!-- default: FIFO by received date -->
+            <set field="assetOrderBy" from="resOrderEnum?.enumCode || 'receivedDate'"/><!-- default: FIFO by received date -->
 
-            <set field="inventoryFacilityId" from="orderPart?.facilityId ?: productStore?.inventoryFacilityId"/>
+            <set field="inventoryFacilityId" from="orderPart?.facilityId || productStore?.inventoryFacilityId"/>
             <entity-find-one entity-name="mantle.facility.Facility" value-field="inventoryFacility" cache="true">
                 <field-map field-name="facilityId" from="inventoryFacilityId"/></entity-find-one>
             <set field="assetAllowOtherOwner" from="inventoryFacility?.assetAllowOtherOwner"/>
 
             <!-- determine organizationPartyId -->
-            <set field="organizationPartyId" from="orderPart?.vendorPartyId ?: productStore?.organizationPartyId"/>
+            <set field="organizationPartyId" from="orderPart?.vendorPartyId || productStore?.organizationPartyId"/>
             <!-- if organizationPartyId is not an internal org this is not a sales order, so don't do inventory res (return) -->
             <entity-find-one entity-name="mantle.party.PartyRole" value-field="orgPartyRole" cache="true">
                 <field-map field-name="partyId" from="organizationPartyId"/>
@@ -821,8 +821,8 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- get assetPoolId values this order qualifies for (by store, vendor, customer) -->
             <service-call name="mantle.product.AssetServices.get#AssetPools" out-map="poolsOut"
-                    in-map="[productStoreId:orderHeader.productStoreId, vendorPartyId:orderPart?.vendorPartyId,
-                        customerPartyId:orderPart?.customerPartyId]"/>
+                    in-map="{productStoreId:orderHeader.productStoreId, vendorPartyId:orderPart?.vendorPartyId,
+                        customerPartyId:orderPart?.customerPartyId}"/>
             <set field="assetPoolIdSet" from="poolsOut.assetPoolIdSet"/>
 
             <!-- check and lock individual Asset records -->
@@ -861,7 +861,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <if condition="quantityToReserve &gt; asset.availableToPromiseTotal">
                         <!-- displace existing reservations for explicit assetIds -->
                         <service-call name="mantle.product.AssetServices.displace#AssetReservations"
-                                in-map="[assetId:asset.assetId, orderId:orderId, orderItemSeqId:orderItemSeqId, quantity:quantityToReserve]"/>
+                                in-map="{assetId:asset.assetId, orderId:orderId, orderItemSeqId:orderItemSeqId, quantity:quantityToReserve}"/>
                         <entity-find-one entity-name="mantle.product.asset.Asset" value-field="asset" for-update="true">
                             <field-map field-name="assetId" from="asset.assetId"/></entity-find-one>
                     </if>
@@ -873,7 +873,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </iterate>
             </if>
             <if condition="checkQuantityRemaining &gt; 0.0">
-                <set field="baseAssetCond" from="[productId:productId, statusId:'AstAvailable']"/>
+                <set field="baseAssetCond" from="{productId:productId, statusId:'AstAvailable'}"/>
                 <if condition="inventoryFacilityId"><set field="baseAssetCond.facilityId" from="inventoryFacilityId"/></if>
                 <!-- TODO 20180503 remove this at some point, added to monitor corner case issue -->
                 <if condition="!baseAssetCond.facilityId"><log level="warn" message="Reserving inventory for order ${orderId} item ${orderItemSeqId} with no facilityId"/></if>
@@ -899,8 +899,8 @@ along with this software (see the LICENSE.md file). If not, see
                             <select-field field-name="expirationDate,expectedEndOfLife"/>
                             <order-by field-name="-issuedDate"/>
                         </entity-find>
-                        <if condition="issuanceLotList">
-                            <set field="newerThanExpireDate" from="issuanceLotList[0].expirationDate ?: issuanceLotList[0].expectedEndOfLife"/></if>
+                        <if condition="(issuanceLotList?.length > 0)">
+                            <set field="newerThanExpireDate" from="issuanceLotList[0].expirationDate || issuanceLotList[0].expectedEndOfLife"/></if>
                     </if>
                     <!-- do pre-query to find sufficient lots, or if no sufficient largest lots by order to minimize lots -->
                     <entity-find entity-name="mantle.product.asset.AssetLotSummary" list="lotSummaryList">
@@ -932,7 +932,7 @@ along with this software (see the LICENSE.md file). If not, see
                         </entity-find>
                     </if>
                     <!-- if we found any lots look for singleLotId if singleLot, else use best candidate lots based on queries above -->
-                    <if condition="lotSummaryList">
+                    <if condition="(lotSummaryList?.length > 0)">
                         <set field="singleLotId" from="null"/>
                         <if condition="singleLot">
                             <!-- find first in list (smallest) lot with sufficient inventory and use it -->
@@ -1039,7 +1039,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- <log level="warn" message="Reserve order ${orderId}:${orderItemSeqId} asset ${assetId} lockedAssetList: ${lockedAssetList*.assetId} ${lockedAssetList*.availableToPromiseTotal}"/> -->
 
             <!-- do the reservations... -->
-            <set field="baseMap" from="[orderId:orderId, orderItemSeqId:orderItemSeqId, productId:productId]"/>
+            <set field="baseMap" from="{orderId:orderId, orderItemSeqId:orderItemSeqId, productId:productId}"/>
             <iterate list="lockedAssetList" entry="asset">
                 <if condition="quantityRemaining &gt; 0.0">
                     <set field="quantityToReserve" from="asset.availableToPromiseTotal &gt; quantityRemaining ? quantityRemaining : asset.availableToPromiseTotal"/>
@@ -1075,8 +1075,8 @@ along with this software (see the LICENSE.md file). If not, see
                         <return error="true" message="Pick Assembly Product ${assoc.productId} has itself for a component product, remove the Manufacturing BOM Association"/></if>
 
                     <service-call name="mantle.product.AssetServices.reserve#AssetForOrderItem"
-                            in-map="[orderId:orderId, orderItemSeqId:orderItemSeqId, productStore:productStore, forceReserve:forceReserve,
-                                componentProductId:assoc.toProductId, componentQuantity:((assoc.quantity ?: 1.0) * quantityRemaining)]"/>
+                            in-map="{orderId:orderId, orderItemSeqId:orderItemSeqId, productStore:productStore, forceReserve:forceReserve,
+                                componentProductId:assoc.toProductId, componentQuantity:((assoc.quantity || 1.0) * quantityRemaining)}"/>
                 </iterate>
 
                 <set field="quantityRemaining" from="0.0"/>
@@ -1104,8 +1104,8 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="!newResAssetId">
                     <!-- no asset... create a shell one to record the reservation and detail against -->
                     <service-call name="mantle.product.AssetServices.create#ProductAssetAdHoc" out-map="assetOut"
-                            in-map="[productId:productId, facilityId:inventoryFacilityId, ownerPartyId:organizationPartyId,
-                                createdDate:nowTimestamp]"/>
+                            in-map="{productId:productId, facilityId:inventoryFacilityId, ownerPartyId:organizationPartyId,
+                                createdDate:nowTimestamp}"/>
                     <set field="newResAssetId" from="assetOut.assetId"/>
                 </if>
 
@@ -1134,7 +1134,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="orderId"/><econdition field-name="orderItemSeqId"/></entity-find>
             <iterate list="existingResList" entry="existingRes">
                 <service-call name="mantle.product.AssetServices.reduce#AssetReservation"
-                        in-map="[assetReservationId:existingRes.assetReservationId, reserveIncreasedAsset:true]"/>
+                        in-map="{assetReservationId:existingRes.assetReservationId, reserveIncreasedAsset:true}"/>
             </iterate>
         </actions>
     </service>
@@ -1151,7 +1151,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="orderId"/></entity-find>
             <iterate list="existingResList" entry="existingRes">
                 <service-call name="mantle.product.AssetServices.reduce#AssetReservation"
-                        in-map="[assetReservationId:existingRes.assetReservationId, reserveIncreasedAsset:true]"/>
+                        in-map="{assetReservationId:existingRes.assetReservationId, reserveIncreasedAsset:true}"/>
             </iterate>
         </actions>
     </service>
@@ -1172,9 +1172,9 @@ along with this software (see the LICENSE.md file). If not, see
 
             <if condition="!quantityToDeduct"><set field="quantityToDeduct" from="existingRes.quantityNotIssued"/></if>
             <if condition="quantityToDeduct &gt;= existingRes.quantity &amp;&amp; existingRes.quantity == existingRes.quantityNotIssued"><then>
-                <service-call name="create#mantle.product.asset.AssetDetail" in-map="[assetId:existingRes.assetId,
+                <service-call name="create#mantle.product.asset.AssetDetail" in-map="{assetId:existingRes.assetId,
                                 effectiveDate:ec.user.nowTimestamp, availableToPromiseDiff:existingRes.quantity,
-                                assetReservationId:existingRes.assetReservationId, productId:existingRes.productId, orderId:existingRes.orderId]"/>
+                                assetReservationId:existingRes.assetReservationId, productId:existingRes.productId, orderId:existingRes.orderId}"/>
 
                 <set field="quantityDeducted" from="existingRes.quantity"/>
                 <entity-delete value-field="existingRes"/>
@@ -1183,10 +1183,10 @@ along with this software (see the LICENSE.md file). If not, see
                                 quantityToDeduct : existingRes.quantityNotIssued"/>
                 <!-- add to ATP on Asset through a detail record, if curQuantityToDeduct not null and not zero -->
                 <if condition="curQuantityToDeduct">
-                    <service-call name="create#mantle.product.asset.AssetDetail" in-map="[assetId:existingRes.assetId,
+                    <service-call name="create#mantle.product.asset.AssetDetail" in-map="{assetId:existingRes.assetId,
                             effectiveDate:ec.user.nowTimestamp, availableToPromiseDiff:curQuantityToDeduct,
                             assetReservationId:existingRes.assetReservationId, productId:existingRes.productId,
-                            orderId:existingRes.orderId, orderItemSeqId:existingRes.orderItemSeqId]"/>
+                            orderId:existingRes.orderId, orderItemSeqId:existingRes.orderItemSeqId}"/>
                 </if>
                 <!-- reduce quantities on AssetReservation -->
                 <set field="existingRes.quantity" from="existingRes.quantity - curQuantityToDeduct"/>
@@ -1207,7 +1207,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <if condition="reserveIncreasedAsset">
                 <!-- with ATP increased reserve newly available inventory -->
-                <service-call name="mantle.product.AssetServices.reserve#IncreasedAsset" in-map="[assetId:existingRes.assetId]"/>
+                <service-call name="mantle.product.AssetServices.reserve#IncreasedAsset" in-map="{assetId:existingRes.assetId}"/>
             </if>
         </actions>
     </service>
@@ -1245,14 +1245,14 @@ along with this software (see the LICENSE.md file). If not, see
 
                 <!-- remove item reservations -->
                 <service-call name="mantle.product.AssetServices.remove#OrderItemReservations"
-                        in-map="[orderId:resOrderItem.orderId, orderItemSeqId:resOrderItem.orderItemSeqId]"/>
+                        in-map="{orderId:resOrderItem.orderId, orderItemSeqId:resOrderItem.orderItemSeqId}"/>
 
                 <!-- look up OrderPart, OrderHeader to see if item qualifies for re-reserve, and get order by fields -->
                 <set field="orderPart" from="orderItem.part"/>
                 <if condition="orderPart.statusId in reserveOrderStatusIdSet">
                     <set field="orderHeader" from="orderItem.header"/>
-                    <script>orderItemInfoList.add([orderId:orderItem.orderId, orderItemSeqId:orderItem.orderItemSeqId,
-                            priority:orderPart.priority, placedDate:orderHeader.placedDate])</script>
+                    <script>orderItemInfoList.add({orderId:orderItem.orderId, orderItemSeqId:orderItem.orderItemSeqId,
+                            priority:orderPart.priority, placedDate:orderHeader.placedDate})</script>
                 </if>
             </iterate>
 
@@ -1262,7 +1262,7 @@ along with this software (see the LICENSE.md file). If not, see
             <iterate list="orderItemInfoList" entry="orderItemInfo">
                 <!-- NOTE: a reservation existed so forceReserve:true -->
                 <service-call name="mantle.product.AssetServices.reserve#AssetForOrderItem"
-                        in-map="[orderId:orderItemInfo.orderId, orderItemSeqId:orderItemInfo.orderItemSeqId, forceReserve:true]"/>
+                        in-map="{orderId:orderItemInfo.orderId, orderItemSeqId:orderItemInfo.orderItemSeqId, forceReserve:true}"/>
             </iterate>
         </actions>
     </service>
@@ -1316,9 +1316,9 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="quantityToMove &gt; 0.0">
                     <service-call name="mantle.product.AssetServices.move#AssetReservation"
                             out-map="moveArOut" out-map-add-to-existing="false"
-                            in-map="[assetId:assetId, assetReservationId:res.assetReservationId, quantity:quantityToMove]"/>
-                    <set field="availableRemaining" from="availableRemaining - (moveArOut.quantityMoved ?: 0.0)"/>
-                    <set field="quantityMoved" from="quantityMoved + (moveArOut.quantityMoved ?: 0.0)"/>
+                            in-map="{assetId:assetId, assetReservationId:res.assetReservationId, quantity:quantityToMove}"/>
+                    <set field="availableRemaining" from="availableRemaining - (moveArOut.quantityMoved || 0.0)"/>
+                    <set field="quantityMoved" from="quantityMoved + (moveArOut.quantityMoved || 0.0)"/>
                 </if>
             </iterate>
         </actions>
@@ -1348,8 +1348,8 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="orderPart" from="orderItem.part"/>
                 <set field="orderHeader" from="orderItem.header"/>
                 <service-call name="mantle.product.AssetServices.get#AssetPools" out-map="poolsOut"
-                        in-map="[productStoreId:orderHeader.productStoreId, vendorPartyId:orderPart?.vendorPartyId,
-                            customerPartyId:orderPart?.customerPartyId]"/>
+                        in-map="{productStoreId:orderHeader.productStoreId, vendorPartyId:orderPart?.vendorPartyId,
+                            customerPartyId:orderPart?.customerPartyId}"/>
                 <set field="assetPoolIdSet" from="poolsOut.assetPoolIdSet"/>
                 <if condition="!assetPoolIdSet || !assetPoolIdSet.contains(asset.assetPoolId)">
                     <set field="quantityMoved" from="0.0"/>
@@ -1374,15 +1374,15 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- move over the whole reservation -->
 
                 <!-- increment old Asset ATP -->
-                <service-call name="create#mantle.product.asset.AssetDetail" in-map="[assetId:assetReservation.assetId,
+                <service-call name="create#mantle.product.asset.AssetDetail" in-map="{assetId:assetReservation.assetId,
                         effectiveDate:ec.user.nowTimestamp, availableToPromiseDiff:quantityToMove,
                         assetReservationId:assetReservationId, productId:assetReservation.productId,
-                        orderId:assetReservation.orderId, orderItemSeqId:assetReservation.orderItemSeqId]"/>
+                        orderId:assetReservation.orderId, orderItemSeqId:assetReservation.orderItemSeqId}"/>
                 <!-- decrement new Asset ATP -->
-                <service-call name="create#mantle.product.asset.AssetDetail" in-map="[assetId:assetId,
+                <service-call name="create#mantle.product.asset.AssetDetail" in-map="{assetId:assetId,
                         effectiveDate:ec.user.nowTimestamp, availableToPromiseDiff:-quantityToMove,
                         assetReservationId:assetReservationId, productId:assetReservation.productId,
-                        orderId:assetReservation.orderId, orderItemSeqId:assetReservation.orderItemSeqId]"/>
+                        orderId:assetReservation.orderId, orderItemSeqId:assetReservation.orderItemSeqId}"/>
 
                 <!-- set the new assetId and decrease quantityNotAvailable (should be to 0!) -->
                 <set field="assetReservation.assetId" from="assetId"/>
@@ -1398,13 +1398,13 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="orderItemSeqId" from="assetReservation.orderItemSeqId"/>
                     <order-by field-name="assetReservationId"/>
                 </entity-find>
-                <if condition="existingReservationList"><then>
+                <if condition="(existingReservationList?.length > 0)"><then>
                     <set field="existingRes" from="existingReservationList[0]"/>
                     <set field="newAssetReservationId" from="existingRes.assetReservationId"/>
                     <service-call name="update#mantle.product.issuance.AssetReservation" out-map="newResOut"
-                            in-map="[assetReservationId:newAssetReservationId,
-                                quantity:((existingRes.quantity ?: 0.0) + quantityToMove),
-                                quantityNotIssued:((existingRes.quantityNotIssued ?: 0.0) + quantityToMove)]"/>
+                            in-map="{assetReservationId:newAssetReservationId,
+                                quantity:((existingRes.quantity || 0.0) + quantityToMove),
+                                quantityNotIssued:((existingRes.quantityNotIssued || 0.0) + quantityToMove)}"/>
                 </then><else>
                     <!-- create a new reservation, split the quantity -->
                     <service-call name="create#mantle.product.issuance.AssetReservation" out-map="newResOut"
@@ -1424,15 +1424,15 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-update value-field="assetReservation"/>
 
                 <!-- increment old Asset ATP -->
-                <service-call name="create#mantle.product.asset.AssetDetail" in-map="[assetId:assetReservation.assetId,
+                <service-call name="create#mantle.product.asset.AssetDetail" in-map="{assetId:assetReservation.assetId,
                     effectiveDate:ec.user.nowTimestamp, availableToPromiseDiff:quantityToMove,
                     assetReservationId:assetReservationId, productId:assetReservation.productId,
-                    orderId:assetReservation.orderId, orderItemSeqId:assetReservation.orderItemSeqId]"/>
+                    orderId:assetReservation.orderId, orderItemSeqId:assetReservation.orderItemSeqId}"/>
                 <!-- decrement new Asset ATP -->
-                <service-call name="create#mantle.product.asset.AssetDetail" in-map="[assetId:assetId,
+                <service-call name="create#mantle.product.asset.AssetDetail" in-map="{assetId:assetId,
                     effectiveDate:ec.user.nowTimestamp, availableToPromiseDiff:-quantityToMove,
                     assetReservationId:newAssetReservationId, productId:assetReservation.productId,
-                    orderId:assetReservation.orderId, orderItemSeqId:assetReservation.orderItemSeqId]"/>
+                    orderId:assetReservation.orderId, orderItemSeqId:assetReservation.orderItemSeqId}"/>
             </else></if>
         </actions>
     </service>
@@ -1468,7 +1468,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <order-by field-name="receivedDate"/>
             </entity-find>
 
-            <set field="remainingQuantity" from="asset.availableToPromiseTotal ?: 0.0"/>
+            <set field="remainingQuantity" from="asset.availableToPromiseTotal || 0.0"/>
             <iterate list="nonPickAssetList" entry="nonPickAsset">
                 <if condition="remainingQuantity == 0.0"><break/></if>
                 <set field="remainingQuantityBefore" from="remainingQuantity"/>
@@ -1482,7 +1482,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="quantityToMove" from="quantityReserved &gt; remainingQuantity ? remainingQuantity : quantityReserved"/>
                     <if condition="quantityToMove &gt; 0.0">
                         <service-call name="mantle.product.AssetServices.move#AssetReservation" out-map="moveArOut" out-map-add-to-existing="false"
-                                in-map="[assetId:assetId, assetReservationId:assetRes.assetReservationId, quantity:quantityToMove]"/>
+                                in-map="{assetId:assetId, assetReservationId:assetRes.assetReservationId, quantity:quantityToMove}"/>
                         <set field="remainingQuantity" from="remainingQuantity - quantityToMove"/>
                     </if>
                     <if condition="remainingQuantity == 0.0"><break/></if>
@@ -1508,14 +1508,14 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="assetId"/></entity-find>
             <iterate list="assetReservationList" entry="assetReservation">
                 <service-call name="mantle.product.AssetServices.check#AssetReservationValid"
-                        in-map="[assetReservationId:assetReservation.assetReservationId,
-                            assetReservation:assetReservation, asset:asset]"/>
+                        in-map="{assetReservationId:assetReservation.assetReservationId,
+                            assetReservation:assetReservation, asset:asset}"/>
             </iterate>
 
             <!-- refresh Asset, check ATP -->
             <entity-find-one entity-name="mantle.product.asset.Asset" value-field="asset" for-update="true"/>
             <if condition="asset.availableToPromiseTotal &gt; 0.0">
-                <service-call name="mantle.product.AssetServices.reserve#IncreasedAsset" in-map="[assetId:assetId]"/>
+                <service-call name="mantle.product.AssetServices.reserve#IncreasedAsset" in-map="{assetId:assetId}"/>
             </if>
         </actions>
     </service>
@@ -1570,7 +1570,7 @@ along with this software (see the LICENSE.md file). If not, see
                             <script>facilityIdSet.add(productStore.inventoryFacilityId)</script></if>
                         <entity-find entity-name="mantle.product.store.ProductStoreFacility" list="productStoreFacilityList">
                             <date-filter/><econdition field-name="productStoreId"/></entity-find>
-                        <if condition="productStoreFacilityList">
+                        <if condition="(productStoreFacilityList?.length > 0)">
                             <script>facilityIdSet.addAll(productStoreFacilityList*.facilityId)</script></if>
 
                         <if condition="!facilityIdSet.contains(asset.facilityId)">
@@ -1591,8 +1591,8 @@ along with this software (see the LICENSE.md file). If not, see
                     <if condition="orderPart == null"><set field="orderPart" from="orderItem.part"/></if>
                     <if condition="orderHeader == null"><set field="orderHeader" from="orderItem.header"/></if>
                     <service-call name="mantle.product.AssetServices.get#AssetPools" out-map="poolsOut"
-                            in-map="[productStoreId:orderHeader.productStoreId, vendorPartyId:orderPart?.vendorPartyId,
-                                customerPartyId:orderPart?.customerPartyId]"/>
+                            in-map="{productStoreId:orderHeader.productStoreId, vendorPartyId:orderPart?.vendorPartyId,
+                                customerPartyId:orderPart?.customerPartyId}"/>
                     <set field="assetPoolIdSet" from="poolsOut.assetPoolIdSet"/>
                     <if condition="!assetPoolIdSet || !assetPoolIdSet.contains(asset.assetPoolId)">
                         <log message="AssetReservation ${assetReservationId} for OrderItem ${orderItem.orderId}:${orderItem.orderItemSeqId} is no longer valid for Asset ${asset.assetId} with assetPoolId ${asset.assetPoolId}, available pools ${assetPoolIdSet}"/>
@@ -1606,13 +1606,13 @@ along with this software (see the LICENSE.md file). If not, see
 
                 <!-- reservation not valid, delete and try to re-reserve for OrderItem -->
                 <service-call name="mantle.product.AssetServices.reduce#AssetReservation"
-                        in-map="[assetReservationId:assetReservationId, reserveIncreasedAsset:true]"/>
+                        in-map="{assetReservationId:assetReservationId, reserveIncreasedAsset:true}"/>
                 <if condition="!assetReservation.orderId || !assetReservation.orderItemSeqId"><then>
                     <log level="warn" message="AssetReservation ${assetReservationId} has no order item and is no longer valid but cannot re-reserve"/>
                 </then><else>
                     <service-call name="mantle.product.AssetServices.reserve#AssetForOrderItem"
-                            in-map="[orderId:assetReservation.orderId, orderItemSeqId:assetReservation.orderItemSeqId,
-                                skipAssetIds:[asset.assetId]]"/>
+                            in-map="{orderId:assetReservation.orderId, orderItemSeqId:assetReservation.orderItemSeqId,
+                                skipAssetIds:[asset.assetId]}"/>
                 </else></if>
             </if>
         </actions>
@@ -1641,10 +1641,10 @@ along with this software (see the LICENSE.md file). If not, see
             <iterate list="assetReservationList" entry="assetReservation">
                 <service-call name="mantle.product.AssetServices.check#AssetReservationValid"
                         out-map="checkValidOut" out-map-add-to-existing="false"
-                        in-map="[assetReservationId:assetReservation.assetReservationId]"/>
+                        in-map="{assetReservationId:assetReservation.assetReservationId}"/>
                 <if condition="checkValidOut.reservationInvalid">
                     <set field="invalidReservationCount" from="invalidReservationCount + 1"/>
-                    <set field="quantityNotValid" from="quantityNotValid + (checkValidOut.quantityNotValid ?: 0.0)"/>
+                    <set field="quantityNotValid" from="quantityNotValid + (checkValidOut.quantityNotValid || 0.0)"/>
                 </if>
             </iterate>
 
@@ -1657,8 +1657,8 @@ along with this software (see the LICENSE.md file). If not, see
             <iterate list="assetList" entry="asset">
                 <service-call name="mantle.product.AssetServices.reserve#IncreasedAsset"
                         out-map="reserveOut" out-map-add-to-existing="false"
-                        in-map="[assetId:asset.assetId]"/>
-                <set field="quantityMoved" from="quantityMoved + (reserveOut.quantityMoved ?: 0.0)"/>
+                        in-map="{assetId:asset.assetId}"/>
+                <set field="quantityMoved" from="quantityMoved + (reserveOut.quantityMoved || 0.0)"/>
             </iterate>
 
             <if condition="invalidReservationCount">
@@ -1731,10 +1731,10 @@ along with this software (see the LICENSE.md file). If not, see
 
                     <!-- NOTE in this case we want to reduce#AssetReservation but not reserveIncreasedAsset so that still available for the displace -->
                     <service-call name="mantle.product.AssetServices.reduce#AssetReservation" out-map="reduceArOut" out-map-add-to-existing="false"
-                            in-map="[assetReservationId:resToMove.assetReservationId, quantityToDeduct:curMoveQuantity, reserveIncreasedAsset:false]"/>
+                            in-map="{assetReservationId:resToMove.assetReservationId, quantityToDeduct:curMoveQuantity, reserveIncreasedAsset:false}"/>
 
                     <service-call name="mantle.product.AssetServices.reserve#AssetForOrderItem"
-                            in-map="[orderId:resToMove.orderId, orderItemSeqId:resToMove.orderItemSeqId, skipAssetIds:[assetId]]"/>
+                            in-map="{orderId:resToMove.orderId, orderItemSeqId:resToMove.orderItemSeqId, skipAssetIds:[assetId]}"/>
 
                     <set field="resQuantityRemaining" from="resQuantityRemaining - reduceArOut.quantityDeducted"/>
                 </iterate>
@@ -1755,7 +1755,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="curReduceQuantity" from="resQuantityToClear &gt; oiOtherRes.quantityNotIssued ? oiOtherRes.quantityNotIssued : resQuantityToClear"/>
                     <!-- NOTE in this case we want to reduce#AssetReservation but not reserveIncreasedAsset so that still available for the displace -->
                     <service-call name="mantle.product.AssetServices.reduce#AssetReservation" out-map="reduceArOut"
-                            in-map="[assetReservationId:oiOtherRes.assetReservationId, quantityToDeduct:curReduceQuantity, reserveIncreasedAsset:false]"/>
+                            in-map="{assetReservationId:oiOtherRes.assetReservationId, quantityToDeduct:curReduceQuantity, reserveIncreasedAsset:false}"/>
                     <set field="resQuantityToClear" from="resQuantityToClear - reduceArOut.quantityDeducted"/>
                 </iterate>
             </if>
@@ -1783,8 +1783,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <field-map field-name="assetId"/></entity-find-one>
 
             <!-- NOTE: AssetDetail must be created before potentially changing the status below; in condition below it uses the prior asset record (ie not refreshed from DB to update QOH) -->
-            <service-call name="create#mantle.product.asset.AssetDetail" in-map="context +
-                    [quantityOnHandDiff:quantityDiff, availableToPromiseDiff:quantityDiff]"/>
+            <service-call name="create#mantle.product.asset.AssetDetail" in-map="Object.assign({}, context, {quantityOnHandDiff:quantityDiff, availableToPromiseDiff:quantityDiff})"/>
 
             <!-- if this is serialized inventory update status and set ownerPartyId to customer party -->
             <if condition="asset.serialNumber &amp;&amp; quantityDiff == -1.0 &amp;&amp; (asset.quantityOnHandTotal == 1.0 || asset.hasQuantity == 'N')">
@@ -1799,12 +1798,12 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="ownerPartyId" from="shipment?.toPartyId"/>
                 </if>
                 <service-call name="update#mantle.product.asset.Asset"
-                        in-map="[assetId:asset.assetId, statusId:'AstDelivered', ownerPartyId:(ownerPartyId ?: asset.ownerPartyId)]"/>
+                        in-map="{assetId:asset.assetId, statusId:'AstDelivered', ownerPartyId:(ownerPartyId || asset.ownerPartyId)}"/>
             </if>
 
             <!-- reserve the newly available Asset, if needed -->
             <if condition="quantityDiff &gt; 0.0 &amp;&amp; asset.productId">
-                <service-call name="mantle.product.AssetServices.reserve#IncreasedAsset" in-map="[assetId:assetId]"/></if>
+                <service-call name="mantle.product.AssetServices.reserve#IncreasedAsset" in-map="{assetId:assetId}"/></if>
 
             <!-- on decrease adjust reservations down and re-reserve -->
             <if condition="quantityDiff &lt; 0.0 &amp;&amp; asset.productId">
@@ -1835,9 +1834,9 @@ along with this software (see the LICENSE.md file). If not, see
 
                         <!-- NOTE could reserveIncreasedAsset here but would do no good, point is to bring ATP from negative to zero -->
                         <service-call name="mantle.product.AssetServices.reduce#AssetReservation" out-map="reduceArOut" out-map-add-to-existing="false"
-                                in-map="[assetReservationId:res.assetReservationId, quantityToDeduct:quantityToReduce, reserveIncreasedAsset:false]"/>
+                                in-map="{assetReservationId:res.assetReservationId, quantityToDeduct:quantityToReduce, reserveIncreasedAsset:false}"/>
                         <service-call name="mantle.product.AssetServices.reserve#AssetForOrderItem"
-                                in-map="[orderId:res.orderId, orderItemSeqId:res.orderItemSeqId, skipAssetIds:[assetId]]"/>
+                                in-map="{orderId:res.orderId, orderItemSeqId:res.orderItemSeqId, skipAssetIds:[assetId]}"/>
 
                         <set field="reduceQuantityRemaining" from="reduceQuantityRemaining - reduceArOut.quantityDeducted"/>
                     </iterate>
@@ -1925,32 +1924,32 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="orderId" from="assetReservation.orderId" ignore-if-empty="true"/>
                 <econdition field-name="orderItemSeqId" from="assetReservation.orderItemSeqId" ignore-if-empty="true"/>
             </entity-find>
-            <if condition="existingIssuanceList"><then>
+            <if condition="(existingIssuanceList?.length > 0)"><then>
                 <!-- add to existing issuance -->
                 <set field="existingIssuance" from="existingIssuanceList[0]"/>
                 <set field="assetIssuanceId" from="existingIssuance.assetIssuanceId"/>
                 <service-call name="update#mantle.product.issuance.AssetIssuance"
-                        in-map="[assetIssuanceId:assetIssuanceId, quantity:(existingIssuance.quantity + quantity),
-                            invoiceId:(existingIssuance.invoiceId ?: shipmentItemSource?.invoiceId),
-                            invoiceItemSeqId:(existingIssuance.invoiceItemSeqId ?: shipmentItemSource?.invoiceItemSeqId)]"/>
+                        in-map="{assetIssuanceId:assetIssuanceId, quantity:(existingIssuance.quantity + quantity),
+                            invoiceId:(existingIssuance.invoiceId || shipmentItemSource?.invoiceId),
+                            invoiceItemSeqId:(existingIssuance.invoiceItemSeqId || shipmentItemSource?.invoiceItemSeqId)}"/>
             </then><else>
                 <!-- create an issuance, get back assetIssuanceId -->
                 <service-call name="create#mantle.product.issuance.AssetIssuance" out-map="context"
-                        in-map="[assetId:assetReservation.assetId, assetReservationId:assetReservation.assetReservationId,
+                        in-map="{assetId:assetReservation.assetId, assetReservationId:assetReservation.assetReservationId,
                             orderId:assetReservation.orderId, orderItemSeqId:assetReservation.orderItemSeqId,
                             invoiceId:shipmentItemSource?.invoiceId, invoiceItemSeqId:shipmentItemSource?.invoiceItemSeqId,
                             shipmentId:shipmentId, shipmentItemSourceId:shipmentItemSourceId,
                             workEffortId:workEffortId, productId:assetReservation.productId,
-                            issuedDate:issuedDate, issuedByUserId:ec.user.userId, quantity:quantity]"/>
+                            issuedDate:issuedDate, issuedByUserId:ec.user.userId, quantity:quantity}"/>
             </else></if>
 
             <!-- create AssetDetail to decrement quantityOnHand -->
             <!-- NOTE: no availableToPromiseDiff because that was modified during the reservation -->
-            <service-call name="create#mantle.product.asset.AssetDetail" in-map="[assetId:assetReservation.assetId,
+            <service-call name="create#mantle.product.asset.AssetDetail" in-map="{assetId:assetReservation.assetId,
                     effectiveDate:issuedDate, quantityOnHandDiff:-quantity,
                     assetReservationId:assetReservation.assetReservationId, shipmentId:shipmentId, workEffortId:workEffortId,
                     productId:assetReservation.productId, assetIssuanceId:assetIssuanceId,
-                    orderId:assetReservation.orderId, orderItemSeqId:assetReservation.orderItemSeqId]"/>
+                    orderId:assetReservation.orderId, orderItemSeqId:assetReservation.orderItemSeqId}"/>
 
             <set field="assetReservation.quantityNotIssued" from="assetReservation.quantityNotIssued - quantity"/>
             <if condition="assetReservation.quantityNotIssued == 0.0"><then>
@@ -1969,7 +1968,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <if condition="orderPart?.customerPartyId"><set field="ownerPartyId" from="orderPart.customerPartyId"/></if>
                 </if>
                 <service-call name="update#mantle.product.asset.Asset"
-                        in-map="[assetId:asset.assetId, statusId:'AstDelivered', ownerPartyId:ownerPartyId]"/>
+                        in-map="{assetId:asset.assetId, statusId:'AstDelivered', ownerPartyId:ownerPartyId}"/>
             </if>
         </actions>
     </service>
@@ -1993,7 +1992,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- get facilityId from SRS.originFacilityId -->
             <entity-find entity-name="mantle.shipment.ShipmentRouteSegment" list="srsList" limit="1">
                 <econdition field-name="shipmentId"/><order-by field-name="shipmentRouteSegmentSeqId"/></entity-find>
-            <if condition="srsList"><set field="facilityId" from="srsList[0].originFacilityId"/></if>
+            <if condition="(srsList?.length > 0)"><set field="facilityId" from="srsList[0].originFacilityId"/></if>
 
             <if condition="orderId &amp;&amp; orderItemSeqId"><then>
                 <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
@@ -2028,8 +2027,8 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.facility.Facility" value-field="facility" cache="true"/>
             <if condition="facility == null"><return error="true" message="Could not find facility to issue asset from for shipment ${shipmentId}"/></if>
 
-            <set field="baseMap" from="[productId:productId, orderId:orderId, orderItemSeqId:orderItemSeqId,
-                    invoiceId:invoiceId, invoiceItemSeqId:invoiceItemSeqId, shipmentId:shipmentId, shipmentItemSourceId:shipmentItemSourceId]"/>
+            <set field="baseMap" from="{productId:productId, orderId:orderId, orderItemSeqId:orderItemSeqId,
+                    invoiceId:invoiceId, invoiceItemSeqId:invoiceItemSeqId, shipmentId:shipmentId, shipmentItemSourceId:shipmentItemSourceId}"/>
 
             <set field="ownerPartyId" from="productStore?.organizationPartyId"/>
             <!-- no ProductStore organizationPartyId? try OrderPart.vendorPartyId (for sales orders should be an internal org) -->
@@ -2052,7 +2051,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- if assetId specified add it to the list -->
             <if condition="passedAsset != null"><script>assetList.add(0, passedAsset)</script></if>
 
-            <if condition="assetList"><then>
+            <if condition="(assetList?.length > 0)"><then>
                 <!-- reserve by availableToPromiseTotal (no reservation here, but respect others) -->
                 <set field="quantityRemaining" from="quantity"/>
                 <iterate list="assetList" entry="asset">
@@ -2083,11 +2082,11 @@ along with this software (see the LICENSE.md file). If not, see
                             <econdition field-name="invoiceId" from="baseMap.invoiceId" ignore-if-empty="true"/>
                             <econdition field-name="invoiceItemSeqId" from="baseMap.invoiceItemSeqId" ignore-if-empty="true"/>
                         </entity-find>
-                        <if condition="existingIssuanceList"><then>
+                        <if condition="(existingIssuanceList?.length > 0)"><then>
                             <!-- add to existing issuance -->
                             <set field="existingIssuance" from="existingIssuanceList[0]"/>
                             <service-call name="update#mantle.product.issuance.AssetIssuance"
-                                    in-map="[assetIssuanceId:existingIssuance.assetIssuanceId, quantity:(existingIssuance.quantity + quantityToIssue)]"/>
+                                    in-map="{assetIssuanceId:existingIssuance.assetIssuanceId, quantity:(existingIssuance.quantity + quantityToIssue)}"/>
                             <service-call name="mantle.product.AssetServices.change#AssetQuantity" in-map="baseMap + [assetId:asset.assetId,
                                 effectiveDate:issuedDate, quantityDiff:-quantityToIssue, assetIssuanceId:existingIssuance.assetIssuanceId]"/>
                         </then><else>
@@ -2117,11 +2116,11 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="invoiceId" from="baseMap.invoiceId" ignore-if-empty="true"/>
                         <econdition field-name="invoiceItemSeqId" from="baseMap.invoiceItemSeqId" ignore-if-empty="true"/>
                     </entity-find>
-                    <if condition="existingIssuanceList"><then>
+                    <if condition="(existingIssuanceList?.length > 0)"><then>
                         <!-- add to existing issuance -->
                         <set field="existingIssuance" from="existingIssuanceList[0]"/>
                         <service-call name="update#mantle.product.issuance.AssetIssuance"
-                                in-map="[assetIssuanceId:existingIssuance.assetIssuanceId, quantity:(existingIssuance.quantity + quantityRemaining)]"/>
+                                in-map="{assetIssuanceId:existingIssuance.assetIssuanceId, quantity:(existingIssuance.quantity + quantityRemaining)}"/>
                         <service-call name="mantle.product.AssetServices.change#AssetQuantity" in-map="baseMap + [assetId:asset.assetId,
                                 effectiveDate:issuedDate, quantityDiff:-quantityRemaining, assetIssuanceId:existingIssuance.assetIssuanceId]"/>
                     </then><else>
@@ -2140,10 +2139,10 @@ along with this software (see the LICENSE.md file). If not, see
 
                 <!-- no asset... create a shell one to record the issuance and detail against -->
                 <service-call name="create#mantle.product.asset.Asset" out-map="context"
-                        in-map="[assetTypeEnumId:'AstTpInventory', hasQuantity:'Y', statusId:'AstAvailable',
+                        in-map="{assetTypeEnumId:'AstTpInventory', hasQuantity:'Y', statusId:'AstAvailable',
                             productId:productId, facilityId:productStore.inventoryFacilityId,
                             ownerPartyId:productStore?.organizationPartyId, receivedDate:ec.user.nowTimestamp,
-                            availableToPromiseTotal:0, quantityOnHandTotal: 0]"/>
+                            availableToPromiseTotal:0, quantityOnHandTotal: 0}"/>
                 <service-call name="create#mantle.product.issuance.AssetIssuance" out-map="issueOut"
                         in-map="baseMap + [assetId:assetId, issuedDate:issuedDate, issuedByUserId:ec.user.userId, quantity:quantity]"/>
                 <!-- create AssetDetail to decrement QOH and ATP -->
@@ -2179,7 +2178,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <if condition="quantity &amp;&amp; quantityUomId"><then>
                 <service-call name="mantle.shipment.ShipmentServices.convert#ProductBoxQuantity" out-map="cvtQty"
-                        in-map="[productId:asset.productId, originalQuantity:quantity, originalQuantityUomId:quantityUomId]"/>
+                        in-map="{productId:asset.productId, originalQuantity:quantity, originalQuantityUomId:quantityUomId}"/>
                 <set field="quantity" from="cvtQty.convertedQuantity"/>
             </then><else-if condition="!quantity">
                 <set field="quantity" from="asset.availableToPromiseTotal"/>
@@ -2204,10 +2203,10 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="workEffortId"/><econdition field-name="productId" from="asset.productId"/>
                 <econdition field-name="typeEnumId" value="WeptConsume"/>
             </entity-find>
-            <if condition="!consumeProductList">
+            <if condition="!consumeProductList?.length">
                 <if condition="noConsumeProduct == 'add'"><then>
-                    <service-call name="create#mantle.work.effort.WorkEffortProduct" in-map="[workEffortId:workEffortId,
-                            productId:asset.productId, typeEnumId:'WeptConsume', estimatedQuantity:quantity]"/>
+                    <service-call name="create#mantle.work.effort.WorkEffortProduct" in-map="{workEffortId:workEffortId,
+                            productId:asset.productId, typeEnumId:'WeptConsume', estimatedQuantity:quantity}"/>
                 </then><else-if condition="noConsumeProduct != 'ignore'">
                     <entity-find-one entity-name="mantle.product.Product" value-field="product">
                         <field-map field-name="productId" from="asset.productId"/></entity-find-one>
@@ -2221,10 +2220,10 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="workEffortId"/><econdition field-name="facilityId" from="asset.originFacilityId"/>
                     <econdition field-name="typeEnumId" value="WeftOrigin"/>
                 </entity-find>
-                <if condition="!originFacilityList">
+                <if condition="!originFacilityList?.length">
                     <if condition="noOriginFacility == 'add'"><then>
-                        <service-call name="create#mantle.work.effort.WorkEffortFacility" in-map="[workEffortId:workEffortId,
-                            facilityId:asset.originFacilityId, typeEnumId:'WeftOrigin']"/>
+                        <service-call name="create#mantle.work.effort.WorkEffortFacility" in-map="{workEffortId:workEffortId,
+                            facilityId:asset.originFacilityId, typeEnumId:'WeftOrigin'}"/>
                     </then><else-if condition="noOriginFacility != 'ignore'">
                         <entity-find-one entity-name="mantle.facility.Facility" value-field="facility">
                             <field-map field-name="facilityId" from="asset.originFacilityId"/></entity-find-one>
@@ -2235,7 +2234,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <check-errors/>
 
-            <set field="baseMap" from="[workEffortId:workEffortId, assetId:asset.assetId, productId:asset.productId]"/>
+            <set field="baseMap" from="{workEffortId:workEffortId, assetId:asset.assetId, productId:asset.productId}"/>
 
             <!-- look for existing AssetIssuance to add to -->
             <entity-find entity-name="mantle.product.issuance.AssetIssuance" list="existingIssuanceList">
@@ -2248,7 +2247,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="invoiceId" ignore-if-empty="true"/>
                 <econdition field-name="invoiceItemSeqId" ignore-if-empty="true"/>
             </entity-find>
-            <if condition="existingIssuanceList"><then>
+            <if condition="(existingIssuanceList?.length > 0)"><then>
                 <!-- add to existing issuance -->
                 <set field="existingIssuance" from="existingIssuanceList[0]"/>
                 <service-call name="update#mantle.product.issuance.AssetIssuance" in-map="baseMap +
@@ -2287,7 +2286,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="curQuantity" from="asset.availableToPromiseTotal &gt; remainingQuantity ? remainingQuantity : asset.availableToPromiseTotal"/>
                 <if condition="curQuantity">
                     <service-call name="mantle.product.AssetServices.issue#AssetToWorkEffort"
-                            in-map="[workEffortId:workEffortId, assetId:asset.assetId, issuedDate:issuedDate, quantity:curQuantity]"/>
+                            in-map="{workEffortId:workEffortId, assetId:asset.assetId, issuedDate:issuedDate, quantity:curQuantity}"/>
                     <set field="remainingQuantity" from="remainingQuantity - curQuantity"/>
                     <if condition="remainingQuantity == 0"><break/></if>
                 </if>
@@ -2352,15 +2351,15 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- compile set of assetPoolId values -->
             <service-call name="mantle.product.AssetServices.get#AssetPools" out-map="poolsOut"
-                    in-map="[productStoreId:productStoreId, vendorPartyId:vendorPartyId, customerPartyId:customerPartyId]"/>
+                    in-map="{productStoreId:productStoreId, vendorPartyId:vendorPartyId, customerPartyId:customerPartyId}"/>
             <set field="assetPoolIdSet" from="poolsOut.assetPoolIdSet"/>
 
             <if condition="workEffortOnly"><then>
-                <set field="baseMap" from="[workEffortId:workEffortId]"/>
+                <set field="baseMap" from="{workEffortId:workEffortId}"/>
             </then><else>
-                <set field="baseMap" from="[shipmentId:shipmentId, shipmentItemSourceId:shipmentItemSourceId,
+                <set field="baseMap" from="{shipmentId:shipmentId, shipmentItemSourceId:shipmentItemSourceId,
                         orderId:shipmentItemSource.orderId, orderItemSeqId:shipmentItemSource.orderItemSeqId,
-                        invoiceId:shipmentItemSource.invoiceId, invoiceItemSeqId:shipmentItemSource.invoiceItemSeqId]"/>
+                        invoiceId:shipmentItemSource.invoiceId, invoiceItemSeqId:shipmentItemSource.invoiceItemSeqId}"/>
             </else></if>
 
             <!-- start with available inventory -->
@@ -2403,7 +2402,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <if condition="curQuantity">
                         <!-- handle reservations, moving other reservations as needed to handle current quantity assumed to be physically present -->
                         <service-call name="mantle.product.AssetServices.displace#AssetReservations"
-                                in-map="[assetId:asset.assetId, quantity:curQuantity]"/>
+                                in-map="{assetId:asset.assetId, quantity:curQuantity}"/>
 
                         <service-call name="mantle.product.AssetServices.issue#Asset"
                                 in-map="baseMap + [quantity:curQuantity, issuedDate:issuedDate, assetId:asset.assetId]"/>
@@ -2425,15 +2424,15 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="statusId" value="AstAvailable"/>
                         <order-by field-name="-receivedDate,-assetId"/>
                     </entity-find>
-                    <if condition="recentAssetList"><then>
+                    <if condition="(recentAssetList?.length > 0)"><then>
                         <service-call name="mantle.product.AssetServices.issue#Asset"
                                 in-map="baseMap + [quantity:quantityRemaining, issuedDate:issuedDate, assetId:recentAssetList[0].assetId]"/>
                         <set field="quantityRemaining" from="0.0"/>
                     </then><else>
                         <!-- no asset... create a shell one to record the reservation and detail against -->
                         <service-call name="mantle.product.AssetServices.create#ProductAssetAdHoc" out-map="createAssetOut"
-                                in-map="[productId:productId, facilityId:facilityId, ownerPartyId:vendorPartyId,
-                                    createdDate:nowTimestamp]"/>
+                                in-map="{productId:productId, facilityId:facilityId, ownerPartyId:vendorPartyId,
+                                    createdDate:nowTimestamp}"/>
                         <service-call name="mantle.product.AssetServices.issue#Asset"
                                 in-map="baseMap + [quantity:quantityRemaining, issuedDate:issuedDate, assetId:createAssetOut.assetId]"/>
                         <set field="quantityRemaining" from="0.0"/>
@@ -2461,16 +2460,16 @@ along with this software (see the LICENSE.md file). If not, see
             <iterate list="issuanceList" entry="issuance">
                 <!-- cancel original issuance quantity -->
                 <service-call name="update#mantle.product.issuance.AssetIssuance"
-                        in-map="[assetIssuanceId:issuance.assetIssuanceId, quantityCancelled:issuance.quantity, quantity:0]"/>
+                        in-map="{assetIssuanceId:issuance.assetIssuanceId, quantityCancelled:issuance.quantity, quantity:0}"/>
                 <!-- create new issuance -->
                 <filter-map-list list="orderItemList" to-list="prodOrderItemList">
                     <field-map field-name="productId" from="issuance.productId"/></filter-map-list>
                 <if condition="!prodOrderItemList">
                     <return error="true" message="In move issuance to new shipment no Order Item found on order ${newOrderId} for product ${issuance.productId}"/></if>
                 <service-call name="create#mantle.product.issuance.AssetIssuance"
-                        in-map="[assetId:issuance.assetId, quantity:issuance.quantity, orderId:newOrderId,
+                        in-map="{assetId:issuance.assetId, quantity:issuance.quantity, orderId:newOrderId,
                             orderItemSeqId:prodOrderItemList[0].orderItemSeqId, shipmentId:newShipmentId,
-                            productId:issuance.productId, issuedDate:issuedDate, issuedByUserId:ec.user.userId]"/>
+                            productId:issuance.productId, issuedDate:issuedDate, issuedByUserId:ec.user.userId}"/>
 
                 <!-- TODO check GL inventory transactions on cancel, direct issuance create; need any since this is a direct replacement? -->
             </iterate>
@@ -2500,10 +2499,10 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="assetIssuance.invoiceId">
                 <return error="true" message="Cannot cancel issuance ${assetIssuanceId}, already on invoice ${assetIssuance.invoiceId}"/></if>
 
-            <set field="quantityCancelled" from="(assetIssuance.quantityCancelled ?: 0.0) + quantityToCancel"/>
+            <set field="quantityCancelled" from="(assetIssuance.quantityCancelled || 0.0) + quantityToCancel"/>
             <set field="quantityRemaining" from="assetIssuance.quantity - quantityToCancel"/>
-            <service-call name="update#mantle.product.issuance.AssetIssuance" in-map="[assetIssuanceId:assetIssuanceId,
-                    quantity:quantityRemaining, quantityCancelled:quantityCancelled]"/>
+            <service-call name="update#mantle.product.issuance.AssetIssuance" in-map="{assetIssuanceId:assetIssuanceId,
+                    quantity:quantityRemaining, quantityCancelled:quantityCancelled}"/>
 
             <!-- NOTE: used to look at "assetIssuance.issuedDate ?:" but better to stick with actual time for easier tracking and figuring out time lines -->
             <set field="cancelDate" from="ec.user.nowTimestamp"/>
@@ -2513,22 +2512,22 @@ along with this software (see the LICENSE.md file). If not, see
                     <field-map field-name="assetReservationId" from="assetIssuance.assetReservationId"/></entity-find-one>
             </if>
             <!-- create AssetDetail to increment QOH and if there is no reservation also ATP -->
-            <service-call name="create#mantle.product.asset.AssetDetail" in-map="[assetId:assetIssuance.assetId,
+            <service-call name="create#mantle.product.asset.AssetDetail" in-map="{assetId:assetIssuance.assetId,
                         effectiveDate:cancelDate, quantityOnHandDiff:quantityToCancel,
                         availableToPromiseDiff:(oldReservation != null ? 0.0 : quantityToCancel),
                         productId:assetIssuance.productId, assetIssuanceId:assetIssuanceId,
                         shipmentId:assetIssuance.shipmentId, workEffortId:assetIssuance.workEffortId,
-                        assetMaintenanceId:assetIssuance.assetMaintenanceId]"/>
+                        assetMaintenanceId:assetIssuance.assetMaintenanceId}"/>
             <if condition="oldReservation != null"><then>
                 <!-- if issuance was from a reservation increase not issued quantity -->
-                <set field="oldReservation.quantityNotIssued" from="(oldReservation.quantityNotIssued ?: 0.0) + quantityToCancel"/>
+                <set field="oldReservation.quantityNotIssued" from="(oldReservation.quantityNotIssued || 0.0) + quantityToCancel"/>
                 <entity-update value-field="oldReservation"/>
             </then><else>
                 <if condition="reserveAsset &amp;&amp; (orderId || assetIssuance.orderId)">
                     <!-- no reservation, try reserve for order item using this asset with freshly available inventory -->
                     <service-call name="mantle.product.AssetServices.reserve#AssetForOrderItem"
-                            in-map="[orderId:(orderId ?: assetIssuance.orderId), orderItemSeqId:(orderItemSeqId ?: assetIssuance.orderItemSeqId),
-                                assetId:assetIssuance.assetId]"/>
+                            in-map="{orderId:(orderId || assetIssuance.orderId), orderItemSeqId:(orderItemSeqId || assetIssuance.orderItemSeqId),
+                                assetId:assetIssuance.assetId}"/>
                 </if>
             </else></if>
 
@@ -2544,7 +2543,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="oldValueText" operator="is-not-null"/>
                     <order-by field-name="-changedDate"/>
                 </entity-find>
-                <if condition="ownerAuditLogList"><then>
+                <if condition="(ownerAuditLogList?.length > 0)"><then>
                     <set field="oldOwnerPartyId" from="ownerAuditLogList[0].oldValueText"/>
                 </then><else>
                     <message type="warning">No prior Owner Party for Asset ${asset.assetId} while canceling issuance ${assetIssuanceId}, leaving current owner</message>
@@ -2559,15 +2558,15 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="oldValueText" operator="is-not-null"/>
                     <order-by field-name="-changedDate"/>
                 </entity-find>
-                <if condition="statusAuditLogList"><then>
+                <if condition="(statusAuditLogList?.length > 0)"><then>
                     <set field="oldStatusId" from="statusAuditLogList[0].oldValueText"/>
                 </then><else>
                     <message type="warning">No prior Status for Asset ${asset.assetId} while canceling issuance ${assetIssuanceId}, leaving current status</message>
                 </else></if>
 
-                <if condition="ownerAuditLogList || statusAuditLogList">
+                <if condition="(ownerAuditLogList?.length > 0) || (statusAuditLogList?.length > 0)">
                     <service-call name="update#mantle.product.asset.Asset"
-                            in-map="[assetId:asset.assetId, statusId:oldStatusId, ownerPartyId:oldOwnerPartyId]"/>
+                            in-map="{assetId:asset.assetId, statusId:oldStatusId, ownerPartyId:oldOwnerPartyId}"/>
                 </if>
             </if>
         </actions>
@@ -2584,7 +2583,7 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-update value-field="assetIssuance"/>
             <!-- if issuedDate was changed then after updating the AssetIssuance record repost the GL TX -->
             <service-call name="mantle.ledger.AssetAutoPostServices.repost#AssetIssuance"
-                    in-map="[assetIssuanceId:assetIssuance.assetIssuanceId]"/>
+                    in-map="{assetIssuanceId:assetIssuance.assetIssuanceId}"/>
             <!-- AssetDetail.effectiveDate is based on issuedDate, so update those too -->
             <entity-find entity-name="mantle.product.asset.AssetDetail" list="assetDetailList" for-update="true">
                 <econdition field-name="assetIssuanceId"/></entity-find>
@@ -2663,8 +2662,8 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.facility.Facility" value-field="facility"><field-map field-name="facilityId"/></entity-find-one>
 
             <!-- set type and class from product if not passed in -->
-            <set field="assetTypeEnumId" from="assetTypeEnumId ?: (product.assetTypeEnumId ?: 'AstTpInventory')"/>
-            <set field="classEnumId" from="classEnumId ?: product.assetClassEnumId"/>
+            <set field="assetTypeEnumId" from="assetTypeEnumId || (product.assetTypeEnumId || 'AstTpInventory')"/>
+            <set field="classEnumId" from="classEnumId || product.assetClassEnumId"/>
 
             <!-- get ownerPartyId from OrderPart.customerPartyId if needed (who bought it) -->
             <if condition="!ownerPartyId &amp;&amp; orderItem">
@@ -2713,7 +2712,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="hasQuantity" from="quantity > 1.0 ? 'Y' : 'N'"/>
             </else></if>
 
-            <set field="assetName" from="assetName ?: orderItem?.itemDescription"/>
+            <set field="assetName" from="assetName || orderItem?.itemDescription"/>
 
             <if condition="expectedEndOfLife == null"><set field="expectedEndOfLife" from="expirationDate"/></if>
 
@@ -2725,7 +2724,7 @@ along with this software (see the LICENSE.md file). If not, see
             </then><else-if condition="lotNumber">
                 <entity-find entity-name="mantle.product.asset.Lot" list="existingLots">
                     <econdition field-name="lotNumber"/><econdition field-name="mfgPartyId"/></entity-find>
-                <if condition="existingLots"><then>
+                <if condition="(existingLots?.length > 0)"><then>
                     <set field="lotId" from="existingLots[0].lotId"/>
                     <if condition="expectedEndOfLife == null"><set field="expectedEndOfLife" from="existingLots[0].expirationDate"/></if>
                 </then><else>
@@ -2735,7 +2734,7 @@ along with this software (see the LICENSE.md file). If not, see
                     </if>
                     <if condition="expirationDate == null"><set field="expirationDate" from="expectedEndOfLife"/></if>
                     <service-call name="create#mantle.product.asset.Lot" out-map="context"
-                            in-map="[lotNumber:lotNumber, mfgPartyId:mfgPartyId, manufacturedDate:manufacturedDate, expirationDate:expirationDate]"/>
+                            in-map="{lotNumber:lotNumber, mfgPartyId:mfgPartyId, manufacturedDate:manufacturedDate, expirationDate:expirationDate}"/>
                 </else></if>
             </else-if></if>
 
@@ -2743,45 +2742,45 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="!containerId &amp;&amp; (containerTypeEnumId || containerSerialNumber)">
                 <!-- will put containerId for the new record in the context -->
                 <service-call name="create#mantle.product.asset.Container" out-map="context"
-                        in-map="[containerTypeEnumId:containerTypeEnumId, serialNumber:containerSerialNumber,
-                            facilityId:facilityId, locationSeqId:locationSeqId, geoPointId:geoPointId]"/>
+                        in-map="{containerTypeEnumId:containerTypeEnumId, serialNumber:containerSerialNumber,
+                            facilityId:facilityId, locationSeqId:locationSeqId, geoPointId:geoPointId}"/>
             </if>
 
             <!-- have originalQuantity default to quantity received -->
-            <set field="originalQuantity" from="originalQuantity ?: quantity"/>
+            <set field="originalQuantity" from="originalQuantity || quantity"/>
 
             <!-- create or update the Asset record -->
             <if condition="!assetId"><then>
                 <!-- TODO: if this has a workEffortId and not an orderId get acquireCost from WorkEffort based on cost? -->
                 <service-call name="create#mantle.product.asset.Asset" out-map="context"
-                        in-map="context + [quantityOnHandTotal:0, availableToPromiseTotal:0,
-                            acquiredDate:(orderHeader?.placedDate ?: ec.user.nowTimestamp),
+                        in-map="Object.assign({}, context, {quantityOnHandTotal:0, availableToPromiseTotal:0,
+                            acquiredDate:(orderHeader?.placedDate || ec.user.nowTimestamp),
                             acquireOrderId:orderId, acquireOrderItemSeqId:orderItemSeqId,
-                            acquireShipmentId:shipmentId, acquireCost:(acquireCost ?: orderItem?.standardCost ?: orderItem?.unitAmount),
-                            acquireCostUomId:orderHeader?.currencyUomId, acquireWorkEffortId:workEffortId]"/>
+                            acquireShipmentId:shipmentId, acquireCost:(acquireCost || orderItem?.standardCost || orderItem?.unitAmount),
+                            acquireCostUomId:orderHeader?.currencyUomId, acquireWorkEffortId:workEffortId})"/>
             </then><else>
                 <entity-find-one entity-name="mantle.product.asset.Asset" value-field="asset"/>
-                <set field="asset.originalQuantity" from="(asset.originalQuantity ?: 0) + originalQuantity"/>
-                <set field="asset.containerId" from="asset.containerId ?: containerId"/>
-                <set field="asset.assetPoolId" from="asset.assetPoolId ?: assetPoolId"/>
-                <set field="asset.geoPointId" from="asset.geoPointId ?: geoPointId"/>
-                <set field="asset.acquireWorkEffortId" from="asset.acquireWorkEffortId ?: workEffortId"/>
-                <set field="asset.acquireOrderId" from="asset.acquireOrderId ?: orderId"/>
-                <set field="asset.acquireOrderItemSeqId" from="asset.acquireOrderItemSeqId ?: orderItemSeqId"/>
-                <set field="asset.acquireShipmentId" from="asset.acquireShipmentId ?: shipmentId"/>
-                <set field="asset.acquireCost" from="asset.acquireCost ?: orderItem?.standardCost ?: orderItem?.unitAmount"/>
-                <set field="asset.acquireCostUomId" from="asset.acquireCostUomId ?: orderHeader?.currencyUomId"/>
+                <set field="asset.originalQuantity" from="(asset.originalQuantity || 0) + originalQuantity"/>
+                <set field="asset.containerId" from="asset.containerId || containerId"/>
+                <set field="asset.assetPoolId" from="asset.assetPoolId || assetPoolId"/>
+                <set field="asset.geoPointId" from="asset.geoPointId || geoPointId"/>
+                <set field="asset.acquireWorkEffortId" from="asset.acquireWorkEffortId || workEffortId"/>
+                <set field="asset.acquireOrderId" from="asset.acquireOrderId || orderId"/>
+                <set field="asset.acquireOrderItemSeqId" from="asset.acquireOrderItemSeqId || orderItemSeqId"/>
+                <set field="asset.acquireShipmentId" from="asset.acquireShipmentId || shipmentId"/>
+                <set field="asset.acquireCost" from="asset.acquireCost || orderItem?.standardCost || orderItem?.unitAmount"/>
+                <set field="asset.acquireCostUomId" from="asset.acquireCostUomId || orderHeader?.currencyUomId"/>
                 <entity-update value-field="asset"/>
             </else></if>
 
             <!-- create AssetReceipt -->
             <service-call name="create#mantle.product.receipt.AssetReceipt" out-map="context"
-                    in-map="[assetId:assetId, productId:productId, orderId:orderId, orderItemSeqId:orderItemSeqId,
+                    in-map="{assetId:assetId, productId:productId, orderId:orderId, orderItemSeqId:orderItemSeqId,
                         returnId:returnId, returnItemSeqId:returnItemSeqId, workEffortId:workEffortId,
                         shipmentId:shipmentId, shipmentItemSourceId:shipmentItemSourceId,
                         shipmentPackageSeqId:shipmentPackageSeqId, receivedByUserId:ec.user.userId,
                         receivedDate:receivedDate, quantityAccepted:quantity, quantityRejected:quantityRejected,
-                        rejectionReasonEnumId:rejectionReasonEnumId]"/>
+                        rejectionReasonEnumId:rejectionReasonEnumId}"/>
 
             <!-- if there are OrderItemBilling records matching orderId, orderItemSeqId, and shipmentId set assetReceiptId -->
             <if condition="orderId &amp;&amp; orderItemSeqId &amp;&amp; shipmentId">
@@ -2799,10 +2798,10 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- don't do this, better to make always available given how ATP is used for issuance/etc: <set field="availableToPromiseDiff" from="statusId == 'AstAvailable' ? quantity : 0"/> -->
             <set field="availableToPromiseDiff" from="quantity"/>
             <service-call name="create#mantle.product.asset.AssetDetail" out-map="context"
-                    in-map="[assetId:assetId, effectiveDate:(receivedDate ?: ec.user.nowTimestamp), quantityOnHandDiff:quantity,
+                    in-map="{assetId:assetId, effectiveDate:(receivedDate || ec.user.nowTimestamp), quantityOnHandDiff:quantity,
                         availableToPromiseDiff:availableToPromiseDiff, unitCost:orderItem?.unitAmount,
                         shipmentId:shipmentId, productId:productId, returnId:returnId, returnItemSeqId:returnItemSeqId,
-                        workEffortId:workEffortId, assetReceiptId:assetReceiptId]"/>
+                        workEffortId:workEffortId, assetReceiptId:assetReceiptId}"/>
 
             <!-- if this is for a WorkEffort (production run, etc)  -->
             <if condition="workEffortId">
@@ -2811,19 +2810,19 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="workEffortId"/><econdition field-name="productId"/>
                     <econdition field-name="typeEnumId" value="WeptProduce"/>
                 </entity-find>
-                <if condition="!produceProductList">
+                <if condition="!produceProductList?.length">
                     <if condition="noProduceProduct == 'error'"><then>
                         <message error="true">Not issuing Asset [${assetId}], Product ${ec.resource.expand('ProductNameTemplate','',product)} is not a product to produce</message>
                     </then><else-if condition="noProduceProduct != 'ignore'">
-                        <service-call name="create#mantle.work.effort.WorkEffortProduct" in-map="[workEffortId:workEffortId,
-                            productId:productId, typeEnumId:'WeptProduce', estimatedQuantity:quantity]"/>
+                        <service-call name="create#mantle.work.effort.WorkEffortProduct" in-map="{workEffortId:workEffortId,
+                            productId:productId, typeEnumId:'WeptProduce', estimatedQuantity:quantity}"/>
                     </else-if></if>
                 </if>
             </if>
 
             <!-- call through AssetDetail create? NO, would get called from the move#AssetReservation record recursively -->
             <!-- reserve the newly available Asset, if needed -->
-            <service-call name="mantle.product.AssetServices.reserve#IncreasedAsset" in-map="[assetId:assetId]"/>
+            <service-call name="mantle.product.AssetServices.reserve#IncreasedAsset" in-map="{assetId:assetId}"/>
         </actions>
     </service>
 
@@ -2876,16 +2875,16 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="!assetReceiptId"><return error="true" message="Cannot update Asset and Receipt, could not find AssetReceipt record for assetId [${assetId}], shipmentId [${shipmentId}]"/></if>
 
             <!-- calculate the quantityAccepted difference, will be set in quantityOnHandDiff and availableToPromiseDiff -->
-            <set field="quantityDiff" from="(quantityAccepted != null ? quantityAccepted : (originalAssetReceipt.quantityAccepted ?: 0.0)) - (originalAssetReceipt.quantityAccepted ?: 0.0)"/>
-            <set field="quantityRejectedDiff" from="(quantityRejected != null ? quantityRejected : (originalAssetReceipt.quantityRejected ?: 0.0)) - (originalAssetReceipt.quantityRejected ?: 0.0)"/>
+            <set field="quantityDiff" from="(quantityAccepted != null ? quantityAccepted : (originalAssetReceipt.quantityAccepted || 0.0)) - (originalAssetReceipt.quantityAccepted || 0.0)"/>
+            <set field="quantityRejectedDiff" from="(quantityRejected != null ? quantityRejected : (originalAssetReceipt.quantityRejected || 0.0)) - (originalAssetReceipt.quantityRejected || 0.0)"/>
 
             <!-- <log level="warn" message="======= quantityAccepted ${quantityAccepted}, quantityRejected ${quantityRejected}, quantityDiff ${quantityDiff}, originalAssetReceipt: ${originalAssetReceipt}"/> -->
 
             <!-- Ensure the ShipmentItem has sufficient remaining quantity -->
-            <set field="newQuantityRemaining" from="(quantityDiff ?: 0) + (quantityRejectedDiff ?: 0)"/>
+            <set field="newQuantityRemaining" from="(quantityDiff || 0) + (quantityRejectedDiff || 0)"/>
             <if condition="newQuantityRemaining &amp;&amp; shipmentId">
                 <service-call name="mantle.shipment.ShipmentServices.ensure#ShipmentItemQuantityRemaining"
-                        in-map="[shipmentId:shipmentId, productId:asset.productId, newQuantityRemaining:newQuantityRemaining]"/>
+                        in-map="{shipmentId:shipmentId, productId:asset.productId, newQuantityRemaining:newQuantityRemaining}"/>
             </if>
 
             <if condition="expectedEndOfLife == null"><set field="expectedEndOfLife" from="expirationDate"/></if>
@@ -2898,7 +2897,7 @@ along with this software (see the LICENSE.md file). If not, see
             </then><else-if condition="lotNumber">
                 <entity-find entity-name="mantle.product.asset.Lot" list="existingLots">
                     <econdition field-name="lotNumber"/><econdition field-name="mfgPartyId"/></entity-find>
-                <if condition="existingLots"><then>
+                <if condition="(existingLots?.length > 0)"><then>
                     <set field="lotId" from="existingLots[0].lotId"/>
                     <if condition="expectedEndOfLife == null"><set field="expectedEndOfLife" from="existingLots[0].expirationDate"/></if>
                 </then><else>
@@ -2908,7 +2907,7 @@ along with this software (see the LICENSE.md file). If not, see
                     </if>
                     <if condition="expirationDate == null"><set field="expirationDate" from="expectedEndOfLife"/></if>
                     <service-call name="create#mantle.product.asset.Lot" out-map="context"
-                            in-map="[lotNumber:lotNumber, mfgPartyId:mfgPartyId, manufacturedDate:manufacturedDate, expirationDate:expirationDate]"/>
+                            in-map="{lotNumber:lotNumber, mfgPartyId:mfgPartyId, manufacturedDate:manufacturedDate, expirationDate:expirationDate}"/>
                 </else></if>
             </else-if></if>
 
@@ -2936,12 +2935,12 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- before adjusting new quantity see if we just changed status to Available and if so set ATP to QOH -->
             <if condition="oldAtp &lt;= 0 &amp;&amp; statusId == 'AstAvailable' &amp;&amp; oldStatusId != 'AstAvailable'">
                 <service-call name="create#mantle.product.asset.AssetDetail" out-map="context"
-                        in-map="[assetId:assetId, effectiveDate:receivedDate, quantityOnHandDiff:0,
+                        in-map="{assetId:assetId, effectiveDate:receivedDate, quantityOnHandDiff:0,
                             availableToPromiseDiff:oldQoh, shipmentId:shipmentId, productId:asset.productId,
-                            assetReceiptId:assetReceiptId]"/>
+                            assetReceiptId:assetReceiptId}"/>
 
                 <!-- reserve the newly available Asset, if needed -->
-                <service-call name="mantle.product.AssetServices.reserve#IncreasedAsset" in-map="[assetId:assetId]"/>
+                <service-call name="mantle.product.AssetServices.reserve#IncreasedAsset" in-map="{assetId:assetId}"/>
             </if>
 
             <if condition="quantityDiff != 0"><service-call name="mantle.product.AssetServices.change#AssetQuantity" in-map="context"/></if>
@@ -2951,7 +2950,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="(acquireCost != null &amp;&amp; acquireCost != oldAcquireCost) ||
                     (quantityAccepted != null &amp;&amp; quantityAccepted != originalAssetReceipt.quantityAccepted) ||
                     (receivedDate != null &amp;&amp; oldReceivedDate != receivedDate)">
-                <service-call name="mantle.ledger.AssetAutoPostServices.repost#Asset" in-map="[assetId:assetId]"/>
+                <service-call name="mantle.ledger.AssetAutoPostServices.repost#Asset" in-map="{assetId:assetId}"/>
             </if>
         </actions>
     </service>
@@ -2979,8 +2978,8 @@ along with this software (see the LICENSE.md file). If not, see
                 </else></if>
             </iterate>
             <if condition="!foundExisting">
-                <service-call name="create#mantle.product.asset.AssetPartyAssignment" in-map="[assetId:assetId,
-                    partyId:newPartyId, roleTypeId:roleTypeId, fromDate:ec.user.nowTimestamp]"/>
+                <service-call name="create#mantle.product.asset.AssetPartyAssignment" in-map="{assetId:assetId,
+                    partyId:newPartyId, roleTypeId:roleTypeId, fromDate:ec.user.nowTimestamp}"/>
             </if>
         </actions>
     </service>
@@ -3006,9 +3005,9 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <if condition="toScanLocation">
                 <service-call name="mantle.product.AssetServices.check#ScanLocation" out-map="toScanOut"
-                        in-map="[facilityId:facilityId, locationSeqId:toLocationSeqId, containerId:toContainerId, scanLocation:toScanLocation]"/>
-                <set field="toLocationSeqId" from="toLocationSeqId ?: toScanOut.locationSeqId"/>
-                <set field="toContainerId" from="toContainerId ?: toScanOut.containerId"/>
+                        in-map="{facilityId:facilityId, locationSeqId:toLocationSeqId, containerId:toContainerId, scanLocation:toScanLocation}"/>
+                <set field="toLocationSeqId" from="toLocationSeqId || toScanOut.locationSeqId"/>
+                <set field="toContainerId" from="toContainerId || toScanOut.containerId"/>
             </if>
 
             <if condition="!locationSeqId &amp;&amp; !containerId">
@@ -3027,7 +3026,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
 
                 <service-call name="create#mantle.product.asset.Container" out-map="createContOut"
-                        in-map="[serialNumber:createContainerId, containerTypeEnumId:containerTypeEnumId, facilityId:facilityId, locationSeqId:toLocationSeqId]"/>
+                        in-map="{serialNumber:createContainerId, containerTypeEnumId:containerTypeEnumId, facilityId:facilityId, locationSeqId:toLocationSeqId}"/>
                 <set field="toContainerId" from="createContOut.containerId"/>
                 <message type="success">Created container with serial number ${createContainerId} (internal ID ${toContainerId})</message>
             </if>
@@ -3076,8 +3075,8 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- <log level="warn" message="quantity ${quantity} quantityRemaining ${quantityRemaining} curQuantity ${curQuantity}"/> -->
                 <if condition="curQuantity != 0.0">
                     <service-call name="mantle.product.AssetServices.move#Asset"
-                            in-map="[assetId:asset.assetId, facilityId:facilityId, quantity:curQuantity,
-                                locationSeqId:toLocationSeqId, containerId:toContainerId, assetPoolId:toAssetPoolId]"/>
+                            in-map="{assetId:asset.assetId, facilityId:facilityId, quantity:curQuantity,
+                                locationSeqId:toLocationSeqId, containerId:toContainerId, assetPoolId:toAssetPoolId}"/>
                     <set field="quantityRemaining" from="quantityRemaining - curQuantity"/>
                     <script>assetIdList.add(asset.assetId)</script>
                 </if>
@@ -3232,7 +3231,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="forceNewAsset || (quantity &amp;&amp; quantity &lt; asset.quantityOnHandTotal) ||
                     (facilityId &amp;&amp; facilityId != asset.facilityId) || (assetPoolId != asset.assetPoolId)"><then>
 
-                <set field="newStatusId" from="autoStatusId ?: asset.statusId"/>
+                <set field="newStatusId" from="autoStatusId || asset.statusId"/>
 
                 <!-- look for an existing Asset record to move to -->
                 <if condition="!forceNewAsset">
@@ -3252,7 +3251,7 @@ along with this software (see the LICENSE.md file). If not, see
                     </entity-find>
                 </if>
 
-                <if condition="existingAssetList"><then>
+                <if condition="(existingAssetList?.length > 0)"><then>
                     <set field="newAssetId" from="existingAssetList[0].assetId"/>
                     <!-- <log level="warn" message="In move from Asset ${asset.assetId} found existing move to Asset ${existingAssetList[0]}"/> -->
                 </then><else>
@@ -3268,14 +3267,14 @@ along with this software (see the LICENSE.md file). If not, see
 
                 <!-- increase new asset QOH/ATP by quantity -->
                 <service-call name="create#mantle.product.asset.AssetDetail" out-map="context"
-                        in-map="[assetId:newAssetId, effectiveDate:ec.user.nowTimestamp, quantityOnHandDiff:quantity,
-                                 availableToPromiseDiff:quantity, productId:productId, otherAssetId:assetId]"/>
+                        in-map="{assetId:newAssetId, effectiveDate:ec.user.nowTimestamp, quantityOnHandDiff:quantity,
+                                 availableToPromiseDiff:quantity, productId:productId, otherAssetId:assetId}"/>
 
                 <!-- between increase new Asset and reduce old Asset move AssetReservation(s) -->
                 <if condition="moveAssetReservationId"><then>
                     <!-- <log level="warn" message="In move from Asset ${asset.assetId} moving reservation ${moveAssetReservationId} to new Asset ${newAssetId}"/> -->
                     <service-call name="mantle.product.AssetServices.move#AssetReservation" out-map="moveArOut"
-                            in-map="[assetId:newAssetId, assetReservationId:moveAssetReservationId, quantity:quantity]"/>
+                            in-map="{assetId:newAssetId, assetReservationId:moveAssetReservationId, quantity:quantity}"/>
                 </then><else>
                     <!-- move reservations if necessary so ATP doesn't go negative
                         OR if moving from a non-Pick location to a Pick location (along with reserve in Pick location first logic) -->
@@ -3303,7 +3302,7 @@ along with this software (see the LICENSE.md file). If not, see
                             <if condition="quantityToMove &gt; res.quantityNotIssued"><set field="quantityToMove" from="res.quantityNotIssued"/></if>
                             <if condition="quantityToMove &gt; 0">
                                 <service-call name="mantle.product.AssetServices.move#AssetReservation" out-map="moveArOut" out-map-add-to-existing="false"
-                                        in-map="[assetId:newAssetId, assetReservationId:res.assetReservationId, quantity:quantityToMove]"/>
+                                        in-map="{assetId:newAssetId, assetReservationId:res.assetReservationId, quantity:quantityToMove}"/>
                                 <set field="availableRemaining" from="availableRemaining - moveArOut.quantityMoved"/>
                             </if>
                         </iterate>
@@ -3312,8 +3311,8 @@ along with this software (see the LICENSE.md file). If not, see
 
                 <!-- reduce original asset QOH/ATP by quantity -->
                 <service-call name="create#mantle.product.asset.AssetDetail" out-map="context"
-                        in-map="[assetId:assetId, effectiveDate:ec.user.nowTimestamp, quantityOnHandDiff:-quantity,
-                                 availableToPromiseDiff:-quantity, productId:productId, otherAssetId:newAssetId]"/>
+                        in-map="{assetId:assetId, effectiveDate:ec.user.nowTimestamp, quantityOnHandDiff:-quantity,
+                                 availableToPromiseDiff:-quantity, productId:productId, otherAssetId:newAssetId}"/>
             </then><else>
                 <!-- make sure can change from asset.statusId to autoStatusId -->
                 <if condition="autoStatusId">
@@ -3342,15 +3341,15 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- if assetPoolId was set but is now null call increased inventory service so backordered reservations can use -->
             <!-- do something similar if facilityId changes -->
             <if condition="asset.assetPoolId != newAsset.assetPoolId || asset.facilityId != newAsset.facilityId">
-                <service-call name="mantle.product.AssetServices.check#AssetReservations" in-map="[assetId:newAsset.assetId]"/>
+                <service-call name="mantle.product.AssetServices.check#AssetReservations" in-map="{assetId:newAsset.assetId}"/>
             </if>
             <!-- if me to Pick location and has available quantity, look for reservations against non-Pick locations and move them here -->
             <if condition="checkFacLoc?.locationTypeEnumId == 'FltPick' &amp;&amp; newAsset.availableToPromiseTotal &gt; 0.0">
-                <service-call name="mantle.product.AssetServices.move#ReservationsFromNonPickLocations" in-map="[assetId:newAsset.assetId]"/>
+                <service-call name="mantle.product.AssetServices.move#ReservationsFromNonPickLocations" in-map="{assetId:newAsset.assetId}"/>
             </if>
 
             <set field="newFacLoc" from="newAsset.location"/>
-            <message>Moved ${quantity?.toPlainString()} from Asset ${ec.resource.expand('AssetNameTemplate', '', asset)} from ${ec.resource.expand('FacilityLocationNameTemplate', '', facLoc?:[:])} to Asset ${newAssetId ?: asset.assetId} ${ec.resource.expand('FacilityLocationNameTemplate', '', newFacLoc?:[:])}${container ? ' in container ' + (container.serialNumber ?: container.description ?: containerId) : ''}.</message>
+            <message>Moved ${quantity?.toPlainString()} from Asset ${ec.resource.expand('AssetNameTemplate', '', asset)} from ${ec.resource.expand('FacilityLocationNameTemplate', '', facLoc||{})} to Asset ${newAssetId || asset.assetId} ${ec.resource.expand('FacilityLocationNameTemplate', '', newFacLoc||{})}${container ? ' in container ' + (container.serialNumber || container.description || containerId) : ''}.</message>
         </actions>
     </service>
 
@@ -3386,18 +3385,18 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <if condition="physicalInventoryCountId">
                 <service-call name="update#mantle.product.asset.PhysicalInventoryCount"
-                        in-map="[physicalInventoryCountId:physicalInventoryCountId, quantityOnHand:quantity]"/>
+                        in-map="{physicalInventoryCountId:physicalInventoryCountId, quantityOnHand:quantity}"/>
             </if>
 
             <set field="currentQoh" from="0"/>
             <entity-find entity-name="mantle.product.asset.Asset" list="assetList">
                 <econdition field-name="productId"/>
                 <econdition field-name="facilityId"/>
-                <econdition field-name="locationSeqId" from="locationSeqId ?: null" ignore="!locationSeqId &amp;&amp; !strictLocation &amp;&amp; !strictAll"/>
-                <econdition field-name="lotId" from="lotId ?: null" ignore="!lotId &amp;&amp; !strictLot &amp;&amp; !strictAll"/>
-                <econdition field-name="ownerPartyId" from="ownerPartyId ?: null" ignore="!ownerPartyId &amp;&amp; !strictAll"/>
-                <econdition field-name="assetPoolId" from="assetPoolId ?: null" ignore="!assetPoolId &amp;&amp; !strictAll"/>
-                <econdition field-name="statusId" from="statusId ?: null" ignore="!statusId &amp;&amp; !strictAll"/>
+                <econdition field-name="locationSeqId" from="locationSeqId || null" ignore="!locationSeqId &amp;&amp; !strictLocation &amp;&amp; !strictAll"/>
+                <econdition field-name="lotId" from="lotId || null" ignore="!lotId &amp;&amp; !strictLot &amp;&amp; !strictAll"/>
+                <econdition field-name="ownerPartyId" from="ownerPartyId || null" ignore="!ownerPartyId &amp;&amp; !strictAll"/>
+                <econdition field-name="assetPoolId" from="assetPoolId || null" ignore="!assetPoolId &amp;&amp; !strictAll"/>
+                <econdition field-name="statusId" from="statusId || null" ignore="!statusId &amp;&amp; !strictAll"/>
                 <!-- with physicalInventoryDate in the past this won't work: <econdition field-name="quantityOnHandTotal" operator="not-equals" from="0.0"/> -->
                 <econdition field-name="receivedDate" operator="less-equals" from="physicalInventoryDate" or-null="true"/>
             </entity-find>
@@ -3412,13 +3411,13 @@ along with this software (see the LICENSE.md file). If not, see
                     <select-field field-name="quantityOnHandTotal"/>
                 </entity-find>
                 <if condition="detailSummaryList.size() &gt; 0">
-                    <set field="currentQoh" from="currentQoh + (detailSummaryList.get(0).quantityOnHandTotal ?: 0.0)"/>
+                    <set field="currentQoh" from="currentQoh + (detailSummaryList.get(0).quantityOnHandTotal || 0.0)"/>
                 </if>
             </iterate>
 
             <set field="quantityChange" from="quantity - currentQoh"/>
             <if condition="quantityChange != 0.0"><then>
-                <message>Quantity specified (${ec.l10n.format(quantity, null)}) differs from current on hand (${ec.l10n.format(currentQoh, null)}) by ${ec.l10n.format(quantityChange, null)}, adjusting (Prod:${productId}, Fac:${facilityId}, Loc:${locationSeqId?:(strictAll||strictLocation?'None':'Any')}, Lot:${lotId?:(strictAll||strictLot?'None':'Any')}, Owner:${ownerPartyId?:(strictAll?'None':'Any')}, Pool:${assetPoolId?:(strictAll?'None':'Any')}, Stts:${statusId?:(strictAll?'None':'Any')})</message>
+                <message>Quantity specified (${ec.l10n.format(quantity, null)}) differs from current on hand (${ec.l10n.format(currentQoh, null)}) by ${ec.l10n.format(quantityChange, null)}, adjusting (Prod:${productId}, Fac:${facilityId}, Loc:${locationSeqId||(strictAll||strictLocation?'None':'Any')}, Lot:${lotId||(strictAll||strictLot?'None':'Any')}, Owner:${ownerPartyId||(strictAll?'None':'Any')}, Pool:${assetPoolId||(strictAll?'None':'Any')}, Stts:${statusId||(strictAll?'None':'Any')})</message>
                 <service-call name="mantle.product.AssetServices.record#PhysicalInventoryChange" in-map="context"/>
             </then><else>
                 <message type="success">Quantity specified (${ec.l10n.format(quantity, null)}) matched current records, no adjustment needed</message>
@@ -3462,7 +3461,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="effectiveDate" from="physicalInventoryDate"/>
             <!-- create the PhysicalInventory inventory record -->
             <if condition="!physicalInventoryId">
-                <service-call name="create#mantle.product.asset.PhysicalInventory" in-map="context + [statusId:'PIComplete']" out-map="context"/></if>
+                <service-call name="create#mantle.product.asset.PhysicalInventory" in-map="Object.assign({}, context, {statusId:'PIComplete'})" out-map="context"/></if>
 
             <if condition="!ownerPartyId">
                 <entity-find-one entity-name="mantle.facility.Facility" value-field="facility"/>
@@ -3470,15 +3469,15 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
 
             <set field="assetIdList" from="[]"/>
-            <if condition="!assetList">
+            <if condition="!assetList?.length">
                 <entity-find entity-name="mantle.product.asset.Asset" list="assetList">
                     <econdition field-name="productId"/>
                     <econdition field-name="facilityId"/>
-                    <econdition field-name="locationSeqId" from="locationSeqId ?: null" ignore="!locationSeqId &amp;&amp; !strictLocation &amp;&amp; !strictAll"/>
-                    <econdition field-name="lotId" from="lotId ?: null" ignore="!lotId &amp;&amp; !strictLot &amp;&amp; !strictAll"/>
-                    <econdition field-name="ownerPartyId" from="ownerPartyId ?: null" ignore="!ownerPartyId &amp;&amp; !strictAll"/>
-                    <econdition field-name="assetPoolId" from="assetPoolId ?: null" ignore="!assetPoolId &amp;&amp; !strictAll"/>
-                    <econdition field-name="statusId" from="statusId ?: null" ignore="!statusId &amp;&amp; !strictAll"/>
+                    <econdition field-name="locationSeqId" from="locationSeqId || null" ignore="!locationSeqId &amp;&amp; !strictLocation &amp;&amp; !strictAll"/>
+                    <econdition field-name="lotId" from="lotId || null" ignore="!lotId &amp;&amp; !strictLot &amp;&amp; !strictAll"/>
+                    <econdition field-name="ownerPartyId" from="ownerPartyId || null" ignore="!ownerPartyId &amp;&amp; !strictAll"/>
+                    <econdition field-name="assetPoolId" from="assetPoolId || null" ignore="!assetPoolId &amp;&amp; !strictAll"/>
+                    <econdition field-name="statusId" from="statusId || null" ignore="!statusId &amp;&amp; !strictAll"/>
                     <!-- with physicalInventoryDate in the past this won't work: <econdition field-name="quantityOnHandTotal" operator="not-equals" from="0.0"/> -->
                     <econdition field-name="receivedDate" operator="less-equals" from="physicalInventoryDate" or-null="true"/>
                     <order-by field-name="receivedDate"/><!-- oldest first -->
@@ -3488,14 +3487,14 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- <log level="warn" message="======= Changing product [${productId}] in facility [${facilityId}:${locationSeqId}] by ${quantityChange}; assetList: ${assetList}"/> -->
             <if condition="quantityChange &gt; 0.0"><then>
-                <if condition="assetList"><then>
+                <if condition="(assetList?.length > 0)"><then>
                     <set field="quantityRemaining" from="quantityChange"/>
                     <!-- NOTE: consider reversing assetList to increase quantity newest first instead of oldest first -->
                     <iterate list="assetList" entry="asset">
                         <!-- NOTE: no real reason for iterating here, will always add it all to the first Asset record; leaving it for now to make more complex logic easier in the future -->
                         <set field="quantityDiff" from="quantityRemaining"/>
                         <if condition="quantityDiff != 0">
-                            <service-call name="mantle.product.AssetServices.change#AssetQuantity" in-map="context + [assetId:asset.assetId]"/></if>
+                            <service-call name="mantle.product.AssetServices.change#AssetQuantity" in-map="Object.assign({}, context, {assetId:asset.assetId})"/></if>
                         <set field="quantityRemaining" from="quantityRemaining - quantityDiff"/>
                         <script>assetIdList.add(asset.assetId)</script>
                         <if condition="quantityRemaining == 0"><break/></if>
@@ -3505,21 +3504,21 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="quantityRemaining" from="0.0"/>
                     <!-- no passed assetList and quantityChange > 0, create new Asset -->
                     <service-call name="mantle.product.AssetServices.create#ProductAssetAdHoc" out-map="context"
-                            in-map="context + [createdDate:physicalInventoryDate]"/>
+                            in-map="Object.assign({}, context, {createdDate:physicalInventoryDate})"/>
                     <service-call name="create#mantle.product.asset.AssetDetail" out-map="context"
-                            in-map="[assetId:assetId, effectiveDate:physicalInventoryDate, quantityOnHandDiff:quantityChange,
+                            in-map="{assetId:assetId, effectiveDate:physicalInventoryDate, quantityOnHandDiff:quantityChange,
                                 availableToPromiseDiff:quantityChange, productId:productId,
                                 physicalInventoryId:physicalInventoryId, physicalInventoryCountId:physicalInventoryCountId,
-                                varianceReasonEnumId:varianceReasonEnumId]"/>
+                                varianceReasonEnumId:varianceReasonEnumId}"/>
                     <!-- reserve the newly available Asset, if needed -->
-                    <service-call name="mantle.product.AssetServices.reserve#IncreasedAsset" in-map="[assetId:assetId]"/>
+                    <service-call name="mantle.product.AssetServices.reserve#IncreasedAsset" in-map="{assetId:assetId}"/>
                     <script>assetIdList.add(assetId)</script>
                 </else></if>
             </then><else-if condition="quantityChange &lt; 0.0">
                 <!-- lock the records we need -->
                 <set field="quantityRemaining" from="-quantityChange"/>
                 <set field="lockedAssetList" from="[]"/>
-                <set field="lockedAssetQoh" from="[:]"/>
+                <set field="lockedAssetQoh" from="{}"/>
                 <iterate list="assetList" entry="asset">
                     <!-- calculate quantityOnHandTotal as of physicalInventoryDate instead of using current -->
                     <entity-find entity-name="mantle.product.asset.AssetDetailSummary" list="detailSummaryList">
@@ -3527,7 +3526,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="effectiveDate" operator="less-equals" from="physicalInventoryDate"/>
                         <select-field field-name="quantityOnHandTotal"/>
                     </entity-find>
-                    <set field="quantityOnHandTotal" from="detailSummaryList.size() &gt; 0 ? (detailSummaryList.get(0).quantityOnHandTotal ?: 0.0) : 0.0"/>
+                    <set field="quantityOnHandTotal" from="detailSummaryList.size() &gt; 0 ? (detailSummaryList.get(0).quantityOnHandTotal || 0.0) : 0.0"/>
 
                     <set field="quantityDiff" from="quantityRemaining &gt; quantityOnHandTotal ? quantityOnHandTotal : quantityRemaining"/>
                     <if condition="quantityDiff != 0.0">
@@ -3552,8 +3551,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="quantityOnHandTotal" from="lockedAssetQoh.get(asset.assetId)"/>
                     <set field="quantityDiff" from="quantityRemaining &gt; quantityOnHandTotal ? quantityOnHandTotal : quantityRemaining"/>
                     <if condition="quantityDiff != 0.0">
-                        <service-call name="mantle.product.AssetServices.change#AssetQuantity" in-map="context +
-                                [assetId:asset.assetId, quantityDiff:-quantityDiff]"/>
+                        <service-call name="mantle.product.AssetServices.change#AssetQuantity" in-map="Object.assign({}, context, {assetId:asset.assetId, quantityDiff:-quantityDiff})"/>
                         <set field="quantityRemaining" from="quantityRemaining - quantityDiff"/>
                         <script>assetIdList.add(asset.assetId)</script>
                     </if>
@@ -3576,8 +3574,8 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="assetId"/></out-parameters>
         <actions>
             <entity-find-one entity-name="mantle.product.Product" value-field="product" cache="true"/>
-            <set field="assetTypeEnumId" from="product.assetTypeEnumId ?: 'AstTpInventory'"/>
-            <set field="statusId" from="statusId ?: (assetTypeEnumId == 'AstTpInventory' ? 'AstAvailable' : 'AstInStorage')"/>
+            <set field="assetTypeEnumId" from="product.assetTypeEnumId || 'AstTpInventory'"/>
+            <set field="statusId" from="statusId || (assetTypeEnumId == 'AstTpInventory' ? 'AstAvailable' : 'AstInStorage')"/>
             <if condition="!acquireCost">
                 <!-- we may want more options for this, for now grab the most recent record to try to find a reasonable cost -->
                 <entity-find entity-name="mantle.product.asset.Asset" list="costAssetList" limit="1">
@@ -3585,14 +3583,14 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="ownerPartyId" ignore-if-empty="true"/>
                     <order-by field-name="-assetId"/>
                 </entity-find>
-                <if condition="costAssetList">
+                <if condition="(costAssetList?.length > 0)">
                     <set field="acquireCost" from="costAssetList[0].acquireCost"/>
                     <set field="acquireCostUomId" from="costAssetList[0].acquireCostUomId"/>
                 </if>
             </if>
             <service-call name="create#mantle.product.asset.Asset" out-map="assetOut"
-                    in-map="context + [classEnumId:product.assetClassEnumId, quantityOnHandTotal:0, availableToPromiseTotal:0,
-                        hasQuantity:'Y', receivedDate:createdDate, acquiredDate:createdDate]"/>
+                    in-map="Object.assign({}, context, {classEnumId:product.assetClassEnumId, quantityOnHandTotal:0, availableToPromiseTotal:0,
+                        hasQuantity:'Y', receivedDate:createdDate, acquiredDate:createdDate})"/>
             <set field="assetId" from="assetOut.assetId"/>
         </actions>
     </service>
@@ -3605,7 +3603,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="comments"/>
         </in-parameters>
         <actions>
-            <set field="updateMap" from="[physicalInventoryId:physicalInventoryId, physicalInventoryDate:physicalInventoryDate]"/>
+            <set field="updateMap" from="{physicalInventoryId:physicalInventoryId, physicalInventoryDate:physicalInventoryDate}"/>
             <if condition="comments"><set field="updateMap.comments" from="comments"/></if>
             <service-call name="update#mantle.product.asset.PhysicalInventory" in-map="updateMap"/>
             <entity-find entity-name="mantle.product.asset.AssetDetail" list="assetDetailList">
@@ -3613,9 +3611,9 @@ along with this software (see the LICENSE.md file). If not, see
             <iterate list="assetDetailList" entry="assetDetail">
                 <if condition="assetDetail.effectiveDate != physicalInventoryDate">
                     <service-call name="update#mantle.product.asset.AssetDetail"
-                            in-map="[assetDetailId:assetDetail.assetDetailId, effectiveDate:physicalInventoryDate]"/>
+                            in-map="{assetDetailId:assetDetail.assetDetailId, effectiveDate:physicalInventoryDate}"/>
                     <service-call name="mantle.ledger.AssetAutoPostServices.repost#PhysicalInventoryVariance"
-                            in-map="[assetDetailId:assetDetail.assetDetailId]"/>
+                            in-map="{assetDetailId:assetDetail.assetDetailId}"/>
                 </if>
             </iterate>
         </actions>

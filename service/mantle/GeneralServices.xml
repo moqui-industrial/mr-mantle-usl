@@ -265,7 +265,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- <log level="warn" message="Doing general search with documentType ${documentType} indexName ${indexName} queryString ${queryString}"/> -->
 
             <service-call name="org.moqui.search.SearchServices.search#DataDocuments" out-map="context"
-                    in-map="context + [flattenDocument:false]"/>
+                    in-map="Object.assign({}, context, {flattenDocument:false})"/>
         </actions>
     </service>
 </services>

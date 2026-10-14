@@ -63,8 +63,8 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
 
             <set field="applicablePromoList" from="new ArrayList(storePromoList.size())"/>
-            <set field="promoCodesByPromo" from="[:]"/>
-            <set field="useLimitByPromo" from="[:]"/>
+            <set field="promoCodesByPromo" from="{}"/>
+            <set field="useLimitByPromo" from="{}"/>
             <iterate list="storePromoList" entry="storePromo">
                 <set field="useLimitMin" from="1000.0"/>
 
@@ -110,7 +110,7 @@ along with this software (see the LICENSE.md file). If not, see
                                 <econdition field-name="promoCodeId" from="storePromoCode.promoCodeId"/>
                                 <select-field field-name="promoTimesUsed"/>
                             </entity-find>
-                            <set field="promoTimesUsed" from="itemSummaryList?.first?.promoTimesUsed ?: 0.0"/>
+                            <set field="promoTimesUsed" from="itemSummaryList?.first?.promoTimesUsed || 0.0"/>
                             <set field="curUseLimit" from="storePromoCode.useLimitPerCode - promoTimesUsed"/>
                             <!-- if no use limit available treat as not applicable code -->
                             <if condition="curUseLimit &lt;= 0.0"><continue/></if>
@@ -125,7 +125,7 @@ along with this software (see the LICENSE.md file). If not, see
                                     <econdition field-name="promoCodeId" from="storePromoCode.promoCodeId"/>
                                     <select-field field-name="promoTimesUsed"/>
                                 </entity-find>
-                                <set field="promoTimesUsed" from="itemSummaryList?.first?.promoTimesUsed ?: 0.0"/>
+                                <set field="promoTimesUsed" from="itemSummaryList?.first?.promoTimesUsed || 0.0"/>
                                 <set field="curUseLimit" from="storePromoCode.useLimitPerCustomer - promoTimesUsed"/>
                             </then><else>
                                 <set field="curUseLimit" from="storePromoCode.useLimitPerCustomer"/>
@@ -157,7 +157,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="storePromotionId" from="storePromo.storePromotionId"/>
                         <select-field field-name="promoTimesUsed"/>
                     </entity-find>
-                    <set field="promoTimesUsed" from="itemSummaryList?.first?.promoTimesUsed ?: 0.0"/>
+                    <set field="promoTimesUsed" from="itemSummaryList?.first?.promoTimesUsed || 0.0"/>
                     <set field="curUseLimit" from="storePromo.useLimitPerPromotion - promoTimesUsed"/>
                     <if condition="curUseLimit &lt; useLimitMin"><set field="useLimitMin" from="curUseLimit"/></if>
                 </if>
@@ -170,7 +170,7 @@ along with this software (see the LICENSE.md file). If not, see
                             <econdition field-name="storePromotionId" from="storePromo.storePromotionId"/>
                             <select-field field-name="promoTimesUsed"/>
                         </entity-find>
-                        <set field="promoTimesUsed" from="itemSummaryList?.first?.promoTimesUsed ?: 0.0"/>
+                        <set field="promoTimesUsed" from="itemSummaryList?.first?.promoTimesUsed || 0.0"/>
                         <set field="curUseLimit" from="storePromo.useLimitPerCustomer - promoTimesUsed"/>
                     </then><else>
                         <set field="curUseLimit" from="storePromo.useLimitPerCustomer"/>
@@ -307,7 +307,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="promoCodeId" from="storePromoCode.promoCodeId"/>
                     <select-field field-name="promoTimesUsed"/>
                 </entity-find>
-                <set field="promoTimesUsed" from="itemSummaryList?.first?.promoTimesUsed ?: 0.0"/>
+                <set field="promoTimesUsed" from="itemSummaryList?.first?.promoTimesUsed || 0.0"/>
                 <set field="curUseLimit" from="storePromoCode.useLimitPerCode - promoTimesUsed"/>
                 <if condition="curUseLimit &lt;= 0.0">
                     <script>ec.message.addPublic("Promotion code ${promoCode} has already been used the maximum times allowed", "warning")</script>
@@ -323,7 +323,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="promoCodeId" from="storePromoCode.promoCodeId"/>
                         <select-field field-name="promoTimesUsed"/>
                     </entity-find>
-                    <set field="promoTimesUsed" from="itemSummaryList?.first?.promoTimesUsed ?: 0.0"/>
+                    <set field="promoTimesUsed" from="itemSummaryList?.first?.promoTimesUsed || 0.0"/>
                     <set field="curUseLimit" from="storePromoCode.useLimitPerCustomer - promoTimesUsed"/>
                 </then><else>
                     <set field="curUseLimit" from="storePromoCode.useLimitPerCustomer"/>
@@ -341,7 +341,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="storePromotionId" from="storePromotion.storePromotionId"/>
                     <select-field field-name="promoTimesUsed"/>
                 </entity-find>
-                <set field="promoTimesUsed" from="itemSummaryList?.first?.promoTimesUsed ?: 0.0"/>
+                <set field="promoTimesUsed" from="itemSummaryList?.first?.promoTimesUsed || 0.0"/>
                 <set field="curUseLimit" from="storePromotion.useLimitPerPromotion - promoTimesUsed"/>
                 <if condition="curUseLimit &lt;= 0.0">
                     <script>ec.message.addPublic("Promotion for code ${promoCode} has already been used the maximum times allowed", "warning")</script>
@@ -357,7 +357,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="storePromotionId" from="storePromotion.storePromotionId"/>
                         <select-field field-name="promoTimesUsed"/>
                     </entity-find>
-                    <set field="promoTimesUsed" from="itemSummaryList?.first?.promoTimesUsed ?: 0.0"/>
+                    <set field="promoTimesUsed" from="itemSummaryList?.first?.promoTimesUsed || 0.0"/>
                     <set field="curUseLimit" from="storePromotion.useLimitPerCustomer - promoTimesUsed"/>
                 </then><else>
                     <set field="curUseLimit" from="storePromotion.useLimitPerCustomer"/>
@@ -369,11 +369,11 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
 
             <!-- add the code -->
-            <service-call name="create#mantle.order.OrderPromoCode" in-map="[orderId:orderId, promoCodeId:storePromoCode.promoCodeId]"/>
+            <service-call name="create#mantle.order.OrderPromoCode" in-map="{orderId:orderId, promoCodeId:storePromoCode.promoCodeId}"/>
             <!-- trigger promo re-apply -->
             <iterate list="orderPartList" entry="orderPart">
                 <service-call name="mantle.order.OrderServices.handle#OrderMajorChange"
-                        in-map="[orderId:orderId, orderPartSeqId:orderPart.orderPartSeqId]"/>
+                        in-map="{orderId:orderId, orderPartSeqId:orderPart.orderPartSeqId}"/>
             </iterate>
         </actions>
     </service>
@@ -390,7 +390,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="orderId"/><order-by field-name="orderPartSeqId"/></entity-find>
             <iterate list="orderPartList" entry="orderPart">
                 <service-call name="mantle.order.OrderServices.handle#OrderMajorChange"
-                        in-map="[orderId:orderId, orderPartSeqId:orderPart.orderPartSeqId]"/>
+                        in-map="{orderId:orderId, orderPartSeqId:orderPart.orderPartSeqId}"/>
             </iterate>
         </actions>
     </service>
@@ -421,7 +421,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- anonymous (no UserAccount) customers should not receive this discount -->
                 <entity-find entity-name="moqui.security.UserAccount" list="userAccounts">
                     <econdition field-name="partyId" from="customerPartyId"/><select-field field-name="userId"/></entity-find>
-                <if condition="!userAccounts"><return/></if>
+                <if condition="!userAccounts?.length"><return/></if>
             </if>
 
             <!-- does the customer have a classification other than consumer? -->
@@ -451,7 +451,7 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.product.store.ProductStorePromoCode" value-field="storePromoCode"/>
             
             <!-- NOTE: default to 1000 as an arbitrary high number for when there is no use limit; could also refactor here and main promo apply service for null/0 handling -->
-            <set field="useLimitRemaining" from="useLimit ?: 1000.0"/>
+            <set field="useLimitRemaining" from="useLimit || 1000.0"/>
 
             <!-- apply promo to each eligible item -->
             <entity-find entity-name="mantle.order.OrderItem" list="prodItemList">
@@ -460,7 +460,7 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <iterate list="prodItemList" entry="orderItem">
                 <service-call name="mantle.order.OrderServices.get#OrderItemTotal" out-map-add-to-existing="false"
-                        in-map="[orderItem:orderItem, getChildrenTotals:true]" out-map="orderItemTotalOut"/>
+                        in-map="{orderItem:orderItem, getChildrenTotals:true}" out-map="orderItemTotalOut"/>
                 <if condition="!orderItemTotalOut.combinedAmount"><continue/></if>
                 <if condition="itemsWithPromo"><then>
                     <set field="promoQuantity" from="orderItem.quantity"/>
@@ -477,12 +477,12 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- create promo item -->
                 <set field="discountAmount" from="-(orderItemTotalOut.combinedAmount * (discountPercent/100.0)).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
                 <service-call name="create#mantle.order.OrderItem" out-map="createItemOut"
-                        in-map="[orderId:orderId, orderPartSeqId:orderPartSeqId, parentItemSeqId:orderItem.orderItemSeqId,
+                        in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId, parentItemSeqId:orderItem.orderItemSeqId,
                                  itemTypeEnumId:'ItemDiscount', quantity:promoQuantity, unitAmount:discountAmount, productId:orderItem.productId,
                                  sourcePercentage:discountPercent, storePromotionId:storePromotionId,
                                  promoCodeId:promoCodeId, promoCodeText:storePromoCode?.promoCode,
                                  isPromo:'Y', promoQuantity:promoQuantity, promoTimesUsed:promoQuantity,
-                                 itemDescription:ec.resource.expand(itemDescription, '')?:'New Customer Discount']"/>
+                                 itemDescription:ec.resource.expand(itemDescription, '')||'New Customer Discount'}"/>
             </iterate>
         </actions>
     </service>
@@ -533,7 +533,7 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.product.store.ProductStorePromoCode" value-field="storePromoCode"/>
 
             <!-- NOTE: default to 1000 as an arbitrary high number for when there is no use limit; could also refactor here and main promo apply service for null/0 handling -->
-            <set field="useLimitRemaining" from="useLimit ?: 1000.0"/>
+            <set field="useLimitRemaining" from="useLimit || 1000.0"/>
 
             <set field="buyGetQuantity" from="buyQuantity + getQuantity"/>
             <if condition="buyGetQuantity &lt;= 0.0">
@@ -551,16 +551,16 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <iterate list="prodItemList" entry="orderItem">
                 <service-call name="mantle.order.OrderServices.get#OrderItemTotal" out-map-add-to-existing="false"
-                        in-map="[orderItem:orderItem, getChildrenTotals:true]" out-map="orderItemTotalOut"/>
+                        in-map="{orderItem:orderItem, getChildrenTotals:true}" out-map="orderItemTotalOut"/>
                 <!-- <log level="warn" message="orderItemTotalOut ${orderItemTotalOut}"/> -->
                 <if condition="!orderItemTotalOut.combinedAmount"><continue/></if>
 
                 <!-- if listDiffPercent specified check now -->
                 <if condition="listDiffPercent != null">
-                    <set field="unitAmount" from="orderItem.unitAmount ?: 0.0"/>
+                    <set field="unitAmount" from="orderItem.unitAmount || 0.0"/>
                     <set field="listDiffRatio" from="((BigDecimal) listDiffPercent).divide(100.0, 4, BigDecimal.ROUND_HALF_UP)"/>
                     <service-call name="mantle.product.PriceServices.get#OrderProductPrice" out-map="itemPriceOut"
-                            in-map="[productId:orderItem.productId, orderId:orderId, orderPartSeqId:orderItem.orderPartSeqId]"/>
+                            in-map="{productId:orderItem.productId, orderId:orderId, orderPartSeqId:orderItem.orderPartSeqId}"/>
                     <if condition="itemPriceOut.listPrice"><then>
                         <set field="minApplyPrice" from="((BigDecimal) itemPriceOut.listPrice).multiply(BigDecimal.ONE.minus(listDiffRatio))"/>
                         <if condition="unitAmount &lt; minApplyPrice">
@@ -592,12 +592,12 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- create promo item -->
                 <set field="discountAmount" from="-(orderItemTotalOut.combinedAmount*(discountPercent/100.0)).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
                 <service-call name="create#mantle.order.OrderItem" out-map="createItemOut"
-                        in-map="[orderId:orderId, orderPartSeqId:orderPartSeqId, parentItemSeqId:orderItem.orderItemSeqId,
+                        in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId, parentItemSeqId:orderItem.orderItemSeqId,
                              itemTypeEnumId:'ItemDiscount', quantity:itemQuantity, unitAmount:discountAmount, productId:orderItem.productId,
                              sourcePercentage:discountPercent, storePromotionId:storePromotionId,
                              promoCodeId:promoCodeId, promoCodeText:storePromoCode?.promoCode,
                              isPromo:'Y', promoQuantity:promoQuantity, promoTimesUsed:timesToApply,
-                             itemDescription:ec.resource.expand(itemDescription, '')?:('Buy ' + buyQuantity + ' Get ' + getQuantity + ' at ' + discountPercent + '% off')]"/>
+                             itemDescription:ec.resource.expand(itemDescription, '')||('Buy ' + buyQuantity + ' Get ' + getQuantity + ' at ' + discountPercent + '% off')}"/>
             </iterate>
         </actions>
     </service>
@@ -653,7 +653,7 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <iterate list="prodItemList" entry="orderItem">
                 <service-call name="mantle.order.OrderServices.get#OrderItemTotal" out-map-add-to-existing="false"
-                        in-map="[orderItem:orderItem, getChildrenTotals:true]" out-map="orderItemTotalOut"/>
+                        in-map="{orderItem:orderItem, getChildrenTotals:true}" out-map="orderItemTotalOut"/>
                 <!-- <log level="warn" message="orderItemTotalOut ${orderItemTotalOut}"/> -->
                 <if condition="!orderItemTotalOut.combinedAmount"><continue/></if>
 
@@ -677,11 +677,11 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="discountAmount &gt; orderItemTotalOut.combinedAmount">
                     <set field="discountAmount" from="orderItemTotalOut.combinedAmount"/></if>
                 <service-call name="create#mantle.order.OrderItem" out-map="createItemOut"
-                        in-map="[orderId:orderId, orderPartSeqId:orderPartSeqId, parentItemSeqId:orderItem.orderItemSeqId,
+                        in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId, parentItemSeqId:orderItem.orderItemSeqId,
                              itemTypeEnumId:'ItemDiscount', quantity:itemQuantity, unitAmount:-discountAmount, productId:orderItem.productId,
                              storePromotionId:storePromotionId, promoCodeId:promoCodeId, promoCodeText:storePromoCode?.promoCode,
                              isPromo:'Y', promoQuantity:promoQuantity, promoTimesUsed:eligibleQuantity,
-                             itemDescription:ec.resource.expand(itemDescription, '')?:('Get ' + ec.l10n.format(discountAmount, '#,##0.00') + ' off')]"/>
+                             itemDescription:ec.resource.expand(itemDescription, '')||('Get ' + ec.l10n.format(discountAmount, '#,##0.00') + ' off')}"/>
             </iterate>
         </actions>
     </service>

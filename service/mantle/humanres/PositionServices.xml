@@ -28,7 +28,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- Get EmplPositionClass options from EmplPositionClassParty and EmplPosition -->
             <entity-find entity-name="mantle.humanres.position.EmplPositionClassParty" list="emplPositionClassPartyList">
                 <date-filter/><econdition field-name="partyId"/></entity-find>
-            <if condition="emplPositionClassPartyList">
+            <if condition="(emplPositionClassPartyList?.length > 0)">
                 <then><set field="emplPositionClassIdList" from="emplPositionClassPartyList.emplPositionClassId"/></then>
                 <else><set field="emplPositionClassIdList" from="[]"/></else>
             </if>
@@ -48,7 +48,7 @@ along with this software (see the LICENSE.md file). If not, see
             </iterate>
 
             <!-- If employerRelList empty use all internal orgs -->
-            <if condition="employerRelList"><then>
+            <if condition="(employerRelList?.length > 0)"><then>
                 <entity-find entity-name="mantle.party.PartyDetail" list="employerPartyList">
                     <econdition field-name="partyId" operator="in" from="employerRelList*.toPartyId"/>
                     <econdition field-name="disabled" value="N" or-null="true"/>

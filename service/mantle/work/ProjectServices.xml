@@ -79,35 +79,35 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- always assign the user who creates the project as a manager -->
             <if condition="!vendorManagerPartyId &amp;&amp; ec.user.userAccount?.partyId">
                 <service-call name="create#mantle.work.effort.WorkEffortParty"
-                        in-map="[workEffortId:workEffortId, partyId:ec.user.userAccount.partyId,
-                            roleTypeId:'Manager', fromDate:ec.user.nowTimestamp, statusId:'WeptAssigned']"/>
+                        in-map="{workEffortId:workEffortId, partyId:ec.user.userAccount.partyId,
+                            roleTypeId:'Manager', fromDate:ec.user.nowTimestamp, statusId:'WeptAssigned'}"/>
             </if>
 
             <if condition="clientPartyId">
-                <service-call name="create#mantle.work.effort.WorkEffortParty" in-map="[workEffortId:workEffortId,
-                        partyId:clientPartyId, roleTypeId:'Customer', fromDate:ec.user.nowTimestamp]"/>
+                <service-call name="create#mantle.work.effort.WorkEffortParty" in-map="{workEffortId:workEffortId,
+                        partyId:clientPartyId, roleTypeId:'Customer', fromDate:ec.user.nowTimestamp}"/>
             </if>
             <if condition="clientBillingPartyId">
-                <service-call name="create#mantle.work.effort.WorkEffortParty" in-map="[workEffortId:workEffortId, partyId:clientBillingPartyId,
-                        roleTypeId:'ClientBilling', fromDate:ec.user.nowTimestamp, statusId:'WeptAssigned']"/>
+                <service-call name="create#mantle.work.effort.WorkEffortParty" in-map="{workEffortId:workEffortId, partyId:clientBillingPartyId,
+                        roleTypeId:'ClientBilling', fromDate:ec.user.nowTimestamp, statusId:'WeptAssigned'}"/>
             </if>
             <if condition="clientManagerPartyId">
-                <service-call name="create#mantle.work.effort.WorkEffortParty" in-map="[workEffortId:workEffortId, partyId:clientManagerPartyId,
-                        roleTypeId:'ClientManager', fromDate:ec.user.nowTimestamp, statusId:'WeptAssigned']"/>
+                <service-call name="create#mantle.work.effort.WorkEffortParty" in-map="{workEffortId:workEffortId, partyId:clientManagerPartyId,
+                        roleTypeId:'ClientManager', fromDate:ec.user.nowTimestamp, statusId:'WeptAssigned'}"/>
             </if>
 
             <if condition="vendorPartyId">
-                <service-call name="create#mantle.work.effort.WorkEffortParty" in-map="[workEffortId:workEffortId, partyId:vendorPartyId,
-                        roleTypeId:'Vendor', fromDate:ec.user.nowTimestamp]"/>
+                <service-call name="create#mantle.work.effort.WorkEffortParty" in-map="{workEffortId:workEffortId, partyId:vendorPartyId,
+                        roleTypeId:'Vendor', fromDate:ec.user.nowTimestamp}"/>
             </if>
             <if condition="vendorManagerPartyId &amp;&amp; vendorManagerPartyId != ec.user.userAccount.partyId">
-                <service-call name="create#mantle.work.effort.WorkEffortParty" in-map="[workEffortId:workEffortId, partyId:vendorManagerPartyId,
-                        roleTypeId:'Manager', fromDate:ec.user.nowTimestamp, statusId:'WeptAssigned']"/>
+                <service-call name="create#mantle.work.effort.WorkEffortParty" in-map="{workEffortId:workEffortId, partyId:vendorManagerPartyId,
+                        roleTypeId:'Manager', fromDate:ec.user.nowTimestamp, statusId:'WeptAssigned'}"/>
             </if>
 
             <if condition="assignToPartyId">
-                <service-call name="create#mantle.work.effort.WorkEffortParty" in-map="[workEffortId:workEffortId, partyId:assignToPartyId,
-                        roleTypeId:assignRoleTypeId, fromDate:ec.user.nowTimestamp, statusId:assignStatusId]"/>
+                <service-call name="create#mantle.work.effort.WorkEffortParty" in-map="{workEffortId:workEffortId, partyId:assignToPartyId,
+                        roleTypeId:assignRoleTypeId, fromDate:ec.user.nowTimestamp, statusId:assignStatusId}"/>
             </if>
         </actions>
     </service>
@@ -141,7 +141,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <return error="true" message="Project's new end date puts one or more tasks out of date range."/>
                 </if>
             </iterate>
-            <if condition="!taskList">
+            <if condition="!taskList?.length">
                 <entity-find entity-name="mantle.work.time.TimeEntry" list="timeEntryList">
                     <econdition field-name="workEffortId"/>
                 </entity-find>
@@ -158,23 +158,23 @@ along with this software (see the LICENSE.md file). If not, see
 
             <if condition="clientPartyId">
                 <service-call name="mantle.work.WorkEffortServices.replace#WorkEffortParty"
-                        in-map="[workEffortId:workEffortId, roleTypeId:'Customer', newPartyId:clientPartyId]"/>
+                        in-map="{workEffortId:workEffortId, roleTypeId:'Customer', newPartyId:clientPartyId}"/>
             </if>
             <if condition="clientBillingPartyId">
                 <service-call name="mantle.work.WorkEffortServices.replace#WorkEffortParty"
-                        in-map="[workEffortId:workEffortId, roleTypeId:'ClientBilling',newPartyId:clientBillingPartyId, statusId:'WeptAssigned']"/>
+                        in-map="{workEffortId:workEffortId, roleTypeId:'ClientBilling',newPartyId:clientBillingPartyId, statusId:'WeptAssigned'}"/>
             </if>
             <if condition="clientManagerPartyId">
                 <service-call name="mantle.work.WorkEffortServices.replace#WorkEffortParty"
-                        in-map="[workEffortId:workEffortId, roleTypeId:'ClientManager', newPartyId:clientManagerPartyId, statusId:'WeptAssigned']"/>
+                        in-map="{workEffortId:workEffortId, roleTypeId:'ClientManager', newPartyId:clientManagerPartyId, statusId:'WeptAssigned'}"/>
             </if>
             <if condition="vendorPartyId">
                 <service-call name="mantle.work.WorkEffortServices.replace#WorkEffortParty"
-                        in-map="[workEffortId:workEffortId, roleTypeId:'Vendor', newPartyId:vendorPartyId, statusId:'WeptAssigned']"/>
+                        in-map="{workEffortId:workEffortId, roleTypeId:'Vendor', newPartyId:vendorPartyId, statusId:'WeptAssigned'}"/>
             </if>
             <if condition="managerPartyId">
                 <service-call name="mantle.work.WorkEffortServices.replace#WorkEffortParty"
-                        in-map="[workEffortId:workEffortId, roleTypeId:'Manager', newPartyId:managerPartyId, statusId:'WeptAssigned']"/>
+                        in-map="{workEffortId:workEffortId, roleTypeId:'Manager', newPartyId:managerPartyId, statusId:'WeptAssigned'}"/>
             </if>
         </actions>
     </service>
@@ -219,28 +219,28 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="workEffort == null">
                 <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="workEffort"/></if>
 
-            <set field="actualProfit" from="(workEffort.actualClientCost ?: 0) - (workEffort.actualCost ?: 0)"/>
-            <set field="clientBudgetRemaining" from="(workEffort.totalClientCostAllowed ?: 0) - (workEffort.actualClientCost ?: 0)"/>
-            <set field="clientBudgetUsedPercent" from="workEffort.totalClientCostAllowed ? ((workEffort.actualClientCost ?: 0) / workEffort.totalClientCostAllowed) * 100 : 0"/>
+            <set field="actualProfit" from="(workEffort.actualClientCost || 0) - (workEffort.actualCost || 0)"/>
+            <set field="clientBudgetRemaining" from="(workEffort.totalClientCostAllowed || 0) - (workEffort.actualClientCost || 0)"/>
+            <set field="clientBudgetUsedPercent" from="workEffort.totalClientCostAllowed ? ((workEffort.actualClientCost || 0) / workEffort.totalClientCostAllowed) * 100 : 0"/>
             <set field="clientActualOverBudget" from="workEffort.actualClientCost &gt; workEffort.totalClientCostAllowed &amp;&amp; workEffort.totalClientCostAllowed"/>
 
-            <set field="actualPlusRemainingTime" from="(workEffort.actualWorkTime ?: 0) + (workEffort.remainingWorkTime ?: 0)"/>
+            <set field="actualPlusRemainingTime" from="(workEffort.actualWorkTime || 0) + (workEffort.remainingWorkTime || 0)"/>
             <set field="bestTimeEstimate" from="actualPlusRemainingTime &gt; workEffort.estimatedWorkTime ? actualPlusRemainingTime : workEffort.estimatedWorkTime "/>
-            <set field="estimatedCompletePercent" from="workEffort.estimatedWorkTime ? ((workEffort.actualWorkTime ?: 0) / workEffort.estimatedWorkTime) * 100 : 0"/>
-            <set field="estimatedRemainingPercent" from="workEffort.estimatedWorkTime ? ((workEffort.remainingWorkTime ?: 0) / workEffort.estimatedWorkTime) * 100 : 0"/>
-            <set field="estimatedActualPlusRemainingDiff" from="(workEffort.estimatedWorkTime ?: 0) - actualPlusRemainingTime"/>
-            <set field="actualPlusRemainingOverEstimated" from="actualPlusRemainingTime &gt; (workEffort.estimatedWorkTime ?: 0)"/>
+            <set field="estimatedCompletePercent" from="workEffort.estimatedWorkTime ? ((workEffort.actualWorkTime || 0) / workEffort.estimatedWorkTime) * 100 : 0"/>
+            <set field="estimatedRemainingPercent" from="workEffort.estimatedWorkTime ? ((workEffort.remainingWorkTime || 0) / workEffort.estimatedWorkTime) * 100 : 0"/>
+            <set field="estimatedActualPlusRemainingDiff" from="(workEffort.estimatedWorkTime || 0) - actualPlusRemainingTime"/>
+            <set field="actualPlusRemainingOverEstimated" from="actualPlusRemainingTime &gt; (workEffort.estimatedWorkTime || 0)"/>
 
-            <set field="timeBudgetCompletePercent" from="workEffort.totalTimeAllowed ? ((workEffort.actualWorkTime ?: 0) / workEffort.totalTimeAllowed) * 100 : 0"/>
-            <set field="timeBudgetRemainingPercent" from="workEffort.totalTimeAllowed ? ((workEffort.remainingWorkTime ?: 0) / workEffort.totalTimeAllowed) * 100 : 0"/>
-            <set field="timeBudgetActualPlusRemainingDiff" from="(workEffort.totalTimeAllowed ?: 0) - actualPlusRemainingTime"/>
-            <set field="actualPlusRemainingOverTimeBudget" from="actualPlusRemainingTime &gt; (workEffort.totalTimeAllowed ?: 0)"/>
+            <set field="timeBudgetCompletePercent" from="workEffort.totalTimeAllowed ? ((workEffort.actualWorkTime || 0) / workEffort.totalTimeAllowed) * 100 : 0"/>
+            <set field="timeBudgetRemainingPercent" from="workEffort.totalTimeAllowed ? ((workEffort.remainingWorkTime || 0) / workEffort.totalTimeAllowed) * 100 : 0"/>
+            <set field="timeBudgetActualPlusRemainingDiff" from="(workEffort.totalTimeAllowed || 0) - actualPlusRemainingTime"/>
+            <set field="actualPlusRemainingOverTimeBudget" from="actualPlusRemainingTime &gt; (workEffort.totalTimeAllowed || 0)"/>
 
-            <set field="clientAverageHourCost" from="workEffort.actualWorkTime ? ((workEffort.actualClientCost ?: 0) / workEffort.actualWorkTime) : 0"/>
+            <set field="clientAverageHourCost" from="workEffort.actualWorkTime ? ((workEffort.actualClientCost || 0) / workEffort.actualWorkTime) : 0"/>
             <set field="clientEstimatedCost" from="clientAverageHourCost * bestTimeEstimate"/>
-            <set field="clientBudgetEstimateDiff" from="(workEffort.totalClientCostAllowed ?: 0) - clientEstimatedCost"/>
+            <set field="clientBudgetEstimateDiff" from="(workEffort.totalClientCostAllowed || 0) - clientEstimatedCost"/>
 
-            <set field="estimatedCompleteBudgetPercentGap" from="(estimatedCompletePercent ?: 0) - clientBudgetUsedPercent"/>
+            <set field="estimatedCompleteBudgetPercentGap" from="(estimatedCompletePercent || 0) - clientBudgetUsedPercent"/>
             <set field="estimatedCompleteOverBudget" from="estimatedCompletePercent &lt; clientBudgetUsedPercent"/>
 
             <set field="projectDanger" from="clientActualOverBudget | actualPlusRemainingOverEstimated"/>
@@ -254,7 +254,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="rootWorkEffortId" from="workEffort.workEffortId"/>
                 <select-field field-name="statusId"/><select-field field-name="taskCount"/>
             </entity-find>
-            <set field="taskCountByStatusMap" from="[:]"/>
+            <set field="taskCountByStatusMap" from="{}"/>
             <iterate list="taskStatusCountList" entry="taskStatusCount">
                 <script>taskCountByStatusMap.put(taskStatusCount.statusId, taskStatusCount.taskCount)</script></iterate>
         </actions>
@@ -305,20 +305,20 @@ along with this software (see the LICENSE.md file). If not, see
                 <order-by field-name="estimatedStartDate,workEffortName"/>
             </entity-find>
 
-            <set field="milestoneStatsTotals" from="[workEffortId: 'Total', workEffortName: '', estimatedStartDate: '']"/>
+            <set field="milestoneStatsTotals" from="{workEffortId: 'Total', workEffortName: '', estimatedStartDate: ''}"/>
             <script>for (String statsField in statsFields) milestoneStatsTotals.put(statsField, 0.0)</script>
 
             <set field="milestoneStatsList" from="[]"/>
             <iterate list="milestoneList" entry="milestone">
-                <set field="milestoneStats" from="[workEffortId:milestone.workEffortId, workEffortName:milestone.workEffortName,
-                                                   estimatedStartDate:milestone.estimatedStartDate]"/>
+                <set field="milestoneStats" from="{workEffortId:milestone.workEffortId, workEffortName:milestone.workEffortName,
+                                                   estimatedStartDate:milestone.estimatedStartDate}"/>
                 <entity-find entity-name="mantle.work.effort.MilestoneSummary" list="msSummaryList">
                     <date-filter/><econdition field-name="workEffortId" from="milestone.workEffortId"/>
                     <select-field field-name="estimatedWorkTime,estimatedSetupTime,remainingWorkTime,actualWorkTime,actualSetupTime,totalTimeAllowed,actualCost,actualClientCost,totalClientCostAllowed"/>
                 </entity-find>
-                <if condition="msSummaryList"><script>
+                <if condition="(msSummaryList?.length > 0)"><script>
                     Map msSummary = msSummaryList.get(0)
-                    for (String statsField in statsFields) milestoneStats.put(statsField, msSummary.get(statsField) ?: 0.0)
+                    for (String statsField in statsFields) milestoneStats.put(statsField, msSummary.get(statsField) || 0.0)
 
                     milestoneStats.estimatedWorkDays = milestoneStats.estimatedWorkTime / timePerDay
                     milestoneStats.remainingWorkDays = milestoneStats.remainingWorkTime / timePerDay
@@ -427,13 +427,13 @@ along with this software (see the LICENSE.md file). If not, see
                 import org.moqui.entity.EntityValue
                 import org.moqui.impl.context.ExecutionContextImpl
 
-                Map childStatsTotals = [workEffortId: 'Total', workEffortName: '', priority: '']
+                Map childStatsTotals = {workEffortId: 'Total', workEffortName: '', priority: ''}
                 for (String statsField in statsFields) childStatsTotals.put(statsField, 0.0)
 
                 childStatsList = new ArrayList<>(directChildren.size())
                 for (EntityValue directChild in directChildren) {
-                    Map topLevelStats = [workEffortId: directChild.workEffortId, workEffortName: directChild.workEffortName,
-                            priority: directChild.priority]
+                    Map topLevelStats = {workEffortId: directChild.workEffortId, workEffortName: directChild.workEffortName,
+                            priority: directChild.priority}
                     for (String statsField in statsFields) topLevelStats.put(statsField, 0.0)
                     addChildStats(directChild, topLevelStats, ec)
 
@@ -530,17 +530,17 @@ along with this software (see the LICENSE.md file). If not, see
                 </entity-find>
                 <script>
                     resultList = []
-                    if (addOptional) resultList.add([partyId:"", name:"None"])
-                    for (party in partyList) resultList.add([partyId:party.partyId, name:ec.resource.expand('PartyNameTemplate', '', party)])
+                    if (addOptional) resultList.add({partyId:"", name:"None"})
+                    for (party in partyList) resultList.add({partyId:party.partyId, name:ec.resource.expand('PartyNameTemplate', '', party)})
                 </script>
             </then><else>
-                <set field="term" from="term ?: '*'"/>
+                <set field="term" from="term || '*'"/>
 
                 <entity-find-one entity-name="mantle.party.PartyDetail" value-field="partyDetail">
                     <field-map field-name="partyId" from="term"/></entity-find-one>
                 <if condition="partyDetail != null"><then>
                     <script>
-                        def outList = [[partyId:partyDetail.partyId, name:ec.resource.expand("PartyNameTemplate", "", partyDetail)]]
+                        def outList = [{partyId:partyDetail.partyId, name:ec.resource.expand("PartyNameTemplate", "", partyDetail)}]
                         ec.web.sendJsonResponse(outList)
                     </script>
                 </then><else>
@@ -569,11 +569,11 @@ along with this software (see the LICENSE.md file). If not, see
                     ]]></script>
                     <!-- <log level="warn" message="Doing party search with queryString [${termSb.toString()}], indexName:${indexName}, documentType:${documentType}"/> -->
                     <service-call name="org.moqui.search.SearchServices.search#DataDocuments" out-map="context"
-                            in-map="[queryString:termSb.toString(), indexName:searchIndexName, documentType:searchPartyDocType]"/>
+                            in-map="{queryString:termSb.toString(), indexName:searchIndexName, documentType:searchPartyDocType}"/>
                     <!-- <log level="warn" message="Got party search results: ${documentList}"/> -->
                     <script>
                         def outList = []
-                        for (document in documentList) outList.add([partyId:document._id, name:ec.resource.expand("PartyNameTemplate", "", document)])
+                        for (document in documentList) outList.add({partyId:document._id, name:ec.resource.expand("PartyNameTemplate", "", document)})
                         ec.web.sendJsonResponse(outList)
                     </script>
                     <!-- <log level="warn" message="Got party search outList: ${outList}"/> -->
@@ -595,8 +595,8 @@ along with this software (see the LICENSE.md file). If not, see
                 <order-by field-name="organizationName,^firstName,^lastName"/>
             </entity-find>
             <script>
-                resultList = [[partyId:"", name:"None"]]
-                for (weapd in weapdList) resultList.add([partyId:weapd.partyId, name:ec.resource.expand('PartyNameTemplate', '', weapd)])
+                resultList = [{partyId:"", name:"None"}]
+                for (weapd in weapdList) resultList.add({partyId:weapd.partyId, name:ec.resource.expand('PartyNameTemplate', '', weapd)})
             </script>
         </actions>
     </service>
@@ -615,7 +615,7 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <script>
                 resultList = []
-                for (task in taskList) resultList.add([workEffortId:task.workEffortId, taskLabel:ec.resource.expand('WorkEffortNameTemplate', '', task)])
+                for (task in taskList) resultList.add({workEffortId:task.workEffortId, taskLabel:ec.resource.expand('WorkEffortNameTemplate', '', task)})
             </script>
         </actions>
     </service>
@@ -633,7 +633,7 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <script>
                 resultList = []
-                for (milestone in milestoneList) resultList.add([workEffortId:milestone.workEffortId, milestoneLabel:ec.resource.expand('WorkEffortNameTemplate', '', milestone)])
+                for (milestone in milestoneList) resultList.add({workEffortId:milestone.workEffortId, milestoneLabel:ec.resource.expand('WorkEffortNameTemplate', '', milestone)})
             </script>
         </actions>
     </service>
@@ -651,7 +651,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <!-- decided to go with manual ID instead of auto <set field="seqName" value="Project_MS_${rootWorkEffortId}"/>
             <set field="workEffortId" value="${rootWorkEffortId}-MS-${ec.entity.sequencedIdPrimary(seqName, null, null)}"/> -->
-            <service-call name="create#mantle.work.effort.WorkEffort" out-map="context" in-map="context + [workEffortTypeEnumId:'WetMilestone']"/>
+            <service-call name="create#mantle.work.effort.WorkEffort" out-map="context" in-map="Object.assign({}, context, {workEffortTypeEnumId:'WetMilestone'})"/>
         </actions>
     </service>
     <service verb="update" noun="Milestone">

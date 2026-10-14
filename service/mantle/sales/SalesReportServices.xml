@@ -55,8 +55,8 @@ along with this software (see the LICENSE.md file). If not, see
             int displayIntervalCount = interval == 'q' ? (intervalCount * 3) : intervalCount
             int searchIntervalCount = displayIntervalCount + maInt
 
-            Map<String, TemporalUnit> tempUnits = [d:ChronoUnit.DAYS, w:ChronoUnit.WEEKS, M:ChronoUnit.MONTHS, q:ChronoUnit.MONTHS, y:ChronoUnit.YEARS]
-            Map<String, String> perMap = [d:'day', w:'week', M:'month', q:'quarter', y:'year']
+            Map<String, TemporalUnit> tempUnits = {d:ChronoUnit.DAYS, w:ChronoUnit.WEEKS, M:ChronoUnit.MONTHS, q:ChronoUnit.MONTHS, y:ChronoUnit.YEARS}
+            Map<String, String> perMap = {d:'day', w:'week', M:'month', q:'quarter', y:'year'}
             ArrayList<Timestamp> curPer = ec.user.getPeriodRange(perMap.get(interval), 0, thruDate)
             Timestamp thruTimestamp = curPer.get(1)
             def fromDateDt = java.time.ZonedDateTime.ofInstant(java.time.Instant.ofEpochMilli(curPer[0].time), TimeZone.getDefault().toZoneId())
@@ -64,16 +64,16 @@ along with this software (see the LICENSE.md file). If not, see
             // ec.logger.warn("from ${fromDateDt} thru ${thruTimestamp}")
 
             List filterList = [
-                    [range: [(dateField): [gte:(fromDateDt.toInstant().toEpochMilli() as String), lt:(thruTimestamp.time as String), format: 'epoch_millis']]],
-                    [terms: [partStatusId: ['OrderPlaced', 'OrderProcessing', 'OrderApproved', 'OrderSent', 'OrderCompleted', 'OrderHold']]],
-                    [terms: [statusId: ['OrderPlaced', 'OrderProcessing', 'OrderApproved', 'OrderSent', 'OrderCompleted', 'OrderHold']]]
+                    {range: {[dateField]: {gte:(fromDateDt.toInstant().toEpochMilli() as String), lt:(thruTimestamp.time as String), format: 'epoch_millis'}}},
+                    {terms: {partStatusId: ['OrderPlaced', 'OrderProcessing', 'OrderApproved', 'OrderSent', 'OrderCompleted', 'OrderHold']}},
+                    {terms: {statusId: ['OrderPlaced', 'OrderProcessing', 'OrderApproved', 'OrderSent', 'OrderCompleted', 'OrderHold']}}
             ]
-            if (vendorPartyIds) filterList.add([terms: [vendorPartyId: vendorPartyIds]])
-            if (customerPartyIds) filterList.add([terms: [customerPartyId: customerPartyIds]])
-            if (productStoreIds) filterList.add([terms: [productStoreId: productStoreIds]])
-            if (customerClassificationIds) filterList.add([terms: [customerClassId: customerClassificationIds]])
-            if (productIds) filterList.add([terms: [productId: productIds]])
-            Map queryMap = [bool: [filter: filterList]]
+            if (vendorPartyIds) filterList.add({terms: {vendorPartyId: vendorPartyIds}})
+            if (customerPartyIds) filterList.add({terms: {customerPartyId: customerPartyIds}})
+            if (productStoreIds) filterList.add({terms: {productStoreId: productStoreIds}})
+            if (customerClassificationIds) filterList.add({terms: {customerClassId: customerClassificationIds}})
+            if (productIds) filterList.add({terms: {productId: productIds}})
+            Map queryMap = {bool: {filter: filterList}}
 
             if (!offset && interval == 'w') {
                 // default to offset based on user's firstDayOfWeek relative to the ElasticSearch default of Monday for weekly date histogram
@@ -86,41 +86,41 @@ along with this software (see the LICENSE.md file). If not, see
             //         .order(BucketOrder.key(false)).timeZone(DateTimeZone.forTimeZone(TimeZone.getDefault()))
             //         .dateHistogramInterval(new DateHistogramInterval("1" + (String) interval)).format((String) dateFormat)
             // if (offset) aggBuilder.offset((String) offset)
-            Map histoMap = [field:dateField, (intervalName):("1" + (String) interval), time_zone:TimeZone.default.getID(),
-                    format:dateFormat, order:[_key:"desc"]]
+            Map histoMap = {field:dateField, [intervalName]:("1" + (String) interval), time_zone:TimeZone.default.getID(),
+                    format:dateFormat, order:{_key:"desc"}}
             if (offset) histoMap.offset = offset
 
-            Map subAggsMap = [:]
-            Map aggsMap = [DateOuter:[date_histogram:histoMap, aggs:subAggsMap]]
+            Map subAggsMap = {}
+            Map aggsMap = {DateOuter:{date_histogram:histoMap, aggs:subAggsMap}}
 
 
             // order count
             // aggBuilder.subAggregation(AggregationBuilders.cardinality("orderCount").field("orderId"))
-            subAggsMap.orderCount = [cardinality:[field:'orderId', precision_threshold:40000]]
+            subAggsMap.orderCount = {cardinality:{field:'orderId', precision_threshold:40000}}
 
             // total sales (itemSaleTotal, no item type restriction)
             // aggBuilder.subAggregation(AggregationBuilders.sum("totalSales").field("itemSaleTotal"))
-            subAggsMap.totalSales = [sum:[field:'itemSaleTotal']]
+            subAggsMap.totalSales = {sum:{field:'itemSaleTotal'}}
 
             // product only sums
             // AggregationBuilder itemProductFilter = AggregationBuilders.filter("ItemProduct",
             //         QueryBuilders.wrapperQuery(JsonOutput.toJson([term:[itemTypeEnumId:"ItemProduct"]])))
             // aggBuilder.subAggregation(itemProductFilter)
-            Map itemProductSubAggs = [:]
-            subAggsMap.ItemProduct = [filter:[term:[itemTypeEnumId:'ItemProduct']], aggs:itemProductSubAggs]
+            Map itemProductSubAggs = {}
+            subAggsMap.ItemProduct = {filter:{term:{itemTypeEnumId:'ItemProduct'}}, aggs:itemProductSubAggs}
 
             // total product sales (itemSaleTotal; itemTypeEnumId = ItemProduct)
             // itemProductFilter.subAggregation(AggregationBuilders.sum("productSaleTotal").field("itemSaleTotal"))
-            itemProductSubAggs.productSaleTotal = [sum:[field:'itemSaleTotal']]
+            itemProductSubAggs.productSaleTotal = {sum:{field:'itemSaleTotal'}}
             // total product shipped (issuedSaleTotal; itemTypeEnumId = ItemProduct)
             //itemProductFilter.subAggregation(AggregationBuilders.sum("productIssuedTotal").field("issuances.issuedSaleTotal"))
-            itemProductSubAggs.productIssuedTotal = [sum:[field:'issuances.issuedSaleTotal']]
+            itemProductSubAggs.productIssuedTotal = {sum:{field:'issuances.issuedSaleTotal'}}
             // product cost total (issuedCostTotal)
             // itemProductFilter.subAggregation(AggregationBuilders.sum("productCostTotal").field("issuances.issuedCostTotal"))
-            itemProductSubAggs.productCostTotal = [sum:[field:'issuances.issuedCostTotal']]
+            itemProductSubAggs.productCostTotal = {sum:{field:'issuances.issuedCostTotal'}}
             // product quantity total
             // itemProductFilter.subAggregation(AggregationBuilders.sum("productQuantityTotal").field("orderQuantity"))
-            itemProductSubAggs.productQuantityTotal = [sum:[field:'orderQuantity']]
+            itemProductSubAggs.productQuantityTotal = {sum:{field:'orderQuantity'}}
 
             // total discounts (itemSaleTotal for discount itemTypeEnumId)
             List discountTypes = ['ItemDiscount', 'ItemPromptDiscount', 'ItemCouponCredit', 'ItemPromoDiscount', 'ItemFreeFills', 'ItemSlottingFees', 'ItemAdjAdvertising', 'ItemAdjJointAdv']
@@ -128,25 +128,25 @@ along with this software (see the LICENSE.md file). If not, see
             //         QueryBuilders.wrapperQuery(JsonOutput.toJson([terms:[itemTypeEnumId:discountTypes]])))
             // itemDiscountFilter.subAggregation(AggregationBuilders.sum("discountTotal").field("itemSaleTotal"))
             // aggBuilder.subAggregation(itemDiscountFilter)
-            subAggsMap.ItemDiscount = [filter:[terms:[itemTypeEnumId:discountTypes]], aggs:[discountTotal:[sum:[field:'itemSaleTotal']]]]
+            subAggsMap.ItemDiscount = {filter:{terms:{itemTypeEnumId:discountTypes}}, aggs:{discountTotal:{sum:{field:'itemSaleTotal'}}}}
 
             // new customer order count
             // AggregationBuilder newCustFilter = AggregationBuilders.filter("NewCustomer",
             //         QueryBuilders.wrapperQuery(JsonOutput.toJson([term:[isNewCustomer:'Y']])))
             // newCustFilter.subAggregation(AggregationBuilders.cardinality("newCustomerOrderCount").field("orderId"))
             // aggBuilder.subAggregation(newCustFilter)
-            subAggsMap.NewCustomer = [filter:[term:[isNewCustomer:'Y']], aggs:[newCustomerOrderCount:[cardinality:[field:'orderId', precision_threshold:40000]]]]
+            subAggsMap.NewCustomer = {filter:{term:{isNewCustomer:'Y'}}, aggs:{newCustomerOrderCount:{cardinality:{field:'orderId', precision_threshold:40000}}}}
 
             // do the search
             // SearchResponse sr = ElasticSearchUtil.aggregationSearch(indexName, [documentType], null, queryMap, aggBuilder, ec)
             String orderIdx = org.moqui.impl.context.ElasticFacadeImpl.ddIdToEsIndex((String) documentType)
-            Map resultMap = elasticClient.search(orderIdx, [query:queryMap, aggs:aggsMap])
+            Map resultMap = elasticClient.search(orderIdx, {query:queryMap, aggs:aggsMap})
 
             Map aggregationsMap = (Map) resultMap.aggregations
             // ec.logger.error("aggregationsMap:\n${JsonOutput.prettyPrint(JsonOutput.toJson(aggregationsMap))}")
 
             salesOrderSummaryList = []
-            ordersTotal = [dateKey:"Prior Total"]
+            ordersTotal = {dateKey:"Prior Total"}
             for (Map dateBucket in (List<Map>) aggregationsMap.DateOuter.buckets) {
                 Map prodAgg = (Map) dateBucket.ItemProduct
                 Map discAgg = (Map) dateBucket.ItemDiscount
@@ -157,7 +157,7 @@ along with this software (see the LICENSE.md file). If not, see
                 BigDecimal productIssuedTotal = prodAgg.productIssuedTotal?.value as BigDecimal
                 BigDecimal productCostTotal = prodAgg.productCostTotal?.value as BigDecimal
                 BigDecimal discountTotal = discAgg.discountTotal?.value as BigDecimal
-                Map curLine = [dateKey:dateBucket.key_as_string,
+                Map curLine = {dateKey:dateBucket.key_as_string,
                         orderCount:orderCount, newCustomerOrderCount:newCustomerOrderCount,
                         newCustomerPercent:(orderCount ? (newCustomerOrderCount/orderCount) : 0.0),
                         totalSales:dateBucket.totalSales.value as BigDecimal,
@@ -167,7 +167,7 @@ along with this software (see the LICENSE.md file). If not, see
                         discountPercent:(productSaleTotal ? (-discountTotal/productSaleTotal) : 0.0),
                         costPercent:(productIssuedTotal ? (productCostTotal/productIssuedTotal) : 0.0),
                         orderCountMa:0.0, newCustomerOrderCountMa:0.0, newCustomerPercentMa:0.0, productQuantityTotalMa:0.0,
-                        productSaleTotalMa:0.0, discountPercentMa:0.0, netSalesMa:0.0]
+                        productSaleTotalMa:0.0, discountPercentMa:0.0, netSalesMa:0.0}
                 salesOrderSummaryList.add(curLine)
                 // don't include the first (most recent) period in the total and average
                 if (salesOrderSummaryList.size() > 1) addBigDecimalsInMap(ordersTotal, curLine)
@@ -261,8 +261,8 @@ along with this software (see the LICENSE.md file). If not, see
             int displayIntervalCount = interval == 'q' ? (intervalCount * 3) : intervalCount
             int searchIntervalCount = displayIntervalCount + maInt
 
-            Map<String, TemporalUnit> tempUnits = [d:ChronoUnit.DAYS, w:ChronoUnit.WEEKS, M:ChronoUnit.MONTHS, q:ChronoUnit.MONTHS, y:ChronoUnit.YEARS]
-            Map<String, String> perMap = [d:'day', w:'week', M:'month', q:'quarter', y:'year']
+            Map<String, TemporalUnit> tempUnits = {d:ChronoUnit.DAYS, w:ChronoUnit.WEEKS, M:ChronoUnit.MONTHS, q:ChronoUnit.MONTHS, y:ChronoUnit.YEARS}
+            Map<String, String> perMap = {d:'day', w:'week', M:'month', q:'quarter', y:'year'}
             ArrayList<Timestamp> curPer = ec.user.getPeriodRange(perMap.get(interval), 0, thruDate)
             Timestamp thruTimestamp = curPer.get(1)
             def fromDateDt = java.time.ZonedDateTime.ofInstant(java.time.Instant.ofEpochMilli(curPer[0].time), TimeZone.getDefault().toZoneId())
@@ -270,15 +270,15 @@ along with this software (see the LICENSE.md file). If not, see
             // ec.logger.warn("from ${fromDateDt} thru ${thruTimestamp}")
 
             List filterList = [
-                    [range: [(dateField): [gte:(fromDateDt.toInstant().toEpochMilli() as String), lt:(thruTimestamp.time as String), format: 'epoch_millis']]],
-                    [terms: [statusId: ['InvoiceFinalized', 'InvoiceSent', 'InvoiceAcked', 'InvoicePmtRecvd']]]
+                    {range: {[dateField]: {gte:(fromDateDt.toInstant().toEpochMilli() as String), lt:(thruTimestamp.time as String), format: 'epoch_millis'}}},
+                    {terms: {statusId: ['InvoiceFinalized', 'InvoiceSent', 'InvoiceAcked', 'InvoicePmtRecvd']}}
             ]
-            if (fromPartyIds) filterList.add([terms: [fromPartyId: fromPartyIds]])
-            if (toPartyIds) filterList.add([terms: [toPartyId: toPartyIds]])
-            if (productStoreIds) filterList.add([terms: [productStoreId: productStoreIds]])
-            if (customerClassificationIds) filterList.add([terms: [customerClassId: customerClassificationIds]])
-            if (productIds) filterList.add([terms: [productId: productIds]])
-            Map queryMap = [bool: [filter: filterList]]
+            if (fromPartyIds) filterList.add({terms: {fromPartyId: fromPartyIds}})
+            if (toPartyIds) filterList.add({terms: {toPartyId: toPartyIds}})
+            if (productStoreIds) filterList.add({terms: {productStoreId: productStoreIds}})
+            if (customerClassificationIds) filterList.add({terms: {customerClassId: customerClassificationIds}})
+            if (productIds) filterList.add({terms: {productId: productIds}})
+            Map queryMap = {bool: {filter: filterList}}
 
             if (!offset && interval == 'w') {
                 // default to offset based on user's firstDayOfWeek relative to the ElasticSearch default of Monday for weekly date histogram
@@ -288,77 +288,77 @@ along with this software (see the LICENSE.md file). If not, see
             }
 
             // prep the invoice level search
-            Map invHistoMap = [field:dateField, (intervalName):("1" + (String) interval), time_zone:TimeZone.default.getID(),
-                    format:dateFormat, order:[_key:"desc"], min_doc_count:1]
+            Map invHistoMap = {field:dateField, [intervalName]:("1" + (String) interval), time_zone:TimeZone.default.getID(),
+                    format:dateFormat, order:{_key:"desc"}, min_doc_count:1}
             if (offset) invHistoMap.offset = offset
 
-            Map invSubAggsMap = [:]
-            Map invAggsMap = [DateOuter:[date_histogram:invHistoMap, aggs:invSubAggsMap]]
+            Map invSubAggsMap = {}
+            Map invAggsMap = {DateOuter:{date_histogram:invHistoMap, aggs:invSubAggsMap}}
 
             // total sales
-            invSubAggsMap.invoiceTotal = [sum:[field:'invoiceTotal']]
+            invSubAggsMap.invoiceTotal = {sum:{field:'invoiceTotal'}}
             // total paid
             // NOTE: may want this to behave differently, somehow do a nested aggregation for only applications with appliedDate less than the end date of the current date range
-            invSubAggsMap.invoicePaymentsApplied = [sum:[field:'appliedPaymentsTotal']]
+            invSubAggsMap.invoicePaymentsApplied = {sum:{field:'appliedPaymentsTotal'}}
             // total pre-paid
-            invSubAggsMap.prePaymentsTotal = [sum:[field:'prePaymentsTotal']]
+            invSubAggsMap.prePaymentsTotal = {sum:{field:'prePaymentsTotal'}}
 
             // do the invoice search
             String invoiceIdx = org.moqui.impl.context.ElasticFacadeImpl.ddIdToEsIndex((String) invoiceDocumentType)
-            Map invResultMap = elasticClient.search(invoiceIdx, [query:queryMap, aggs:invAggsMap])
+            Map invResultMap = elasticClient.search(invoiceIdx, {query:queryMap, aggs:invAggsMap})
             Map invAggregationsMap = (Map) invResultMap.aggregations
 
             // prep the invoice item search
-            Map itemHistoMap = [field:dateField, (intervalName):("1" + (String) interval), time_zone:TimeZone.default.getID(),
-                    format:dateFormat, order:[_key:"desc"]]
+            Map itemHistoMap = {field:dateField, [intervalName]:("1" + (String) interval), time_zone:TimeZone.default.getID(),
+                    format:dateFormat, order:{_key:"desc"}}
             if (offset) itemHistoMap.offset = offset
 
-            Map itemSubAggsMap = [:]
-            Map itemAggsMap = [DateOuter:[date_histogram:itemHistoMap, aggs:itemSubAggsMap]]
+            Map itemSubAggsMap = {}
+            Map itemAggsMap = {DateOuter:{date_histogram:itemHistoMap, aggs:itemSubAggsMap}}
 
             // invoice count
-            itemSubAggsMap.invoiceIdCount = [cardinality:[field:'invoiceId', precision_threshold:40000]]
+            itemSubAggsMap.invoiceIdCount = {cardinality:{field:'invoiceId', precision_threshold:40000}}
             // total sales (itemSaleTotal, no item type restriction)
-            itemSubAggsMap.totalSales = [sum:[field:'itemSaleTotal']]
+            itemSubAggsMap.totalSales = {sum:{field:'itemSaleTotal'}}
 
             // product only counts
-            Map itemProductSubAggs = [:]
-            itemSubAggsMap.ItemProduct = [filter:[term:[itemTypeEnumId:'ItemProduct']], aggs:itemProductSubAggs]
+            Map itemProductSubAggs = {}
+            itemSubAggsMap.ItemProduct = {filter:{term:{itemTypeEnumId:'ItemProduct'}}, aggs:itemProductSubAggs}
             // total product sales (itemSaleTotal; itemTypeEnumId = ItemProduct)
-            itemProductSubAggs.productSaleTotal = [sum:[field:'itemSaleTotal']]
+            itemProductSubAggs.productSaleTotal = {sum:{field:'itemSaleTotal'}}
             // total product shipped (issuedSaleTotal; itemTypeEnumId = ItemProduct)
-            itemProductSubAggs.productIssuedTotal = [sum:[field:'issuances.issuedSaleTotal']]
+            itemProductSubAggs.productIssuedTotal = {sum:{field:'issuances.issuedSaleTotal'}}
             // product cost total (issuedCostTotal)
-            itemProductSubAggs.productCostTotal = [sum:[field:'issuances.issuedCostTotal']]
+            itemProductSubAggs.productCostTotal = {sum:{field:'issuances.issuedCostTotal'}}
             // product quantity total
-            itemProductSubAggs.productQuantityTotal = [sum:[field:'quantity']]
+            itemProductSubAggs.productQuantityTotal = {sum:{field:'quantity'}}
 
             // total discounts (itemSaleTotal for discount itemTypeEnumId)
             List discountTypes = ['ItemDiscount', 'ItemPromptDiscount', 'ItemCouponCredit', 'ItemPromoDiscount', 'ItemFreeFills', 'ItemSlottingFees', 'ItemAdjAdvertising', 'ItemAdjJointAdv']
-            itemSubAggsMap.ItemDiscount = [filter:[terms:[itemTypeEnumId:discountTypes]], aggs:[discountTotal:[sum:[field:'itemSaleTotal']]]]
+            itemSubAggsMap.ItemDiscount = {filter:{terms:{itemTypeEnumId:discountTypes}}, aggs:{discountTotal:{sum:{field:'itemSaleTotal'}}}}
 
             // do the invoice item search
             String itemIdx = org.moqui.impl.context.ElasticFacadeImpl.ddIdToEsIndex((String) itemDocumentType)
-            Map itemResultMap = elasticClient.search(itemIdx, [query:queryMap, aggs:itemAggsMap])
+            Map itemResultMap = elasticClient.search(itemIdx, {query:queryMap, aggs:itemAggsMap})
             Map itemAggregationsMap = (Map) itemResultMap.aggregations
             // ec.logger.warn(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson([query:queryMap, aggs:itemAggsMap])))
 
             // make list for invoice details
-            Map<String, Map> invoiceTempMap = [:]
+            Map<String, Map> invoiceTempMap = {}
             for (Map dateBucket in (List<Map>) invAggregationsMap.DateOuter.buckets) {
                 BigDecimal invoiceTotal = dateBucket.invoiceTotal?.value as BigDecimal
                 BigDecimal invoicePaymentsApplied = dateBucket.invoicePaymentsApplied?.value as BigDecimal
                 BigDecimal prePaymentsTotal = dateBucket.prePaymentsTotal?.value as BigDecimal
                 invoiceTempMap.put((String) dateBucket.key_as_string,
-                        [dateKey:dateBucket.key_as_string, invoiceCount:dateBucket.doc_count as BigDecimal,
+                        {dateKey:dateBucket.key_as_string, invoiceCount:dateBucket.doc_count as BigDecimal,
                          invoiceTotal:invoiceTotal, invoicePaymentsApplied:invoicePaymentsApplied, prePaymentsTotal:prePaymentsTotal,
                          paidPercent:(invoiceTotal ? (invoicePaymentsApplied/invoiceTotal) : 0.0),
-                         prePaidPercent:(invoiceTotal ? (prePaymentsTotal/invoiceTotal) : 0.0)])
+                         prePaidPercent:(invoiceTotal ? (prePaymentsTotal/invoiceTotal) : 0.0)})
             }
 
             // prep the list from items first
             salesInvoiceSummaryList = []
-            invoicesTotal = [dateKey:"Prior Total"]
+            invoicesTotal = {dateKey:"Prior Total"}
             for (Map dateBucket in (List<Map>) itemAggregationsMap.DateOuter.buckets) {
                 String keyAsString = (String) dateBucket.key_as_string
                 Map invoiceTemp = invoiceTempMap.remove(keyAsString)
@@ -366,12 +366,12 @@ along with this software (see the LICENSE.md file). If not, see
                 def prodAgg = dateBucket.ItemProduct
                 def discAgg = dateBucket.ItemDiscount
                 BigDecimal invoiceIdCount = dateBucket.invoiceIdCount?.value as BigDecimal
-                BigDecimal invoiceCount = invoiceTemp?.invoiceCount as BigDecimal ?: invoiceIdCount
+                BigDecimal invoiceCount = invoiceTemp?.invoiceCount as BigDecimal || invoiceIdCount
                 BigDecimal productSaleTotal = prodAgg.productSaleTotal?.value as BigDecimal
                 BigDecimal productIssuedTotal = prodAgg.productIssuedTotal?.value as BigDecimal
                 BigDecimal productCostTotal = prodAgg.productCostTotal?.value as BigDecimal
                 BigDecimal discountTotal = discAgg.discountTotal?.value as BigDecimal
-                Map curLine = [invoiceCount:invoiceCount, invoiceIdCount:invoiceIdCount,
+                Map curLine = {invoiceCount:invoiceCount, invoiceIdCount:invoiceIdCount,
                         totalSales:dateBucket.totalSales?.value as BigDecimal,
                         productSaleTotal:productSaleTotal, productIssuedTotal:productIssuedTotal, productCostTotal:productCostTotal,
                         productQuantityTotal:prodAgg.productQuantityTotal?.value as BigDecimal,
@@ -379,12 +379,12 @@ along with this software (see the LICENSE.md file). If not, see
                         discountPercent:(productSaleTotal ? (-discountTotal/productSaleTotal) : 0.0),
                         costPercent:(productIssuedTotal ? (productCostTotal/productIssuedTotal) : 0.0),
                         invoiceCountMa:0.0, productQuantityTotalMa:0.0, invoiceTotalMa:0.0, paidPercentMa:0.0,
-                        prePaidPercentMa:0.0, costPercentMa:0.0, discountPercentMa:0.0] as Map
+                        prePaidPercentMa:0.0, costPercentMa:0.0, discountPercentMa:0.0} as Map
                 if (invoiceTemp) {
                     curLine.putAll(invoiceTemp)
                 } else {
-                    curLine.putAll([dateKey:keyAsString, invoiceTotal:0.0,
-                            invoicePaymentsApplied:0.0, prePaymentsTotal:0.0, paidPercent:0.0, prePaidPercent:0.0])
+                    curLine.putAll({dateKey:keyAsString, invoiceTotal:0.0,
+                            invoicePaymentsApplied:0.0, prePaymentsTotal:0.0, paidPercent:0.0, prePaidPercent:0.0})
                 }
                 salesInvoiceSummaryList.add(curLine)
                 // don't include the first (most recent) period in the total and average
@@ -464,7 +464,7 @@ along with this software (see the LICENSE.md file). If not, see
             def elasticClient = ec.factory.elastic.getClient((String) clusterName)
             if (elasticClient == null) { ec.message.addMessage("No ElasticClient found for cluster ${clusterName}", "danger"); return }
 
-            Map<String, String> perMap = [d:'day', w:'week', M:'month', q:'quarter', y:'year']
+            Map<String, String> perMap = {d:'day', w:'week', M:'month', q:'quarter', y:'year'}
             ArrayList<Timestamp> curPer = ec.user.getPeriodRange(perMap.get(interval), poffset, thruDate)
             /* no longer do this, other aggregations now use an offset to match the Java week definition for user's Locale:
             // for weeks shift by one to start on Monday (like ES does for aggregations) instead of Sunday
@@ -473,35 +473,35 @@ along with this software (see the LICENSE.md file). If not, see
             topProductStart = curPer.get(0)
             topProductEnd = curPer.get(1)
 
-            Map queryMap = [bool: [filter: [
-                    [range: [(dateField): [gte:(topProductStart.time as String), lt:(topProductEnd.time as String), format: 'epoch_millis']]],
-                    [terms: [partStatusId: ['OrderPlaced', 'OrderProcessing', 'OrderApproved', 'OrderSent', 'OrderCompleted', 'OrderHold']]]
-            ]]]
+            Map queryMap = {bool: {filter: [
+                    {range: {[dateField]: {gte:(topProductStart.time as String), lt:(topProductEnd.time as String), format: 'epoch_millis'}}},
+                    {terms: {partStatusId: ['OrderPlaced', 'OrderProcessing', 'OrderApproved', 'OrderSent', 'OrderCompleted', 'OrderHold']}}
+            ]}}
 
             // By Product Term
-            Map subAggsMap = [:]
-            Map aggsMap = [TopTerms:[terms:[field:'productId', size:topLimit, order:[(orderByField):"desc"]], aggs:subAggsMap]]
+            Map subAggsMap = {}
+            Map aggsMap = {TopTerms:{terms:{field:'productId', size:topLimit, order:{[orderByField]:"desc"}}, aggs:subAggsMap}}
 
-            subAggsMap.totalQuantity = [sum:[field:'orderQuantity']]
-            subAggsMap.totalSales = [sum:[field:'itemSaleTotal']]
+            subAggsMap.totalQuantity = {sum:{field:'orderQuantity'}}
+            subAggsMap.totalSales = {sum:{field:'itemSaleTotal'}}
             // total product shipped (issuedSaleTotal; itemTypeEnumId = ItemProduct)
-            subAggsMap.productIssuedTotal = [sum:[field:'issuances.issuedSaleTotal']]
+            subAggsMap.productIssuedTotal = {sum:{field:'issuances.issuedSaleTotal'}}
             // product cost total (issuedCostTotal)
-            subAggsMap.productCostTotal = [sum:[field:'issuances.issuedCostTotal']]
+            subAggsMap.productCostTotal = {sum:{field:'issuances.issuedCostTotal'}}
 
             String orderIdx = org.moqui.impl.context.ElasticFacadeImpl.ddIdToEsIndex((String) documentType)
-            Map resultMap = elasticClient.search(orderIdx, [query:queryMap, aggs:aggsMap])
+            Map resultMap = elasticClient.search(orderIdx, {query:queryMap, aggs:aggsMap})
             Map aggregationsMap = (Map) resultMap.aggregations
 
             topProductList = new ArrayList(topLimit)
             for (Map bucket in (List<Map>) aggregationsMap.TopTerms.buckets) {
                 BigDecimal productIssuedTotal = bucket.productIssuedTotal?.value as BigDecimal
                 BigDecimal productCostTotal = bucket.productCostTotal?.value as BigDecimal
-                Map curLine = [productId:bucket.key,
+                Map curLine = {productId:bucket.key,
                         totalQuantity:bucket.totalQuantity?.value as BigDecimal,
                         totalSales:bucket.totalSales?.value as BigDecimal,
                         productIssuedTotal:productIssuedTotal, productCostTotal:productCostTotal,
-                        costPercent:(productIssuedTotal ? (productCostTotal/productIssuedTotal) : 0.0)]
+                        costPercent:(productIssuedTotal ? (productCostTotal/productIssuedTotal) : 0.0)}
                 topProductList.add(curLine)
             }
         ]]></script></actions>
@@ -532,7 +532,7 @@ along with this software (see the LICENSE.md file). If not, see
             def elasticClient = ec.factory.elastic.getClient((String) clusterName)
             if (elasticClient == null) { ec.message.addMessage("No ElasticClient found for cluster ${clusterName}", "danger"); return }
 
-            Map<String, String> perMap = [d:'day', w:'week', M:'month', q:'quarter', y:'year']
+            Map<String, String> perMap = {d:'day', w:'week', M:'month', q:'quarter', y:'year'}
             ArrayList<Timestamp> curPer = ec.user.getPeriodRange(perMap.get(interval), poffset, thruDate)
             /* no longer do this, other aggregations now use an offset to match the Java week definition for user's Locale:
             // for weeks shift by one to start on Monday (like ES does for aggregations) instead of Sunday
@@ -541,88 +541,88 @@ along with this software (see the LICENSE.md file). If not, see
             topCustomerClassStart = curPer.get(0)
             topCustomerClassEnd = curPer.get(1)
 
-            Map queryMap = [bool: [filter: [
-                    [range: [(dateField): [gte:(topCustomerClassStart.time as String), lt:(topCustomerClassEnd.time as String), format: 'epoch_millis']]],
-                    [terms: [statusId: ['InvoiceFinalized', 'InvoiceSent', 'InvoiceAcked', 'InvoicePmtRecvd']]]
-            ]]]
+            Map queryMap = {bool: {filter: [
+                    {range: {[dateField]: {gte:(topCustomerClassStart.time as String), lt:(topCustomerClassEnd.time as String), format: 'epoch_millis'}}},
+                    {terms: {statusId: ['InvoiceFinalized', 'InvoiceSent', 'InvoiceAcked', 'InvoicePmtRecvd']}}
+            ]}}
 
             // prep the invoice level search
-            Map invSubAggsMap = [:]
-            Map invAggsMap = [TopTerms:[terms:[field:'customerClassId', size:topLimit], aggs:invSubAggsMap]]
+            Map invSubAggsMap = {}
+            Map invAggsMap = {TopTerms:{terms:{field:'customerClassId', size:topLimit}, aggs:invSubAggsMap}}
 
             // total sales
-            invSubAggsMap.invoiceTotal = [sum:[field:'invoiceTotal']]
+            invSubAggsMap.invoiceTotal = {sum:{field:'invoiceTotal'}}
             // total paid
             // NOTE: may want this to behave differently, somehow do a nested aggregation for only applications with appliedDate less than the end date of the current date range
-            invSubAggsMap.invoicePaymentsApplied = [sum:[field:'appliedPaymentsTotal']]
+            invSubAggsMap.invoicePaymentsApplied = {sum:{field:'appliedPaymentsTotal'}}
             // do the invoice search
             String invoiceIdx = org.moqui.impl.context.ElasticFacadeImpl.ddIdToEsIndex((String) invoiceDocumentType)
-            Map invResultMap = elasticClient.search(invoiceIdx, [query:queryMap, aggs:invAggsMap])
+            Map invResultMap = elasticClient.search(invoiceIdx, {query:queryMap, aggs:invAggsMap})
             Map invAggregationsMap = (Map) invResultMap.aggregations
 
             // prep the invoice item search
-            Map itemSubAggsMap = [:]
-            Map itemAggsMap = [TopTerms:[terms:[field:'customerClassId', size:topLimit], aggs:itemSubAggsMap]]
+            Map itemSubAggsMap = {}
+            Map itemAggsMap = {TopTerms:{terms:{field:'customerClassId', size:topLimit}, aggs:itemSubAggsMap}}
 
             // invoice count
-            itemSubAggsMap.invoiceIdCount = [cardinality:[field:'invoiceId', precision_threshold:40000]]
+            itemSubAggsMap.invoiceIdCount = {cardinality:{field:'invoiceId', precision_threshold:40000}}
             // total sales (itemSaleTotal, no item type restriction)
-            itemSubAggsMap.totalSales = [sum:[field:'itemSaleTotal']]
+            itemSubAggsMap.totalSales = {sum:{field:'itemSaleTotal'}}
 
             // product only counts
-            Map itemProductSubAggs = [:]
-            itemSubAggsMap.ItemProduct = [filter:[term:[itemTypeEnumId:'ItemProduct']], aggs:itemProductSubAggs]
+            Map itemProductSubAggs = {}
+            itemSubAggsMap.ItemProduct = {filter:{term:{itemTypeEnumId:'ItemProduct'}}, aggs:itemProductSubAggs}
 
             // total product sales (itemSaleTotal; itemTypeEnumId = ItemProduct)
-            itemProductSubAggs.productSaleTotal = [sum:[field:'itemSaleTotal']]
+            itemProductSubAggs.productSaleTotal = {sum:{field:'itemSaleTotal'}}
             // total product shipped (issuedSaleTotal; itemTypeEnumId = ItemProduct)
-            itemProductSubAggs.productIssuedTotal = [sum:[field:'issuances.issuedSaleTotal']]
+            itemProductSubAggs.productIssuedTotal = {sum:{field:'issuances.issuedSaleTotal'}}
             // product cost total (issuedCostTotal)
-            itemProductSubAggs.productCostTotal = [sum:[field:'issuances.issuedCostTotal']]
+            itemProductSubAggs.productCostTotal = {sum:{field:'issuances.issuedCostTotal'}}
             // product quantity total
-            itemProductSubAggs.productQuantityTotal = [sum:[field:'quantity']]
+            itemProductSubAggs.productQuantityTotal = {sum:{field:'quantity'}}
 
             // total discounts (itemSaleTotal for discount itemTypeEnumId)
             List discountTypes = ['ItemDiscount', 'ItemPromptDiscount', 'ItemCouponCredit', 'ItemPromoDiscount', 'ItemFreeFills', 'ItemSlottingFees', 'ItemAdjAdvertising', 'ItemAdjJointAdv']
-            itemSubAggsMap.ItemDiscount = [filter:[terms:[itemTypeEnumId:discountTypes]], aggs:[discountTotal:[sum:[field:'itemSaleTotal']]]]
+            itemSubAggsMap.ItemDiscount = {filter:{terms:{itemTypeEnumId:discountTypes}}, aggs:{discountTotal:{sum:{field:'itemSaleTotal'}}}}
 
             // do the invoice item search
             String itemIdx = org.moqui.impl.context.ElasticFacadeImpl.ddIdToEsIndex((String) itemDocumentType)
-            Map itemResultMap = elasticClient.search(itemIdx, [query:queryMap, aggs:itemAggsMap])
+            Map itemResultMap = elasticClient.search(itemIdx, {query:queryMap, aggs:itemAggsMap})
             Map itemAggregationsMap = (Map) itemResultMap.aggregations
 
             // make list for invoice details
-            Map<String, Map> invoiceTempMap = [:]
+            Map<String, Map> invoiceTempMap = {}
             for (Map bucket in (List<Map>) invAggregationsMap.TopTerms.buckets) {
                 String customerClassId = (String) bucket.key
                 BigDecimal invoiceTotal = bucket.invoiceTotal?.value as BigDecimal
                 BigDecimal invoicePaymentsApplied = bucket.invoicePaymentsApplied?.value as BigDecimal
-                invoiceTempMap.put(customerClassId, [customerClassId:customerClassId, invoiceCount:bucket.doc_count as BigDecimal,
+                invoiceTempMap.put(customerClassId, {customerClassId:customerClassId, invoiceCount:bucket.doc_count as BigDecimal,
                         invoiceTotal:invoiceTotal, invoicePaymentsApplied:invoicePaymentsApplied,
-                        paidPercent:(invoiceTotal ? (invoicePaymentsApplied/invoiceTotal) : 0.0)])
+                        paidPercent:(invoiceTotal ? (invoicePaymentsApplied/invoiceTotal) : 0.0)})
             }
 
             // prep the list from items first
-            invoicesTotal = [classDescription:"Total"]
+            invoicesTotal = {classDescription:"Total"}
             for (Map bucket in (List<Map>) itemAggregationsMap.TopTerms.buckets) {
                 String customerClassId = (String) bucket.key
                 Map invoiceTemp = invoiceTempMap.get(customerClassId)
-                if (!invoiceTemp) { invoiceTemp = [customerClassId:customerClassId]; invoiceTempMap.put(customerClassId, invoiceTemp) }
+                if (!invoiceTemp) { invoiceTemp = {customerClassId:customerClassId}; invoiceTempMap.put(customerClassId, invoiceTemp) }
                 def prodAgg = bucket.ItemProduct
                 def discAgg = bucket.ItemDiscount
                 BigDecimal invoiceIdCount = bucket.invoiceIdCount?.value as BigDecimal
-                BigDecimal invoiceCount = (BigDecimal) invoiceTemp?.invoiceCount ?: invoiceIdCount
+                BigDecimal invoiceCount = (BigDecimal) invoiceTemp?.invoiceCount || invoiceIdCount
                 BigDecimal productSaleTotal = prodAgg.productSaleTotal?.value as BigDecimal
                 BigDecimal productIssuedTotal = prodAgg.productIssuedTotal?.value as BigDecimal
                 BigDecimal productCostTotal = prodAgg.productCostTotal?.value as BigDecimal
                 BigDecimal discountTotal = discAgg.discountTotal?.value as BigDecimal
-                Map curLine = [invoiceCount:invoiceCount, invoiceIdCount:invoiceIdCount,
+                Map curLine = {invoiceCount:invoiceCount, invoiceIdCount:invoiceIdCount,
                         totalSales:bucket.totalSales?.value as BigDecimal,
                         productSaleTotal:productSaleTotal, productIssuedTotal:productIssuedTotal, productCostTotal:productCostTotal,
                         productQuantityTotal:prodAgg.productQuantityTotal?.value as BigDecimal,
                         discountTotal:discountTotal, netSales:(productSaleTotal + discountTotal),
                         discountPercent:(productSaleTotal ? (-discountTotal/productSaleTotal) : 0.0),
-                        costPercent:(productIssuedTotal ? (productCostTotal/productIssuedTotal) : 0.0)]
+                        costPercent:(productIssuedTotal ? (productCostTotal/productIssuedTotal) : 0.0)}
                 invoiceTemp.putAll(curLine)
                 addBigDecimalsInMap(invoicesTotal, invoiceTemp)
             }

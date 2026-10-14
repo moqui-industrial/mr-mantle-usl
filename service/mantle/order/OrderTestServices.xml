@@ -31,7 +31,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- store and vendor -->
             <entity-find-one entity-name="mantle.product.store.ProductStore" value-field="productStore"/>
-            <set field="vendorPartyId" from="vendorPartyId ?: productStore.organizationPartyId"/>
+            <set field="vendorPartyId" from="vendorPartyId || productStore.organizationPartyId"/>
 
             <!-- customers to randomly select from -->
             <entity-find entity-name="mantle.party.PartyRole" list="partyRoleList">
@@ -79,10 +79,10 @@ along with this software (see the LICENSE.md file). If not, see
                             java.sql.Date orderDate = thruDate - rand.nextInt(maxDaysPast)
                             Timestamp orderTs = ec.l10n.parseTimestamp(orderDate.toString() + " " + (rand.nextInt(12) + 8).toString().padLeft(2, '0') + ":00:00.000", null)
 
-                            Map orderOut = ec.service.sync().name("mantle.order.OrderServices.create#Order").parameters([entryDate:orderTs,
+                            Map orderOut = ec.service.sync().name("mantle.order.OrderServices.create#Order").parameters({entryDate:orderTs,
                                     productStoreId:productStoreId, salesChannelEnumId:salesChannelEnumIdList.get(rand.nextInt(salesChannelSize)),
                                     vendorPartyId:vendorPartyId, customerPartyId:customerPartyId, carrierPartyId:'_NA_',
-                                    shipmentMethodEnumId:shipmentMethodEnumIdList.get(rand.nextInt(shipmentMethodSize))]).call()
+                                    shipmentMethodEnumId:shipmentMethodEnumIdList.get(rand.nextInt(shipmentMethodSize))}).call()
                             String orderId = orderOut.orderId
                             String orderPartSeqId = orderOut.orderPartSeqId
 
@@ -92,8 +92,8 @@ along with this software (see the LICENSE.md file). If not, see
                             for (int itemIdx = 0; itemIdx < itemCount; itemIdx++) {
                                 String productId = productIdList.get(rand.nextInt(productCount))
                                 int itemQuantity = rand.nextInt(maxQuantity)
-                                ec.service.sync().name("mantle.order.OrderServices.add#OrderProductQuantity").parameters([orderId:orderId,
-                                        orderPartSeqId:orderPartSeqId, productId:productId, quantity:itemQuantity]).call()
+                                ec.service.sync().name("mantle.order.OrderServices.add#OrderProductQuantity").parameters({orderId:orderId,
+                                        orderPartSeqId:orderPartSeqId, productId:productId, quantity:itemQuantity}).call()
                                 ec.logger.warn("Add order ${orderId} item ${itemIdx} product ${productId} quantity ${itemQuantity}")
                             }
 
@@ -116,14 +116,14 @@ along with this software (see the LICENSE.md file). If not, see
                                 if (shippingPcm != null) shippingPostalContactMechId = shippingPcm.contactMechId
                             }
 
-                            ec.service.sync().name("mantle.order.OrderServices.set#OrderBillingShippingInfo").parameters([
+                            ec.service.sync().name("mantle.order.OrderServices.set#OrderBillingShippingInfo").parameters({
                                     orderId:orderId, orderPartSeqId:orderPartSeqId, paymentMethodId:paymentMethodId,
-                                    paymentInstrumentEnumId:paymentInstrumentEnumId, shippingPostalContactMechId:shippingPostalContactMechId]).call()
+                                    paymentInstrumentEnumId:paymentInstrumentEnumId, shippingPostalContactMechId:shippingPostalContactMechId}).call()
 
-                            ec.service.sync().name("mantle.order.OrderServices.place#Order").parameters([orderId:orderId, placedDate:orderTs]).call()
-                            ec.service.sync().name("mantle.order.OrderServices.approve#Order").parameters([orderId:orderId]).call()
+                            ec.service.sync().name("mantle.order.OrderServices.place#Order").parameters({orderId:orderId, placedDate:orderTs}).call()
+                            ec.service.sync().name("mantle.order.OrderServices.approve#Order").parameters({orderId:orderId}).call()
                             ec.service.sync().name("mantle.shipment.ShipmentServices.ship#OrderPart")
-                                    .parameters([orderId:orderId, orderPartSeqId:orderPartSeqId, shipDate:orderTs, tryAutoPackage:false]).call()
+                                    .parameters({orderId:orderId, orderPartSeqId:orderPartSeqId, shipDate:orderTs, tryAutoPackage:false}).call()
                         } catch (Throwable t) {
                             ec.transaction.rollback(beganTransaction, "Error generating order", t)
                             ec.logger.log(200, "Generate order error", t)

@@ -117,7 +117,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="title" from="ec.resource.expand(titleGString, '')"/>
                 <set field="startEndOut" from="null"/>
                 <service-call name="mantle.work.WorkEffortServices.get#WorkEffortStartEnd" out-map="startEndOut"
-                        in-map="[workEffortId:workEffort.workEffortId, workEffort:workEffort]"/>
+                        in-map="{workEffortId:workEffort.workEffortId, workEffort:workEffort}"/>
 
                 <if condition="workEffort.recurStartCron != null">
                     <script><![CDATA[
@@ -145,7 +145,7 @@ along with this software (see the LICENSE.md file). If not, see
                         }    
                         start = ec.l10n.format(Date.from(nextExecution.toInstant()), dateFormat)
                         end = ec.l10n.format(Date.from(endExecution.toInstant()), dateFormat)
-                        eventList.add([id:workEffort.workEffortId, title:title, start:start, end:end, url:url, allDay:startEndOut.allDay])
+                        eventList.add({id:workEffort.workEffortId, title:title, start:start, end:end, url:url, allDay:startEndOut.allDay})
                     }
                     ]]></script>
                 <else>
@@ -158,7 +158,7 @@ along with this software (see the LICENSE.md file). If not, see
                     </else></if>
                     <if condition="urlGString"><then><set field="url" from="ec.resource.expand(urlGString, '')"/></then>
                         <else><set field="url" value=""/></else></if>
-                    <script>eventList.add([id:workEffort.workEffortId, title:title, start:start, end:end, url:url, allDay:startEndOut.allDay])</script>
+                    <script>eventList.add({id:workEffort.workEffortId, title:title, start:start, end:end, url:url, allDay:startEndOut.allDay})</script>
                 </else>
                 </if>
             </iterate>
@@ -188,13 +188,13 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="seqName" value="Project_${rootWorkEffortId}"/>
             <service-call name="create#mantle.work.effort.WorkEffort" in-map="context" out-map="context"/>
             <if condition="assignToPartyId">
-                <service-call name="create#mantle.work.effort.WorkEffortParty" in-map="[workEffortId:workEffortId, partyId:assignToPartyId,
-                        roleTypeId:assignRoleTypeId, fromDate:ec.user.nowTimestamp, statusId:assignStatusId]"/>
+                <service-call name="create#mantle.work.effort.WorkEffortParty" in-map="{workEffortId:workEffortId, partyId:assignToPartyId,
+                        roleTypeId:assignRoleTypeId, fromDate:ec.user.nowTimestamp, statusId:assignStatusId}"/>
             </if>
             <if condition="requestId"><service-call name="create#mantle.request.RequestWorkEffort"
-                    in-map="[workEffortId:workEffortId, requestId:requestId]"/></if>
+                    in-map="{workEffortId:workEffortId, requestId:requestId}"/></if>
             <if condition="assetId"><service-call name="create#mantle.work.effort.WorkEffortAssetAssign"
-                    in-map="[workEffortId:workEffortId, assetId:assetId, fromDate:ec.user.nowTimestamp, statusId:'WeaaAssigned']"/></if>
+                    in-map="{workEffortId:workEffortId, assetId:assetId, fromDate:ec.user.nowTimestamp, statusId:'WeaaAssigned'}"/></if>
         </actions>
     </service>
 
@@ -248,7 +248,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </entity-find-count>
                 <!-- recurse to get next business day (skip weekends and holidays again) -->
                 <if condition="holidayCount">
-                    <service-call name="mantle.work.EventServices.get#NextBusinessDay" out-map="nextOut" in-map="context + [startDate:nextDayDate]"/>
+                    <service-call name="mantle.work.EventServices.get#NextBusinessDay" out-map="nextOut" in-map="Object.assign({}, context, {startDate:nextDayDate})"/>
                     <set field="nextDayDate" from="nextOut.nextDayDate"/>
                     <set field="calendarDays" from="calendarDays + nextOut.calendarDays"/>
                     <set field="skipWeekends" from="skipWeekends + nextOut.skipWeekends"/>
@@ -284,7 +284,7 @@ along with this software (see the LICENSE.md file). If not, see
             skipHolidays = 0
             for (int i = businessDays; i > 0; i--) {
                 Map nextOut = ec.service.sync().name("mantle.work.EventServices.get#NextBusinessDay")
-                        .parameters(context + [startDate:futureDayDate]).call()
+                        .parameters(Object.assign({}, context, {startDate:futureDayDate})).call()
                 futureDayDate = nextOut.nextDayDate
                 calendarDays += nextOut.calendarDays
                 skipWeekends += nextOut.skipWeekends

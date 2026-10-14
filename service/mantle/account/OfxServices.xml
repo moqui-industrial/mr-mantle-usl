@@ -115,7 +115,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="TRNAMT.contains(',')"><set field="TRNAMT" from="TRNAMT.replace(',', '.')"/></if>
                 <set field="transAmount" from="new BigDecimal(TRNAMT)"/>
 
-                <set field="transName" from="STMTTRN.NAME?.getAt(0)?.text() ?: STMTTRN.PAYEE?.getAt(0)?.text()"/>
+                <set field="transName" from="STMTTRN.NAME?.getAt(0)?.text() || STMTTRN.PAYEE?.getAt(0)?.text()"/>
 
                 <set field="transCode" from="STMTTRN.TRNTYPE[0].text()"/>
                 <set field="transType" from="transCode"/>
@@ -125,10 +125,10 @@ along with this software (see the LICENSE.md file). If not, see
                 </entity-find-one>
                 <if condition="transTypeEnum"><set field="transType" from="transTypeEnum.enumId"/></if>
 
-                <service-call name="create#mantle.account.method.PaymentMethodTrans" in-map="[paymentMethodId:paymentMethodId,
+                <service-call name="create#mantle.account.method.PaymentMethodTrans" in-map="{paymentMethodId:paymentMethodId,
                         fitId:fitId, transType:transType, transCode:transCode, postedDate:postedDate,
                         transAmount:transAmount, transName:transName, transMemo:STMTTRN.MEMO?.getAt(0)?.text(),
-                        checkNumber:STMTTRN.CHECKNUM?.getAt(0)?.text(), refNumber:STMTTRN.REFNUM?.getAt(0)?.text()]"/>
+                        checkNumber:STMTTRN.CHECKNUM?.getAt(0)?.text(), refNumber:STMTTRN.REFNUM?.getAt(0)?.text()}"/>
             </iterate>
 
             <!-- update ledgerBalance, availableBalance, balanceDate (only if more recent than last balanceDate) -->
@@ -144,13 +144,13 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="BALAMT" from="AVAILBAL.BALAMT[0].text()"/>
                 <if condition="BALAMT.contains(',')"><set field="BALAMT" from="BALAMT.replace(',', '.')"/></if>
                 <set field="availableBalance" from="new BigDecimal(BALAMT)"/>
-                <set field="balanceDate" from="balanceDate ?: sgmlReader.parseOfxDateTime(LEDGERBAL.DTASOF[0].text())"/>
+                <set field="balanceDate" from="balanceDate || sgmlReader.parseOfxDateTime(LEDGERBAL.DTASOF[0].text())"/>
             </if>
             <!-- <log message="========= ${balanceDate}: ${ledgerBalance}, ${availableBalance}"/> -->
             <if condition="balanceDate &amp;&amp; (!paymentMethod.balanceDate || balanceDate &gt; paymentMethod.balanceDate)">
                 <service-call name="mantle.account.PaymentMethodServices.update#PaymentMethodMutable"
-                        in-map="[paymentMethodId:paymentMethodId, ledgerBalance:ledgerBalance,
-                            availableBalance:availableBalance, balanceDate:balanceDate]"/>
+                        in-map="{paymentMethodId:paymentMethodId, ledgerBalance:ledgerBalance,
+                            availableBalance:availableBalance, balanceDate:balanceDate}"/>
             </if>
         </actions>
     </service>

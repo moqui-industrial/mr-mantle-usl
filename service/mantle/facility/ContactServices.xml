@@ -29,23 +29,23 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find entity-name="mantle.facility.FacilityContactMech" list="fcmList">
                     <date-filter/><econdition field-name="facilityId"/>
                     <econdition field-name="contactMechPurposeId" value="PostalShippingDest"/></entity-find>
-                <if condition="!fcmList">
+                <if condition="!fcmList?.length">
                     <entity-find entity-name="mantle.facility.FacilityContactMech" list="fcmList">
                         <date-filter/><econdition field-name="facilityId"/>
                         <econdition field-name="contactMechPurposeId" value="PostalPrimary"/></entity-find>
                 </if>
-                <if condition="fcmList"><set field="postalContactMechId" from="fcmList.first().contactMechId"/></if>
+                <if condition="(fcmList?.length > 0)"><set field="postalContactMechId" from="fcmList.first().contactMechId"/></if>
             </if>
             <if condition="facilityId &amp;&amp; !telecomContactMechId">
                 <entity-find entity-name="mantle.facility.FacilityContactMech" list="fcmList">
                     <date-filter/><econdition field-name="facilityId"/>
                     <econdition field-name="contactMechPurposeId" value="PhoneShippingDest"/></entity-find>
-                <if condition="!fcmList">
+                <if condition="!fcmList?.length">
                     <entity-find entity-name="mantle.facility.FacilityContactMech" list="fcmList">
                         <date-filter/><econdition field-name="facilityId"/>
                         <econdition field-name="contactMechPurposeId" value="PhonePrimary"/></entity-find>
                 </if>
-                <if condition="fcmList"><set field="telecomContactMechId" from="fcmList.first().contactMechId"/></if>
+                <if condition="(fcmList?.length > 0)"><set field="telecomContactMechId" from="fcmList.first().contactMechId"/></if>
             </if>
         </actions>
     </service>
@@ -64,23 +64,23 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find entity-name="mantle.facility.FacilityContactMech" list="fcmList">
                     <date-filter/><econdition field-name="facilityId"/>
                     <econdition field-name="contactMechPurposeId" value="PostalShippingOrigin"/></entity-find>
-                <if condition="!fcmList">
+                <if condition="!fcmList?.length">
                     <entity-find entity-name="mantle.facility.FacilityContactMech" list="fcmList">
                         <date-filter/><econdition field-name="facilityId"/>
                         <econdition field-name="contactMechPurposeId" value="PostalPrimary"/></entity-find>
                 </if>
-                <if condition="fcmList"><set field="postalContactMechId" from="fcmList.first().contactMechId"/></if>
+                <if condition="(fcmList?.length > 0)"><set field="postalContactMechId" from="fcmList.first().contactMechId"/></if>
             </if>
             <if condition="facilityId &amp;&amp; !telecomContactMechId">
                 <entity-find entity-name="mantle.facility.FacilityContactMech" list="fcmList">
                     <date-filter/><econdition field-name="facilityId"/>
                     <econdition field-name="contactMechPurposeId" value="PhoneShippingOrigin"/></entity-find>
-                <if condition="!fcmList">
+                <if condition="!fcmList?.length">
                     <entity-find entity-name="mantle.facility.FacilityContactMech" list="fcmList">
                         <date-filter/><econdition field-name="facilityId"/>
                         <econdition field-name="contactMechPurposeId" value="PhonePrimary"/></entity-find>
                 </if>
-                <if condition="fcmList"><set field="telecomContactMechId" from="fcmList.first().contactMechId"/></if>
+                <if condition="(fcmList?.length > 0)"><set field="telecomContactMechId" from="fcmList.first().contactMechId"/></if>
             </if>
         </actions>
     </service>
@@ -129,13 +129,13 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="contactMechPurposeId" from="postalContactMechPurposeId"/>
                     <order-by field-name="-fromDate"/>
                 </entity-find>
-                <if condition="defaultToPrimaryPurpose &amp;&amp; !postalFcmList">
+                <if condition="defaultToPrimaryPurpose &amp;&amp; !postalFcmList?.length">
                     <entity-find entity-name="mantle.facility.FacilityContactMech" list="postalFcmList">
                         <date-filter/><econdition field-name="facilityId"/>
                         <econdition field-name="contactMechPurposeId" value="PostalPrimary"/>
                         <order-by field-name="-fromDate"/>
                     </entity-find>
-                    <if condition="postalFcmList"><set field="postalContactMechPurposeId" value="PostalPrimary"/></if>
+                    <if condition="(postalFcmList?.length > 0)"><set field="postalContactMechPurposeId" value="PostalPrimary"/></if>
                 </if>
                 <set field="postalContactMechId" from="postalFcmList ? postalFcmList[0].contactMechId : null"/>
             </if>
@@ -154,13 +154,13 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="contactMechPurposeId" from="telecomContactMechPurposeId"/>
                     <order-by field-name="-fromDate"/>
                 </entity-find>
-                <if condition="defaultToPrimaryPurpose &amp;&amp; !telecomFcmList">
+                <if condition="defaultToPrimaryPurpose &amp;&amp; !telecomFcmList?.length">
                     <entity-find entity-name="mantle.facility.FacilityContactMech" list="telecomFcmList">
                         <date-filter/><econdition field-name="facilityId"/>
                         <econdition field-name="contactMechPurposeId" value="PhonePrimary"/>
                         <order-by field-name="-fromDate"/>
                     </entity-find>
-                    <if condition="telecomFcmList"><set field="telecomContactMechPurposeId" value="PhonePrimary"/></if>
+                    <if condition="(telecomFcmList?.length > 0)"><set field="telecomContactMechPurposeId" value="PhonePrimary"/></if>
                 </if>
                 <set field="telecomContactMechId" from="telecomFcmList ? telecomFcmList[0].contactMechId : null"/>
             </if>
@@ -173,13 +173,13 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="contactMechPurposeId" from="emailContactMechPurposeId"/>
                     <order-by field-name="-fromDate"/>
                 </entity-find>
-                <if condition="defaultToPrimaryPurpose &amp;&amp; !emailFcmList">
+                <if condition="defaultToPrimaryPurpose &amp;&amp; !emailFcmList?.length">
                     <entity-find entity-name="mantle.facility.FacilityContactMech" list="emailFcmList">
                         <date-filter/><econdition field-name="facilityId"/>
                         <econdition field-name="contactMechPurposeId" value="EmailPrimary"/>
                         <order-by field-name="-fromDate"/>
                     </entity-find>
-                    <if condition="emailFcmList"><set field="emailContactMechPurposeId" value="EmailPrimary"/></if>
+                    <if condition="(emailFcmList?.length > 0)"><set field="emailContactMechPurposeId" value="EmailPrimary"/></if>
                 </if>
                 <set field="emailContactMechId" from="emailFcmList ? emailFcmList[0].contactMechId : null"/>
             </if>
@@ -264,8 +264,8 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="contactMechId" from="contactMechId"/>
                 <econdition field-name="contactMechPurposeId" from="contactMechPurposeId" ignore-if-empty="true"/>
             </entity-find>
-            <if condition="!origFcmList">
-                <return error="true" message="Postal Address with ID [${contactMechId}] is not associated with Facility ID [${facilityId}] and purpose [${contactMechPurposeId?:'N/A'}], not updating."/>
+            <if condition="!origFcmList?.length">
+                <return error="true" message="Postal Address with ID [${contactMechId}] is not associated with Facility ID [${facilityId}] and purpose [${contactMechPurposeId||'N/A'}], not updating."/>
             </if>
 
             <!-- at this point we have at least one FCM, so create the updated PostalAddress and then expire/update the FCMs -->
@@ -339,8 +339,8 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="contactMechId" from="contactMechId"/>
                 <econdition field-name="contactMechPurposeId" from="contactMechPurposeId" ignore-if-empty="true"/>
             </entity-find>
-            <if condition="!origFcmList">
-                <return error="true" message="Telecom Number with ID [${contactMechId}] is not associated with Facility ID [${facilityId}] and purpose [${contactMechPurposeId?:'N/A'}], not updating."/>
+            <if condition="!origFcmList?.length">
+                <return error="true" message="Telecom Number with ID [${contactMechId}] is not associated with Facility ID [${facilityId}] and purpose [${contactMechPurposeId||'N/A'}], not updating."/>
             </if>
 
             <!-- at this point we have at least one FCM, so create the updated TelecomNumber and then expire/update the FCMs -->
@@ -410,11 +410,11 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="contactMechId" from="contactMechId" ignore-if-empty="true"/>
                 <econdition field-name="contactMechPurposeId" from="contactMechPurposeId" ignore-if-empty="true"/>
             </entity-find>
-            <if condition="!origFcmList">
-                <log message="Contact Info with ID [${contactMechId}] is not associated with Facility ID [${facilityId}] and purpose [${contactMechPurposeId?:'N/A'}], not updating."/>
+            <if condition="!origFcmList?.length">
+                <log message="Contact Info with ID [${contactMechId}] is not associated with Facility ID [${facilityId}] and purpose [${contactMechPurposeId||'N/A'}], not updating."/>
                 <return/>
             </if>
-            <set field="contactMechId" from="contactMechId ?: origFcmList[0].contactMechId"/>
+            <set field="contactMechId" from="contactMechId || origFcmList[0].contactMechId"/>
 
             <entity-find-one entity-name="mantle.party.contact.ContactMech" value-field="origContactMech"/>
             <script>newContactMech = origContactMech.cloneValue()</script>
@@ -461,9 +461,9 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <script><![CDATA[
                 def ef = ec.entity.find("mantle.facility.FacilityContactMech")
-                ef.condition([facilityId:facilityId, contactMechId:contactMechId])
+                ef.condition({facilityId:facilityId, contactMechId:contactMechId})
                 if (contactMechPurposeId) ef.condition("contactMechPurposeId", contactMechPurposeId)
-                ef.updateAll([thruDate:ec.user.getNowTimestamp()])
+                ef.updateAll({thruDate:ec.user.getNowTimestamp()})
                 ]]></script>
         </actions>
     </service>

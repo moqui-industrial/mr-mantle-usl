@@ -79,7 +79,7 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
 
             <!-- no payments? return now with a message -->
-            <if condition="!originalPaymentList"><return message="No pending ACH payments found for payment method [${paymentMethodId}]"/></if>
+            <if condition="!originalPaymentList?.length"><return message="No pending ACH payments found for payment method [${paymentMethodId}]"/></if>
 
             <!-- count of files sent today for File ID Modifier in File Header char 34 -->
             <set field="todayRange" from="ec.user.getPeriodRange('day', '0')"/>
@@ -97,10 +97,10 @@ along with this software (see the LICENSE.md file). If not, see
                 <message error="true">NACHA Immediate Destination field (${bankAccount.nachaImmedDest}) on Bank Account must be 9 or 10 characters</message></if>
             <if condition="!bankAccount.nachaImmedOrig || bankAccount.nachaImmedOrig.length() &lt; 9 || bankAccount.nachaImmedOrig.length() &gt; 10">
                 <message error="true">NACHA Immediate Origin field (${bankAccount.nachaImmedOrig}) on Bank Account must be 9 or 10 characters</message></if>
-            <set field="nachaImmedDestName" from="bankAccount.nachaImmedDestName ?: bankAccount.bankName"/>
+            <set field="nachaImmedDestName" from="bankAccount.nachaImmedDestName || bankAccount.bankName"/>
             <if condition="!nachaImmedDestName || nachaImmedDestName.length() &gt; 23">
                 <message error="true">NACHA Immediate Destination Name field (${nachaImmedDestName}) on Bank Account must be specified and not more than 23 characters</message></if>
-            <set field="nachaImmedOrigName" from="bankAccount.nachaImmedOrigName ?: paymentMethod.companyNameOnAccount"/>
+            <set field="nachaImmedOrigName" from="bankAccount.nachaImmedOrigName || paymentMethod.companyNameOnAccount"/>
             <if condition="!nachaImmedOrigName || nachaImmedOrigName.length() &gt; 23">
                 <message error="true">NACHA Immediate Origin Name field (${nachaImmedOrigName}) on Bank Account must be specified and not more than 23 characters</message></if>
 
@@ -112,23 +112,23 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
             <if condition="!nachaCompanyName || nachaCompanyName.length() &gt; 16">
                 <message error="true">NACHA Company Name field (${nachaCompanyName}) on Bank Account must be specified and not more than 16 characters</message></if>
-            <set field="nachaDiscrData" from="bankAccount.nachaDiscrData ?: ''"/>
+            <set field="nachaDiscrData" from="bankAccount.nachaDiscrData || ''"/>
             <if condition="nachaDiscrData.length() &gt; 20">
                 <message error="true">NACHA Discretionary Data field (${nachaDiscrData}) on Bank Account must not be more than 20 characters</message></if>
             <if condition="!bankAccount.nachaCompanyId || bankAccount.nachaCompanyId.length() &gt; 10">
                 <message error="true">NACHA Company ID field (${bankAccount.nachaCompanyId}) on Bank Account must be specified and not more than 10 characters</message></if>
-            <set field="nachaEntryDescription" from="nachaEntryDescription ?: bankAccount.nachaEntryDescription"/>
+            <set field="nachaEntryDescription" from="nachaEntryDescription || bankAccount.nachaEntryDescription"/>
             <if condition="!nachaEntryDescription || nachaEntryDescription.length() &gt; 10">
                 <message error="true">NACHA Entry Description field (${nachaEntryDescription}) on Bank Account or service parameter must be specified and not more than 10 characters</message></if>
 
-            <set field="nachaOdfiId" from="bankAccount.nachaOdfiId ?: bankAccount.nachaImmedDest.take(8)"/>
+            <set field="nachaOdfiId" from="bankAccount.nachaOdfiId || bankAccount.nachaImmedDest.take(8)"/>
             <if condition="nachaOdfiId.length() &gt; 8">
                 <message error="true">NACHA Originating DFI ID (${nachaOdfiId}) on Bank Account must not be more than 8 digits</message></if>
 
             <if condition="!effectiveEntryDate">
                 <!-- FUTURE: support some sort of configuration for the holidays to skip -->
                 <service-call name="mantle.work.EventServices.get#NextBusinessDay" out-map="nextDayOut"
-                        in-map="[startDate:fileDate, workEffortCategoryIds:['HolidayUsaBank']]"/>
+                        in-map="{startDate:fileDate, workEffortCategoryIds:['HolidayUsaBank']}"/>
                 <set field="effectiveEntryDate" from="nextDayOut.nextDayDate"/>
             </if>
 
@@ -446,7 +446,7 @@ along with this software (see the LICENSE.md file). If not, see
                 // combines the lines
                 StringBuilder ftSb = new StringBuilder(95 * lines.size())
                 for (StringBuilder line in lines) {
-                    if (line.length() != 94) ec.message.addError(ec.resource.expand('Generated line does not have exactly 94 chars: ${line}','',[line:line]))
+                    if (line.length() != 94) ec.message.addError(ec.resource.expand('Generated line does not have exactly 94 chars: ${line}','',{line:line}))
                     ftSb.append(line)
                     if (addNewLine) ftSb.append('\n')
                 }
@@ -459,14 +459,14 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- save file info on PaymentMethodFile, update statusId and set paymentMethodFileId on Payment records -->
             <service-call name="mantle.account.PaymentMethodServices.update#PaymentMethodFileComplete"
-                    in-map="context + [entryCount:entryCount, debitAmountTotal:debitAmountTotal, creditAmountTotal:creditAmountTotal]"/>
+                    in-map="Object.assign({}, context, {entryCount:entryCount, debitAmountTotal:debitAmountTotal, creditAmountTotal:creditAmountTotal})"/>
 
             <if condition="produceSystemMessage">
                 <entity-find-one entity-name="mantle.account.method.PaymentMethodFileType" value-field="paymentMethodFileType">
                     <field-map field-name="paymentMethodId"/><field-map field-name="fileTypeEnumId"/></entity-find-one>
                 <if condition="paymentMethodFileType?.systemMessageTypeId &amp;&amp; paymentMethodFileType?.systemMessageRemoteId"><then>
                     <service-call name="mantle.account.PaymentMethodServices.produce#PaymentMethodFileSystemMessage"
-                            in-map="[paymentMethodFileId:paymentMethodFileId]"/>
+                            in-map="{paymentMethodFileId:paymentMethodFileId}"/>
                 </then><else>
                     <message type="danger">Not sending file ${paymentMethodFileId}, no message type or remote system configured for payment method ${paymentMethodId} and file type ${fileTypeEnumId}</message>
                 </else></if>
@@ -539,7 +539,7 @@ along with this software (see the LICENSE.md file). If not, see
                                 batch += achEntry
                                 achEntry = null
                             }
-                            achEntry = [
+                            achEntry = {
                                 recordTypeCode : line[0],
                                 transactionCode : line[1..2],
                                 dfiId : line[3..10].trim(),
@@ -550,12 +550,12 @@ along with this software (see the LICENSE.md file). If not, see
                                 discretionaryData: line[76..77],
                                 addendaIndicator: line[78],
                                 traceNumber: line[79..93]
-                            ]
+                            }
 
                         } else if ("7" == type /* addenda */) {
                             if (achEntry != null) {
                                 if (!achEntry.addendums) achEntry.addendums = []
-                                addenda = [recordTypeCode : line[0], addendaTypeCode : line[1..2]]
+                                addenda = {recordTypeCode : line[0], addendaTypeCode : line[1..2]}
                                 if (addenda.addendaTypeCode == "99") {
                                     addenda.returnReasonCode = line[3..5]
                                     addenda.orgEntryTraceNum = line[6..20]
@@ -598,38 +598,38 @@ along with this software (see the LICENSE.md file). If not, see
                             type = lastAddenda.addendaTypeCode
                             if ('99' == type) {
                                 // return
-                                payment = ec.entity.find("mantle.account.payment.Payment").condition([paymentId : paymentId]).one()
+                                payment = ec.entity.find("mantle.account.payment.Payment").condition({paymentId : paymentId}).one()
                                 if (payment) {
                                     // find description of the return reason code
                                     returnReason = ec.entity.find("moqui.basic.Enumeration")
-                                            .condition([enumTypeId : "ACHReturnCode", enumCode : lastAddenda.returnReasonCode]).one()
+                                            .condition({enumTypeId : "ACHReturnCode", enumCode : lastAddenda.returnReasonCode}).one()
                                     ec.service.sync().name("create#mantle.account.method.PaymentGatewayResponse")
-                                            .parameters([paymentId : paymentId, paymentMethodId : paymentMethodId,
+                                            .parameters({paymentId : paymentId, paymentMethodId : paymentMethodId,
                                             amount : entry.amount, referenceNum : lastAddenda.traceNum,
                                             amountUomId : payment.amountUomId, reasonCode: lastAddenda.returnReasonCode,
-                                            reasonMessage : returnReason ? returnReason.description : lastAddenda.info]).call()
+                                            reasonMessage : returnReason ? returnReason.description : lastAddenda.info}).call()
                                     ec.service.sync().name("update#mantle.account.payment.Payment")
-                                            .parameters([paymentId : paymentId, statusId : "PmntDeclined"]).call()
+                                            .parameters({paymentId : paymentId, statusId : "PmntDeclined"}).call()
                                 } else {
-                                    ec.message.addError(ec.resource.expand('Payment ${paymentId} not found', '', [paymentId: paymentId]))
+                                    ec.message.addError(ec.resource.expand('Payment ${paymentId} not found', '', {paymentId: paymentId}))
                                 }
 
                             } else if ('98' == type) {
                                 // notification of change
-                                payment = ec.entity.find("mantle.account.payment.Payment").condition([paymentId : paymentId]).one()
+                                payment = ec.entity.find("mantle.account.payment.Payment").condition({paymentId : paymentId}).one()
                                 if (payment) {
                                     // find description of the change notification
                                     changeReason = ec.entity.find("moqui.basic.Enumeration")
-                                            .condition([enumTypeId : "ACHChangeCode", enumCode : lastAddenda.changeCode]).one()
+                                            .condition({enumTypeId : "ACHChangeCode", enumCode : lastAddenda.changeCode}).one()
                                     ec.service.sync().name("create#mantle.account.method.PaymentGatewayResponse")
-                                            .parameters([paymentId : paymentId, paymentMethodId : paymentMethodId,
+                                            .parameters({paymentId : paymentId, paymentMethodId : paymentMethodId,
                                             amount : entry.amount, referenceNum : lastAddenda.traceNum,
                                             amountUomId : payment.amountUomId, reasonCode: lastAddenda.changeCode,
-                                            reasonMessage : (changeReason ? changeReason.description : "" + " Corrected: " + lastAddenda.correctedData)]).call()
+                                            reasonMessage : (changeReason ? changeReason.description : "" + " Corrected: " + lastAddenda.correctedData)}).call()
                                     ec.service.sync().name("update#mantle.account.payment.Payment")
-                                            .parameters([paymentId : paymentId, statusId : "PmntAuthorized"]).call()
+                                            .parameters({paymentId : paymentId, statusId : "PmntAuthorized"}).call()
                                 } else {
-                                    ec.message.addError(ec.resource.expand('Payment ${paymentId} not found', '', [paymentId: paymentId]))
+                                    ec.message.addError(ec.resource.expand('Payment ${paymentId} not found', '', {paymentId: paymentId}))
                                 }
                             }
                         }

@@ -34,13 +34,13 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="visitId" from="ec.user.visitId"/>
             <service-call name="create#mantle.request.Request" out-map="context" in-map="context"/>
             <if condition="filedByPartyId"><service-call name="create#mantle.request.RequestParty"
-                    in-map="[requestId:requestId, partyId:filedByPartyId, roleTypeId:'Reporter', fromDate:ec.user.nowTimestamp]"/></if>
+                    in-map="{requestId:requestId, partyId:filedByPartyId, roleTypeId:'Reporter', fromDate:ec.user.nowTimestamp}"/></if>
             <if condition="assignToPartyId"><service-call name="create#mantle.request.RequestParty"
-                    in-map="[requestId:requestId, partyId:assignToPartyId, roleTypeId:'Assignee', fromDate:ec.user.nowTimestamp]"/></if>
+                    in-map="{requestId:requestId, partyId:assignToPartyId, roleTypeId:'Assignee', fromDate:ec.user.nowTimestamp}"/></if>
             <if condition="customerPartyId"><service-call name="create#mantle.request.RequestParty"
-                    in-map="[requestId:requestId, partyId:customerPartyId, roleTypeId:'Customer', fromDate:ec.user.nowTimestamp]"/></if>
+                    in-map="{requestId:requestId, partyId:customerPartyId, roleTypeId:'Customer', fromDate:ec.user.nowTimestamp}"/></if>
             <if condition="clientPartyId"><service-call name="create#mantle.request.RequestParty"
-                    in-map="[requestId:requestId, partyId:clientPartyId, roleTypeId:'Customer', fromDate:ec.user.nowTimestamp]"/></if>
+                    in-map="{requestId:requestId, partyId:clientPartyId, roleTypeId:'Customer', fromDate:ec.user.nowTimestamp}"/></if>
         </actions>
     </service>
     <service verb="update" noun="Request">
@@ -54,11 +54,11 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <service-call name="update#mantle.request.Request" out-map="context" in-map="context"/>
             <if condition="assignToPartyId"><service-call name="mantle.request.RequestServices.replace#RequestParty"
-                    in-map="[requestId:requestId, roleTypeId:'Assignee', newPartyId:assignToPartyId]"/></if>
+                    in-map="{requestId:requestId, roleTypeId:'Assignee', newPartyId:assignToPartyId}"/></if>
             <if condition="customerPartyId"><service-call name="mantle.request.RequestServices.replace#RequestParty"
-                    in-map="[requestId:requestId, roleTypeId:'Customer', newPartyId:customerPartyId]"/></if>
+                    in-map="{requestId:requestId, roleTypeId:'Customer', newPartyId:customerPartyId}"/></if>
             <if condition="clientPartyId"><service-call name="mantle.request.RequestServices.replace#RequestParty"
-                    in-map="[requestId:requestId, roleTypeId:'Customer', newPartyId:clientPartyId]"/></if>
+                    in-map="{requestId:requestId, roleTypeId:'Customer', newPartyId:clientPartyId}"/></if>
         </actions>
     </service>
 
@@ -110,7 +110,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- create a party with the name -->
                 <if condition="!customerPartyId">
                     <service-call name="mantle.party.PartyServices.create#Person" out-map="createPartyOut"
-                            in-map="[firstName:firstName, lastName:lastName, roleTypeId:'Customer']"/>
+                            in-map="{firstName:firstName, lastName:lastName, roleTypeId:'Customer'}"/>
                     <set field="customerPartyId" from="createPartyOut.partyId"/>
                 </if>
 
@@ -124,11 +124,11 @@ along with this software (see the LICENSE.md file). If not, see
                         <date-filter/><econdition field-name="partyId" from="customerPartyId"/>
                         <econdition field-name="infoString" from="emailAddress"/>
                     </entity-find>
-                    <if condition="existingEmailList"><then>
+                    <if condition="(existingEmailList?.length > 0)"><then>
                         <set field="emailContactMechId" from="existingEmailList[0].contactMechId"/>
                     </then><else>
                         <service-call name="mantle.party.ContactServices.create#EmailAddress" out-map="emailOut"
-                                in-map="[partyId:customerPartyId, emailAddress:emailAddress, contactMechPurposeId:'EmailPrimary']"/>
+                                in-map="{partyId:customerPartyId, emailAddress:emailAddress, contactMechPurposeId:'EmailPrimary'}"/>
                         <set field="emailContactMechId" from="emailOut.contactMechId"/>
                     </else></if>
                 </then><else>
@@ -146,9 +146,9 @@ along with this software (see the LICENSE.md file). If not, see
 
             <service-call name="create#mantle.request.Request" out-map="context" in-map="context"/>
             <service-call name="create#mantle.request.RequestParty"
-                    in-map="[requestId:requestId, partyId:filedByPartyId, roleTypeId:'Reporter', fromDate:ec.user.nowTimestamp]"/>
+                    in-map="{requestId:requestId, partyId:filedByPartyId, roleTypeId:'Reporter', fromDate:ec.user.nowTimestamp}"/>
             <service-call name="create#mantle.request.RequestParty"
-                    in-map="[requestId:requestId, partyId:customerPartyId, roleTypeId:'Customer', fromDate:ec.user.nowTimestamp]"/>
+                    in-map="{requestId:requestId, partyId:customerPartyId, roleTypeId:'Customer', fromDate:ec.user.nowTimestamp}"/>
 
             <message public="true" type="success">Thank you, we have received your request. Your request number is ${requestId}</message>
         </actions>
@@ -157,7 +157,7 @@ along with this software (see the LICENSE.md file). If not, see
         <implements service="mantle.request.RequestServices.create#ContactRequest"/>
         <in-parameters><parameter name="reCaptchaToken"/></in-parameters>
         <actions>
-            <service-call name="org.moqui.impl.GoogleServices.verify#ReCaptcha" in-map="[reCaptchaToken:reCaptchaToken]"/>
+            <service-call name="org.moqui.impl.GoogleServices.verify#ReCaptcha" in-map="{reCaptchaToken:reCaptchaToken}"/>
             <service-call name="mantle.request.RequestServices.create#ContactRequest" in-map="context" out-map="context"/>
         </actions>
     </service>
@@ -176,7 +176,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-update value-field="rpValue"/>
             </iterate>
             <service-call name="create#mantle.request.RequestParty"
-                    in-map="[requestId:requestId, partyId:newPartyId, roleTypeId:roleTypeId, fromDate:ec.user.nowTimestamp]"/>
+                    in-map="{requestId:requestId, partyId:newPartyId, roleTypeId:roleTypeId, fromDate:ec.user.nowTimestamp}"/>
         </actions>
     </service>
 
@@ -189,11 +189,11 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <actions>
             <service-call name="create#mantle.party.communication.CommunicationEvent" out-map="context"
-                    in-map="[communicationEventTypeId:'Comment', contactMechTypeEnumId:'CmtWebForm', statusId:'CeSent',
+                    in-map="{communicationEventTypeId:'Comment', contactMechTypeEnumId:'CmtWebForm', statusId:'CeSent',
                         fromPartyId:ec.user.userAccount.partyId, entryDate:ec.user.nowTimestamp,
-                        contentType:contentType, subject:subject, body:body]"/>
+                        contentType:contentType, subject:subject, body:body}"/>
             <service-call name="create#mantle.request.RequestCommEvent"
-                    in-map="[requestId:requestId, communicationEventId:communicationEventId]"/>
+                    in-map="{requestId:requestId, communicationEventId:communicationEventId}"/>
         </actions>
     </service>
     <service verb="update" noun="RequestComment">
@@ -206,8 +206,8 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <actions>
             <service-call name="update#mantle.party.communication.CommunicationEvent" out-map="context"
-                    in-map="[communicationEventId:communicationEventId, fromPartyId:ec.user.userAccount.partyId,
-                        contentType:contentType, subject:subject, body:body]"/>
+                    in-map="{communicationEventId:communicationEventId, fromPartyId:ec.user.userAccount.partyId,
+                        contentType:contentType, subject:subject, body:body}"/>
         </actions>
     </service>
     <service verb="delete" noun="RequestComment">
@@ -217,7 +217,7 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <actions>
             <service-call name="delete#mantle.request.RequestCommEvent"
-                    in-map="[requestId:requestId, communicationEventId:communicationEventId]"/>
+                    in-map="{requestId:requestId, communicationEventId:communicationEventId}"/>
             <service-call name="delete#mantle.party.communication.CommunicationEvent"
                     in-map="communicationEventId:communicationEventId"/>
         </actions>
@@ -239,7 +239,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find entity-name="mantle.request.RequestContent" list="requestContentList">
                     <econdition field-name="requestId"/><econdition field-name="contentTypeEnumId"/>
                     <order-by field-name="-contentDate"/></entity-find>
-                <if condition="requestContentList">
+                <if condition="(requestContentList?.length > 0)">
                     <set field="requestContent" from="requestContentList[0]"/>
                     <break/>
                 </if>
@@ -273,7 +273,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
                 <entity-find-one entity-name="mantle.request.RequestContent" value-field="requestContent"/>
                 <service-call name="mantle.request.RequestServices.save#RequestContentFile" out-map="context"
-                        in-map="context + [requestId:requestContent.requestId, saveContentLocation:false]"/>
+                        in-map="Object.assign({}, context, {requestId:requestContent.requestId, saveContentLocation:false})"/>
             </if>
             <service-call name="update#mantle.request.RequestContent" in-map="context"/>
         </actions>
@@ -289,9 +289,9 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <set field="filename" from="contentFile.getName()"/>
             <if condition="org.moqui.resource.ResourceReference.isTextFilename(filename)"><then>
-                <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') ?: 'dbresource://mantle/content'"/>
+                <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content'"/>
             </then><else>
-                <set field="contentRoot" from="ec.user.getPreference('mantle.content.large.root') ?: 'dbresource://mantle/content'"/>
+                <set field="contentRoot" from="ec.user.getPreference('mantle.content.large.root') || 'dbresource://mantle/content'"/>
             </else></if>
             <set field="contentLocation" value="${contentRoot}/request/${requestId}/content_${requestContentId}/${filename}"/>
 
@@ -302,7 +302,7 @@ along with this software (see the LICENSE.md file). If not, see
             </script>
 
             <if condition="saveContentLocation"><service-call name="update#mantle.request.RequestContent"
-                    in-map="[requestContentId:requestContentId, contentLocation:contentLocation]"/></if>
+                    in-map="{requestContentId:requestContentId, contentLocation:contentLocation}"/></if>
         </actions>
     </service>
 </services>

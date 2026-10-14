@@ -55,7 +55,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="priceTypeEnumId" required="true"/>
             <parameter name="quantity" type="BigDecimal" default="1.0"/>
             <parameter name="validDate" type="Timestamp" default="ec.user.nowTimestamp"/>
-            <parameter name="priceUomId" default="ec.user.getPreference('CurrencyDefault') ?: 'USD'"/>
+            <parameter name="priceUomId" default="ec.user.getPreference('CurrencyDefault') || 'USD'"/>
             <parameter name="pricePurposeEnumId" default-value="PppPurchase"/>
             <parameter name="productStoreId"/><parameter name="vendorPartyId"/><parameter name="customerPartyId"/>
         </in-parameters>
@@ -84,7 +84,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- use the maximal match, priority customer, vendor, then store (each if applicable/specified) -->
             <!-- <log level="warn" message="Price by type ${priceTypeEnumId} list ${currentPriceListAll}"/> -->
             <set field="productPrice" from="findMaximalMatch(currentPriceList,
-                    [customerPartyId:customerPartyId, vendorPartyId:vendorPartyId, productStoreId:productStoreId])"/>
+                    {customerPartyId:customerPartyId, vendorPartyId:vendorPartyId, productStoreId:productStoreId})"/>
             <set field="productPriceId" from="productPrice?.productPriceId"/>
             <set field="price" from="productPrice?.price"/>
         </actions>
@@ -95,7 +95,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="productId" required="true"/>
             <parameter name="quantity" type="BigDecimal" default="1.0"/>
             <parameter name="validDate" type="Timestamp" default="ec.user.nowTimestamp"/>
-            <parameter name="priceUomId" default="ec.user.getPreference('CurrencyDefault') ?: 'USD'"/>
+            <parameter name="priceUomId" default="ec.user.getPreference('CurrencyDefault') || 'USD'"/>
             <parameter name="pricePurposeEnumId" default-value="PppPurchase"/>
             <parameter name="productStoreId"/><parameter name="vendorPartyId"/><parameter name="customerPartyId"/>
             <!-- TODO: to support look for records with this first and then with null: <parameter name="agreementId"/> -->
@@ -111,12 +111,12 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions>
             <service-call name="mantle.product.PriceServices.get#ProductPriceByType" out-map="currentOut"
-                    in-map="context + [priceTypeEnumId:'PptCurrent']"/>
+                    in-map="Object.assign({}, context, {priceTypeEnumId:'PptCurrent'})"/>
             <set field="productPriceId" from="currentOut.productPriceId"/>
             <set field="price" from="currentOut.price"/>
 
             <service-call name="mantle.product.PriceServices.get#ProductPriceByType" out-map="listOut"
-                    in-map="context + [priceTypeEnumId:'PptList']"/>
+                    in-map="Object.assign({}, context, {priceTypeEnumId:'PptList'})"/>
             <set field="listProductPriceId" from="listOut.productPriceId"/>
             <set field="listPrice" from="listOut.price"/>
 
@@ -127,17 +127,17 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="productAssocTypeEnumId" value="PatVariant"/>
                     <econdition field-name="toProductId" from="productId"/>
                 </entity-find>
-                <if condition="varAssocList">
+                <if condition="(varAssocList?.length > 0)">
                     <set field="virtualProductId" from="varAssocList[0].productId"/>
                     <if condition="!price">
                         <service-call name="mantle.product.PriceServices.get#ProductPriceByType" out-map="currentOut" out-map-add-to-existing="false"
-                                in-map="context + [productId:virtualProductId, priceTypeEnumId:'PptCurrent']"/>
+                                in-map="Object.assign({}, context, {productId:virtualProductId, priceTypeEnumId:'PptCurrent'})"/>
                         <set field="productPriceId" from="currentOut.productPriceId"/>
                         <set field="price" from="currentOut.price"/>
                     </if>
                     <if condition="!listPrice">
                         <service-call name="mantle.product.PriceServices.get#ProductPriceByType" out-map="listOut" out-map-add-to-existing="false"
-                                in-map="context + [productId:virtualProductId, priceTypeEnumId:'PptList']"/>
+                                in-map="Object.assign({}, context, {productId:virtualProductId, priceTypeEnumId:'PptList'})"/>
                         <set field="listProductPriceId" from="listOut.productPriceId"/>
                         <set field="listPrice" from="listOut.price"/>
                     </if>
@@ -146,7 +146,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- if no price default to listPrice or ZERO -->
             <if condition="defaultToListPrice &amp;&amp; !price">
-                <set field="price" from="listPrice ?: BigDecimal.ZERO"/></if>
+                <set field="price" from="listPrice || BigDecimal.ZERO"/></if>
 
 
             <!-- <log level="warn" message="========== BEFORE rules productId=${productId}, price=${price}, listPrice=${listPrice}"/> -->
@@ -199,18 +199,18 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="orderId">
                 <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader">
                     <field-map field-name="orderId"/></entity-find-one>
-                <set field="productStoreId" from="productStoreId ?: orderHeader?.productStoreId"/>
+                <set field="productStoreId" from="productStoreId || orderHeader?.productStoreId"/>
                 <entity-find-one entity-name="mantle.product.store.ProductStore" value-field="productStore">
                     <field-map field-name="productStoreId"/></entity-find-one>
-                <set field="priceUomId" from="priceUomId ?: orderHeader?.currencyUomId ?: productStore?.defaultCurrencyUomId ?: ec.user.getPreference('CurrencyDefault') ?: 'USD'"/>
-                <set field="pricePurposeEnumId" from="pricePurposeEnumId ?: (orderHeader?.recurCronExpression ? 'PppRecurring' : 'PppPurchase')"/>
+                <set field="priceUomId" from="priceUomId || orderHeader?.currencyUomId || productStore?.defaultCurrencyUomId || ec.user.getPreference('CurrencyDefault') || 'USD'"/>
+                <set field="pricePurposeEnumId" from="pricePurposeEnumId || (orderHeader?.recurCronExpression ? 'PppRecurring' : 'PppPurchase')"/>
 
                 <if condition="orderPartSeqId">
                     <entity-find-one entity-name="mantle.order.OrderPart" value-field="orderPart"/>
-                    <set field="vendorPartyId" from="(vendorPartyId ?: orderPart?.vendorPartyId) ?: productStore?.organizationPartyId"/>
-                    <set field="customerPartyId" from="(customerPartyId ?: orderPart?.customerPartyId) ?: ec.user.userAccount?.partyId"/>
+                    <set field="vendorPartyId" from="(vendorPartyId || orderPart?.vendorPartyId) || productStore?.organizationPartyId"/>
+                    <set field="customerPartyId" from="(customerPartyId || orderPart?.customerPartyId) || ec.user.userAccount?.partyId"/>
                 </if>
-                <set field="vendorPartyId" from="orderPart?.vendorPartyId ?: productStore?.organizationPartyId"/>
+                <set field="vendorPartyId" from="orderPart?.vendorPartyId || productStore?.organizationPartyId"/>
             </if>
 
             <if condition="!pricePurposeEnumId"><set field="pricePurposeEnumId" value="PppPurchase"/></if>

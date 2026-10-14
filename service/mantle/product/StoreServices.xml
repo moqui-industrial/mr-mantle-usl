@@ -53,7 +53,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find entity-name="mantle.product.store.ProductStoreShipOption" list="shipOptionList" cache="true">
                     <econdition field-name="productStoreId"/><order-by field-name="sequenceNum"/></entity-find>
                 <!-- default to all CarrierShipmentMethod records for each carrier in a gateway associated with the store -->
-                <if condition="!shipOptionList">
+                <if condition="!shipOptionList?.length">
                     <set field="shipOptionList" from="[]"/>
                     <entity-find entity-name="mantle.product.store.ProductStoreShippingGateway" list="pssgList" cache="true">
                         <econdition field-name="productStoreId"/></entity-find>
@@ -65,10 +65,10 @@ along with this software (see the LICENSE.md file). If not, see
                     </iterate>
                 </if>
                 <!-- get rates -->
-                <if condition="getRates &amp;&amp; shipOptionList &amp;&amp; orderId &amp;&amp; orderPartSeqId">
+                <if condition="getRates &amp;&amp; (shipOptionList?.length > 0) &amp;&amp; orderId &amp;&amp; orderPartSeqId">
                     <service-call name="mantle.shipment.CarrierServices.get#OrderShippingRatesBulk" out-map="ratesBulkOut"
-                            in-map="[orderId:orderId, orderPartSeqId:orderPartSeqId, postalContactMechId:postalContactMechId,
-                            carrierShipmentMethodList:shipOptionList]"/>
+                            in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId, postalContactMechId:postalContactMechId,
+                            carrierShipmentMethodList:shipOptionList}"/>
                     <set field="postalContactMechId" from="ratesBulkOut.postalContactMechId"/>
 
                     <!-- make sure there is a return value for each in carrierShipmentMethodList -->
@@ -93,7 +93,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <if condition="!carrierShipmentMethod">
                         <return error="true" message="No matching Carrier Shipment Method found for Carrier ${shipOption.carrierPartyId} and Shipment Method ${shipOption.shipmentMethodEnumId}"/>
                     </if>
-                    <set field="shippingOption.description" from="shippingOption.description ?: carrierShipmentMethod.description"/>
+                    <set field="shippingOption.description" from="shippingOption.description || carrierShipmentMethod.description"/>
                     <entity-find-one entity-name="mantle.party.PartyDetail" value-field="carrierDetail" cache="true">
                         <field-map field-name="partyId" from="shipOption.carrierPartyId"/></entity-find-one>
                     <entity-find-one entity-name="moqui.basic.Enumeration" value-field="shipmentMethodEnum">
@@ -108,8 +108,8 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find entity-name="moqui.basic.Enumeration" list="methodEnumList">
                     <econdition field-name="enumTypeId" value="ShipmentMethod"/><order-by field-name="sequenceNum,description"/></entity-find>
                 <iterate list="methodEnumList" entry="methodEnum">
-                    <script>shippingOptions.add([carrierPartyId:'_NA_', carrierName:'',
-                            shipmentMethodEnumId:methodEnum.enumId, shipmentMethodDescription:methodEnum.description])</script>
+                    <script>shippingOptions.add({carrierPartyId:'_NA_', carrierName:'',
+                            shipmentMethodEnumId:methodEnum.enumId, shipmentMethodDescription:methodEnum.description})</script>
                 </iterate>
             </if>
 
@@ -259,8 +259,8 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- TODO: Add handling for if Product with productId doesn't exist -->
                 <set field="productName" from="product?.productName"/>
             </if>
-            <service-call name="mantle.product.StoreServices.format#UrlSlug" in-map="[inUrlSlug:productName]" out-map="context"/>
-            <service-call name="create#mantle.product.ProductOtherIdentification" in-map="[productOtherIdentId:productOtherIdentId, productId:productId, productIdTypeEnumId:'PidtUrlSlug', idValue:outUrlSlug]" out-map="context"/>
+            <service-call name="mantle.product.StoreServices.format#UrlSlug" in-map="{inUrlSlug:productName}" out-map="context"/>
+            <service-call name="create#mantle.product.ProductOtherIdentification" in-map="{productOtherIdentId:productOtherIdentId, productId:productId, productIdTypeEnumId:'PidtUrlSlug', idValue:outUrlSlug}" out-map="context"/>
         </actions>
     </service>
 
@@ -281,8 +281,8 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- TODO: Add handling for if ProductCategory with productCategoryId doesn't exist -->
                 <set field="categoryName" from="productCategory?.categoryName"/>
             </if>
-            <service-call name="mantle.product.StoreServices.format#UrlSlug" in-map="[inUrlSlug:categoryName]" out-map="context"/>
-            <service-call name="create#mantle.product.category.ProductCategoryIdent" in-map="[productCategoryIdentId:productCategoryIdentId, productCategoryId:productCategoryId, identTypeEnumId:'PcitUrlSlug', idValue:outUrlSlug]" out-map="context"/>
+            <service-call name="mantle.product.StoreServices.format#UrlSlug" in-map="{inUrlSlug:categoryName}" out-map="context"/>
+            <service-call name="create#mantle.product.category.ProductCategoryIdent" in-map="{productCategoryIdentId:productCategoryIdentId, productCategoryId:productCategoryId, identTypeEnumId:'PcitUrlSlug', idValue:outUrlSlug}" out-map="context"/>
         </actions>
     </service>
 
