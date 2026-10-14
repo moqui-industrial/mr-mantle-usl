@@ -59,7 +59,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="partyAcctgPreference" from="sourcePartyAcctgPreference.cloneValue()"/>
             <entity-set value-field="partyAcctgPreference" include="nonpk" set-if-empty="false"/>
             <service-call name="create#mantle.ledger.config.PartyAcctgPreference"
-                    in-map="partyAcctgPreference + [organizationPartyId:organizationPartyId, errorGlJournalId:errorGlJournalId]"/>
+                    in-map="Object.assign({}, partyAcctgPreference, {organizationPartyId:organizationPartyId, errorGlJournalId:errorGlJournalId})"/>
 
             <!-- copy mantle.ledger.account.GlAccountOrganization -->
             <entity-find entity-name="mantle.ledger.account.GlAccountOrganization" list="recordList">
@@ -122,7 +122,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- setup mantle.party.time.TimePeriod for FiscalMonth, FiscalQuarter, FiscalYear -->
             <if condition="startYear"><then>
-                <set field="nextYearInt" from="((Calendar) ec.user.nowCalendar).get(Calendar.YEAR) + 1"/>
+                <set field="nextYearInt" from="new Date(Number(ec.user.nowTimestamp)).getUTCFullYear() + 1"/>
                 <set field="lastYear" from="ec.l10n.format(nextYearInt, '0000')"/>
 
                 <set field="curYear" from="startYear"/>
@@ -139,7 +139,7 @@ along with this software (see the LICENSE.md file). If not, see
                     </iterate>
 
                     <set field="prevPeriodId" from="curYearOut.timePeriodId"/>
-                    <set field="curYear" from="((curYear as int) + 1) as String"/>
+                    <set field="curYear" from="String(parseInt(curYear, 10) + 1)"/>
                 </while>
             </then><else>
                 <service-call name="mantle.ledger.LedgerServices.check#NextFiscalTimePeriods"
@@ -184,12 +184,12 @@ along with this software (see the LICENSE.md file). If not, see
                 <field-map field-name="enumId" from="glAccountClassEnumId"/></entity-find-one>
             <set field="isContra" from="enumValue.optionIndicator || 'N'"/>
 
-            <set field="ancestorClassEnumIdSet" from="new HashSet([glAccountClassEnumId])"/>
+            <set field="ancestorClassEnumIdSet" from="[glAccountClassEnumId]"/>
             <if condition="enumValue.parentEnumId"><then>
                 <service-call name="mantle.ledger.LedgerServices.find#RootGlAccountClassEnum" out-map="nestOut"
                         in-map="{glAccountClassEnumId:enumValue.parentEnumId}"/>
                 <set field="rootGlAccountClassEnumId" from="nestOut.rootGlAccountClassEnumId"/>
-                <script>ancestorClassEnumIdSet.addAll(nestOut.ancestorClassEnumIdSet)</script>
+                <script>for (const id of (nestOut.ancestorClassEnumIdSet || [])) if (!ancestorClassEnumIdSet.includes(id)) ancestorClassEnumIdSet.push(id)</script>
             </then><else>
                 <set field="rootGlAccountClassEnumId" from="glAccountClassEnumId"/>
             </else></if>
@@ -206,14 +206,14 @@ along with this software (see the LICENSE.md file). If not, see
                     in-map="{glAccountClassEnumId:entityValue.glAccountClassEnumId}"/>
 
             <if condition="isContra == 'Y'"><then>
-                <set field="entityValue.isDebit" from="'DEBIT'.equals(rootGlAccountClassEnumId) ? 'N' : 'Y'"/>
+                <set field="entityValue.isDebit" from="rootGlAccountClassEnumId === 'DEBIT' ? 'N' : 'Y'"/>
             </then><else>
-                <set field="entityValue.isDebit" from="'DEBIT'.equals(rootGlAccountClassEnumId) ? 'Y' : 'N'"/>
+                <set field="entityValue.isDebit" from="rootGlAccountClassEnumId === 'DEBIT' ? 'Y' : 'N'"/>
             </else></if>
             <set field="entityValue.isTemporary" value="N"/>
             <set field="tempAccountClasses" from="['REVENUE', 'COST_OF_SALES', 'INCOME', 'EXPENSE', 'NON_OP_EXPENSE']"/>
             <iterate list="tempAccountClasses" entry="tempAccountClass">
-                <if condition="ancestorClassEnumIdSet.contains(tempAccountClass)">
+                <if condition="ancestorClassEnumIdSet.includes(tempAccountClass)">
                     <set field="entityValue.isTemporary" value="Y"/><break/></if>
             </iterate>
         </actions>
@@ -1043,10 +1043,20 @@ along with this software (see the LICENSE.md file). If not, see
         </description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
-            <parameter name="basisDate" type="java.sql.Date" default="new java.sql.Date(ec.user.nowTimestamp.time)"/>
+            <parameter name="basisDate" type="java.sql.Date" default="new Date(Number(ec.user.nowTimestamp)).toISOString().slice(0, 10)"/>
         </in-parameters>
         <actions>
-            <script>basisCal = ec.user.getCalendarSafe(); basisCal.setTime(basisDate)</script>
+            <!-- A date reaches a script as epoch millis text (UTC midnight); the calendar year and zero-based month come from it -->
+            <script><![CDATA[
+                function dateOf(value) {
+                    const text = String(value)
+                    if (/^-?\d+$/.test(text)) { const at = new Date(Number(text)); return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate())) }
+                    const [y, m, d] = text.slice(0, 10).split('-').map(Number)
+                    return new Date(Date.UTC(y, m - 1, d))
+                }
+                basisYear = dateOf(basisDate).getUTCFullYear()
+                basisMonth = dateOf(basisDate).getUTCMonth()
+            ]]></script>
             <entity-find-one entity-name="mantle.party.Organization" value-field="organization">
                 <field-map field-name="partyId" from="organizationPartyId"/></entity-find-one>
 
@@ -1066,7 +1076,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="(recentPeriodList?.length > 0)"><then>
                     <!-- If no current year exists look for most recent and create next until we have current -->
                     <set field="recentPeriod" from="recentPeriodList[0]"/>
-                    <while condition="recentPeriod.thruDate &lt; basisDate">
+                    <while condition="dateOf(recentPeriod.thruDate) &lt; dateOf(basisDate)">
                         <service-call name="mantle.party.TimeServices.create#TimePeriod" out-map="createTpOut"
                                 in-map="{previousPeriodId:recentPeriod.timePeriodId}"/>
                         <entity-find-one entity-name="mantle.party.time.TimePeriod" value-field="recentPeriod">
@@ -1075,10 +1085,8 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="yearPeriodId" from="recentPeriod.timePeriodId"/>
                 </then><else>
                     <!-- no current year... assume fiscal year is calendar year and create one automatically -->
-                    <script>yearFromCal = basisCal.clone(); yearFromCal.set(Calendar.DAY_OF_YEAR, 1)</script>
                     <service-call name="mantle.party.TimeServices.create#TimePeriod" out-map="createTpOut"
-                            in-map="{partyId:organizationPartyId, timePeriodTypeId:'FiscalYear',
-                                fromDate:new java.sql.Date(yearFromCal.getTimeInMillis())}"/>
+                            in-map="{partyId:organizationPartyId, timePeriodTypeId:'FiscalYear', fromDate:basisYear + '-01-01'}"/>
                     <set field="yearPeriodId" from="createTpOut.timePeriodId"/>
                 </else></if>
             </then><else>
@@ -1101,7 +1109,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="(recentPeriodList?.length > 0)"><then>
                     <!-- If no current quarter exists look for most recent and create next until we have current -->
                     <set field="recentPeriod" from="recentPeriodList[0]"/>
-                    <while condition="recentPeriod.thruDate &lt; basisDate">
+                    <while condition="dateOf(recentPeriod.thruDate) &lt; dateOf(basisDate)">
                         <service-call name="mantle.party.TimeServices.create#TimePeriod" out-map="createTpOut"
                                 in-map="{previousPeriodId:recentPeriod.timePeriodId}"/>
                         <entity-find-one entity-name="mantle.party.time.TimePeriod" value-field="recentPeriod">
@@ -1110,12 +1118,11 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="quarterPeriodId" from="recentPeriod.timePeriodId"/>
                 </then><else>
                     <!-- no current quarter... assume fiscal year is calendar year with 4 3-month quarters and create one automatically -->
-                    <script>quarterNumber = (int) (basisCal.get(Calendar.MONTH)/3)</script>
-                    <script>quarterFromCal = basisCal.clone(); quarterFromCal.set(Calendar.MONTH, (quarterNumber * 3)); quarterFromCal.set(Calendar.DAY_OF_MONTH, 1)</script>
+                    <script>quarterNumber = Math.trunc(basisMonth / 3)</script>
                     <service-call name="mantle.party.TimeServices.create#TimePeriod" out-map="createTpOut"
                             in-map="{partyId:organizationPartyId, timePeriodTypeId:'FiscalQuarter',
                                 parentPeriodId:yearPeriodId, periodNum:(quarterNumber + 1),
-                                fromDate:new java.sql.Date(quarterFromCal.getTimeInMillis())}"/>
+                                fromDate:basisYear + '-' + String(quarterNumber * 3 + 1).padStart(2, '0') + '-01'}"/>
                     <set field="quarterPeriodId" from="createTpOut.timePeriodId"/>
                 </else></if>
             </then><else>
@@ -1138,7 +1145,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="(recentPeriodList?.length > 0)"><then>
                     <!-- If no current quarter exists look for most recent and create next until we have current -->
                     <set field="recentPeriod" from="recentPeriodList[0]"/>
-                    <while condition="recentPeriod.thruDate &lt; basisDate">
+                    <while condition="dateOf(recentPeriod.thruDate) &lt; dateOf(basisDate)">
                         <service-call name="mantle.party.TimeServices.create#TimePeriod" out-map="createTpOut"
                                 in-map="{previousPeriodId:recentPeriod.timePeriodId}"/>
                         <entity-find-one entity-name="mantle.party.time.TimePeriod" value-field="recentPeriod">
@@ -1147,12 +1154,11 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="monthPeriodId" from="recentPeriod.timePeriodId"/>
                 </then><else>
                     <!-- no current month... assume fiscal year is calendar year and create one automatically -->
-                    <script>monthNumber = basisCal.get(Calendar.MONTH)</script>
-                    <script>monthFromCal = basisCal.clone(); monthFromCal.set(Calendar.DAY_OF_MONTH, 1)</script>
+                    <script>monthNumber = basisMonth</script>
                     <service-call name="mantle.party.TimeServices.create#TimePeriod" out-map="createTpOut"
                             in-map="{partyId:organizationPartyId, timePeriodTypeId:'FiscalMonth',
                                 parentPeriodId:quarterPeriodId, periodNum:(monthNumber + 1),
-                                fromDate:new java.sql.Date(monthFromCal.getTimeInMillis())}"/>
+                                fromDate:basisYear + '-' + String(monthNumber + 1).padStart(2, '0') + '-01'}"/>
                     <set field="monthPeriodId" from="createTpOut.timePeriodId"/>
                 </else></if>
             </then><else>

@@ -105,6 +105,34 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="timePeriodId"/>
         </out-parameters>
         <actions>
+            <script><![CDATA[
+                // Calendar steps are in UTC on dates, so they never cross a day boundary (what the Java code used the database
+                // time zone for). Results are set as yyyy-MM-dd text. plusMonths clamps the day as java.time does.
+                // A date reaches a script as epoch millis text (UTC midnight for a Date field), or is yyyy-MM-dd text set here
+                function dateOf(value) {
+                    const text = String(value)
+                    if (/^-?\d+$/.test(text)) { const at = new Date(Number(text)); return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate())) }
+                    const [y, m, d] = text.slice(0, 10).split('-').map(Number)
+                    return new Date(Date.UTC(y, m - 1, d))
+                }
+                function textOf(dt) { return dt.toISOString().slice(0, 10); }
+                function plusDays(dt, n) { return new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate() + n)); }
+                function daysInMonth(dt) { return new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth() + 1, 0)).getUTCDate(); }
+                function plusMonths(dt, n) {
+                    const first = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth() + n, 1));
+                    return new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), Math.min(dt.getUTCDate(), daysInMonth(first))));
+                }
+                // ObjectUtilities.getTemporalUnitFromUomId for the day and longer units a TimePeriodType uses
+                function plusUnits(dt, n, uomId) {
+                    switch (uomId) {
+                        case 'TF_day': return plusDays(dt, n);
+                        case 'TF_wk': return plusDays(dt, 7 * n);
+                        case 'TF_mon': return plusMonths(dt, n);
+                        case 'TF_yr': return plusMonths(dt, 12 * n);
+                        default: throw new Error('No equivalent Temporal Unit found for UOM ID ' + uomId);
+                    }
+                }
+            ]]></script>
             <entity-find-one entity-name="mantle.party.time.TimePeriod" value-field="previousPeriod">
                 <field-map field-name="timePeriodId" from="previousPeriodId"/></entity-find-one>
             <entity-find-one entity-name="mantle.party.time.TimePeriod" value-field="previousPeriodParent">
@@ -119,12 +147,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="previousPeriod != null"><then>
                 <if condition="!partyId"><set field="partyId" from="previousPeriod.partyId"/></if>
                 <if condition="!timePeriodTypeId"><set field="timePeriodTypeId" from="previousPeriod.timePeriodTypeId"/></if>
-                <if condition="fromDate == null"><script>
-                    def fromDateDt = java.time.ZonedDateTime.ofInstant(
-                            java.time.Instant.ofEpochMilli((long) previousPeriod.thruDate.time), java.time.ZoneId.systemDefault())
-                    fromDateDt = fromDateDt.plusDays(1)
-                    fromDate = java.sql.Date.from(fromDateDt.toInstant())
-                </script></if>
+                <if condition="fromDate == null"><script>fromDate = textOf(plusDays(dateOf(previousPeriod.thruDate), 1))</script></if>
             </then><else-if condition="nextPeriod != null">
                 <if condition="nextPeriod.previousPeriodId">
                     <set field="timePeriodId" from="nextPeriod.previousPeriodId"/>
@@ -133,12 +156,7 @@ along with this software (see the LICENSE.md file). If not, see
 
                 <if condition="!partyId"><set field="partyId" from="nextPeriod.partyId"/></if>
                 <if condition="!timePeriodTypeId"><set field="timePeriodTypeId" from="nextPeriod.timePeriodTypeId"/></if>
-                <if condition="thruDate == null"><script>
-                    def thruDateDt = java.time.ZonedDateTime.ofInstant(
-                            java.time.Instant.ofEpochMilli((long) nextPeriod.fromDate.time), java.time.ZoneId.systemDefault())
-                    thruDateDt = thruDateDt.minusDays(1)
-                    thruDate = java.sql.Date.from(thruDateDt.toInstant())
-                </script></if>
+                <if condition="thruDate == null"><script>thruDate = textOf(plusDays(dateOf(nextPeriod.fromDate), -1))</script></if>
             </else-if><else>
                 <if condition="!partyId"><message error="true">With no previousPeriodId or nextPeriodId must specify partyId</message></if>
                 <if condition="!timePeriodTypeId"><message error="true">With no previousPeriodId or nextPeriodId must specify timePeriodTypeId</message></if>
@@ -150,30 +168,25 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- if no fromDate calc from thruDate and timePeriodType -->
             <if condition="fromDate == null"><then><script><![CDATA[
-                java.time.temporal.TemporalUnit field = getTemporalUnitFromUomId(timePeriodType.lengthUomId)
-                // use the database time zone, for Date fields this avoid moving across day boundaries
-                def fromDateDt = java.time.ZonedDateTime.ofInstant(java.time.Instant.ofEpochMilli(thruDate.time), java.time.ZoneId.systemDefault())
                 // step forward by one day so fromDate is the first day of this period, not the last day of the previous
                 // NOTE: add one day before subtracting the time period instead of after; found case where
                 //     subtracting 1 month went from the 30th of one month (Nov) to the 30th of the previous month (Oct)
                 //     instead of the 31st, moving the day of month to the first for the fromDate of the following
                 //     period first solves the problem
-                fromDateDt = fromDateDt.plusDays(1)
-
-                BigDecimal periodLength = timePeriodType.periodLength
+                let fromDt = plusDays(dateOf(thruDate), 1)
+                const periodLength = toDecimal(timePeriodType.periodLength).toNumber()
                 if (periodLength < 1 && timePeriodType.lengthUomId == 'TF_mon') {
                     // special case for Semi-Month
-                    int maxDays = fromDateDt.range(java.time.temporal.ChronoField.DAY_OF_MONTH).getMaximum()
-                    int days = (maxDays * periodLength).setScale(0, BigDecimal.ROUND_DOWN).intValue()
-                    if (fromDateDt.dayOfMonth < days) fromDateDt = fromDateDt.minusDays(days)
-                    else fromDateDt = fromDateDt.minusDays(maxDays - days)
+                    const maxDays = daysInMonth(fromDt)
+                    const days = Math.floor(maxDays * periodLength)
+                    fromDt = fromDt.getUTCDate() < days ? plusDays(fromDt, -days) : plusDays(fromDt, -(maxDays - days))
                 } else {
-                    fromDateDt = fromDateDt.minus(periodLength.longValue(), field)
+                    fromDt = plusUnits(fromDt, -Math.trunc(periodLength), timePeriodType.lengthUomId)
                 }
-                fromDate = java.sql.Date.from(fromDateDt.toInstant())
+                fromDate = textOf(fromDt)
             ]]></script>
             </then><else>
-                <set field="fromDate" from="new java.sql.Date(fromDate.time)"/>
+                <set field="fromDate" from="textOf(dateOf(fromDate))"/>
             </else></if>
 
             <!-- see if there is already a TimePeriod for the partyId, timePeriodTypeId, and fromDate -->
@@ -191,30 +204,25 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- if no thruDate calc from fromDate and timePeriodType -->
             <if condition="thruDate == null"><script><![CDATA[
-                java.time.temporal.TemporalUnit field = getTemporalUnitFromUomId(timePeriodType.lengthUomId)
-                // use the database time zone, for Date fields this avoid moving across day boundaries
-                def thruDateDt = java.time.ZonedDateTime.ofInstant(java.time.Instant.ofEpochMilli(fromDate.time), java.time.ZoneId.systemDefault())
-
-                BigDecimal periodLength = timePeriodType.periodLength
+                let thruDt = dateOf(fromDate)
+                const periodLength = toDecimal(timePeriodType.periodLength).toNumber()
                 if (periodLength < 1 && timePeriodType.lengthUomId == 'TF_mon') {
                     // special case for Semi-Month
-                    int maxDays = thruDateDt.range(java.time.temporal.ChronoField.DAY_OF_MONTH).getMaximum()
-                    int days = (maxDays * periodLength).setScale(0, BigDecimal.ROUND_DOWN).intValue()
-                    if (thruDateDt.dayOfMonth < days) thruDateDt = thruDateDt.plusDays(days)
-                    else thruDateDt = thruDateDt.plusDays(maxDays - days)
+                    const maxDays = daysInMonth(thruDt)
+                    const days = Math.floor(maxDays * periodLength)
+                    thruDt = thruDt.getUTCDate() < days ? plusDays(thruDt, days) : plusDays(thruDt, maxDays - days)
                 } else {
-                    thruDateDt = thruDateDt.plus(periodLength.longValue(), field)
+                    thruDt = plusUnits(thruDt, Math.trunc(periodLength), timePeriodType.lengthUomId)
                 }
                 // step back by one day so thruDate is the last day of this period, not the first day of the next
-                thruDateDt = thruDateDt.minusDays(1)
-                thruDate = java.sql.Date.from(thruDateDt.toInstant())
+                thruDate = textOf(plusDays(thruDt, -1))
                 ]]></script></if>
 
             <!-- handle parent periods, now that we have fromDate and thruDate -->
             <if condition="previousPeriod != null"><then>
                 <if condition="!parentPeriodId &amp;&amp; previousPeriod.parentPeriodId">
                     <!-- see if previous period's parent time range covers the new period, otherwise see if it has a next or create one -->
-                    <if condition="previousPeriodParent.thruDate >= thruDate"><then>
+                    <if condition="dateOf(previousPeriodParent.thruDate) >= dateOf(thruDate)"><then>
                         <set field="parentPeriodId" from="previousPeriod.parentPeriodId"/>
                     </then><else>
                         <!-- find the next parent TimePeriod (gets nextTimePeriodId, nextTimePeriod) -->
@@ -226,7 +234,7 @@ along with this software (see the LICENSE.md file). If not, see
             </then><else-if condition="nextPeriod != null">
                 <if condition="!parentPeriodId &amp;&amp; nextPeriod.parentPeriodId">
                     <!-- see if current period's parent time range covers the new period, otherwise see if it has a previous or create one -->
-                    <if condition="nextPeriodParent.fromDate &lt;= fromDate"><then>
+                    <if condition="dateOf(nextPeriodParent.fromDate) &lt;= dateOf(fromDate)"><then>
                         <set field="parentPeriodId" from="nextPeriod.parentPeriodId"/>
                     </then><else>
                         <!-- find the previous parent TimePeriod (gets previousTimePeriodId, previousTimePeriod) -->
@@ -251,15 +259,15 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="periodNum" from="nextPeriod.periodNum - 1"/>
                 </else-if><else>
                     <!-- calculate based on calendar year -->
-                    <set field="fromDateDt" from="java.time.ZonedDateTime.ofInstant(java.time.Instant.ofEpochMilli(fromDate.time), java.time.ZoneId.systemDefault())"/>
+                    <!-- a JavaScript Date does not survive a context set, so each use reads the date again -->
                     <if condition="timePeriodType.lengthUomId == 'TF_yr'"><then>
-                        <set field="periodNum" from="fromDateDt.getYear()"/>
+                        <set field="periodNum" from="dateOf(fromDate).getUTCFullYear()"/>
                     </then><else-if condition="timePeriodType.lengthUomId == 'TF_mon'">
-                        <set field="periodNum" from="((fromDateDt.getMonthValue() - 1) / timePeriodType.periodLength).intValue() + 1"/>
-                        <if condition="timePeriodType.periodLength &lt; 1 &amp;&amp; fromDateDt.getDayOfMonth() &gt; 1">
+                        <set field="periodNum" from="Math.trunc(dateOf(fromDate).getUTCMonth() / toDecimal(timePeriodType.periodLength).toNumber()) + 1"/>
+                        <if condition="toDecimal(timePeriodType.periodLength).compare(1) &lt; 0 &amp;&amp; dateOf(fromDate).getUTCDate() &gt; 1">
                             <set field="periodNum" from="periodNum + 1"/></if>
                     </else-if><else-if condition="timePeriodType.lengthUomId == 'TF_wk'">
-                        <set field="periodNum" from="(fromDateDt.get(java.time.temporal.ChronoField.ALIGNED_WEEK_OF_YEAR) / timePeriodType.periodLength).intValue()"/>
+                        <set field="periodNum" from="Math.trunc((Math.floor((dateOf(fromDate) - Date.UTC(dateOf(fromDate).getUTCFullYear(), 0, 1)) / 86400000 / 7) + 1) / toDecimal(timePeriodType.periodLength).toNumber())"/>
                     </else-if></if>
                 </else></if>
             </if>
@@ -267,8 +275,8 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- Set a default period name -->
             <if condition="!periodName">
                 <entity-find-one entity-name="mantle.party.PartyDetail" value-field="partyDetail"/>
-                <set field="fromLocalDate" from="java.time.LocalDate.parse(ec.l10n.format(fromDate, 'yyyy-MM-dd'))"/>
-                <set field="thruLocalDate" from="java.time.LocalDate.parse(ec.l10n.format(thruDate, 'yyyy-MM-dd'))"/>
+                <set field="fromLocalDate" from="textOf(dateOf(fromDate))"/>
+                <set field="thruLocalDate" from="textOf(dateOf(thruDate))"/>
                 <set field="periodName" from="ec.resource.expand('TimePeriodBaseNameTemplate', null)"/>
             </if>
 
@@ -276,15 +284,15 @@ along with this software (see the LICENSE.md file). If not, see
             <script><![CDATA[
                 try {
                     newTimePeriod = ec.entity.makeValue("mantle.party.time.TimePeriod")
-                    newTimePeriod.setAll(context)
+                    newTimePeriod.setFields(context, true, null, null)
                     newTimePeriod.setSequencedIdPrimary()
                     newTimePeriod.create()
                     timePeriodId = newTimePeriod.get("timePeriodId")
-                } catch (Exception e) {
+                } catch (e) {
                     // try once to find an existing and return its timePeriodId
                     existingTimePeriods = ec.entity.find("mantle.party.time.TimePeriod").condition("partyId", partyId)
                             .condition("timePeriodTypeId", timePeriodTypeId).condition("fromDate", fromDate).list()
-                    if (existingTimePeriods) {
+                    if (existingTimePeriods.size() > 0) {
                         timePeriodId = existingTimePeriods[0].timePeriodId
                     } else {
                         throw e

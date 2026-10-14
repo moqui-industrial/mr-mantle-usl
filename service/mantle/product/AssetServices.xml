@@ -447,8 +447,8 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- View queries won't work with transaction cache (for data updated within the tx), so if active use different approach -->
             <if condition="ec.transaction.isTransactionCacheActive()"><then>
                 <!-- incremental update -->
-                <set field="asset.availableToPromiseTotal" from="(asset.availableToPromiseTotal || 0.0) + (availableToPromiseDiff || 0.0)"/>
-                <set field="asset.quantityOnHandTotal" from="(asset.quantityOnHandTotal || 0.0) + (quantityOnHandDiff || 0.0)"/>
+                <set field="asset.availableToPromiseTotal" from="toDecimal(asset.availableToPromiseTotal ?? 0).add(availableToPromiseDiff ?? 0)"/>
+                <set field="asset.quantityOnHandTotal" from="toDecimal(asset.quantityOnHandTotal ?? 0).add(quantityOnHandDiff ?? 0)"/>
             </then><else>
                 <!-- sum all records, update with new totals -->
                 <entity-find entity-name="mantle.product.asset.AssetDetailSummary" list="assetDetailSummaryList">
@@ -457,11 +457,11 @@ along with this software (see the LICENSE.md file). If not, see
                 </entity-find>
                 <if condition="assetDetailSummaryList.size() &gt; 0"><then>
                     <set field="assetDetailSummary" from="assetDetailSummaryList[0]"/>
-                    <set field="asset.availableToPromiseTotal" from="assetDetailSummary.availableToPromiseTotal || 0.0"/>
-                    <set field="asset.quantityOnHandTotal" from="assetDetailSummary.quantityOnHandTotal || 0.0"/>
+                    <set field="asset.availableToPromiseTotal" from="assetDetailSummary.availableToPromiseTotal ?? toDecimal(0)"/>
+                    <set field="asset.quantityOnHandTotal" from="assetDetailSummary.quantityOnHandTotal ?? toDecimal(0)"/>
                 </then><else>
-                    <set field="asset.availableToPromiseTotal" from="(asset.availableToPromiseTotal || 0.0) + (availableToPromiseDiff || 0.0)"/>
-                    <set field="asset.quantityOnHandTotal" from="(asset.quantityOnHandTotal || 0.0) + (quantityOnHandDiff || 0.0)"/>
+                    <set field="asset.availableToPromiseTotal" from="toDecimal(asset.availableToPromiseTotal ?? 0).add(availableToPromiseDiff ?? 0)"/>
+                    <set field="asset.quantityOnHandTotal" from="toDecimal(asset.quantityOnHandTotal ?? 0).add(quantityOnHandDiff ?? 0)"/>
                 </else></if>
             </else></if>
 
@@ -469,10 +469,10 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- never let quantityOnHandTotal stay negative, do a physical inventory found for the difference -->
             <!-- NOTE: this may be better to do at a higher level in some cases, but this will make sure -->
-            <if condition="asset.quantityOnHandTotal &lt; 0">
+            <if condition="toDecimal(asset.quantityOnHandTotal ?? 0).compare(0) &lt; 0">
                 <service-call name="mantle.product.AssetServices.record#PhysicalInventoryChange"
                         in-map="{productId:asset.productId, facilityId:asset.facilityId, locationSeqId:asset.locationSeqId,
-                            quantityChange:-asset.quantityOnHandTotal, varianceReasonEnumId:'InVrFound',
+                            quantityChange:toDecimal(asset.quantityOnHandTotal).multiply(-1), varianceReasonEnumId:'InVrFound',
                             assetList:[asset]}"/>
             </if>
 

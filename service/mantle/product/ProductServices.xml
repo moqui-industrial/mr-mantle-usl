@@ -249,7 +249,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <date-filter/><econdition field-name="productId"/>
                 <econdition field-name="applTypeEnumId" from="applTypeEnumId" ignore-if-empty="true"/>
             </entity-find>
-            <script>productFeatureList.addAll(pfaaList)</script>
+            <script>productFeatureList = productFeatureList.concat(Array.from(pfaaList))</script>
 
             <entity-find entity-name="mantle.product.category.ProductCategoryMember" list="pcmList">
                 <date-filter/><econdition field-name="productId"/></entity-find>
@@ -262,7 +262,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <iterate list="pcfgaList" entry="pcfga">
                     <entity-find entity-name="mantle.product.feature.ProductFeatureAndGroupAppl" list="pfagaList">
                         <date-filter/><econdition field-name="productFeatureGroupId" from="pcfga.productFeatureGroupId"/></entity-find>
-                    <script>productFeatureList.addAll(pfagaList)</script>
+                    <script>productFeatureList = productFeatureList.concat(Array.from(pfagaList))</script>
                 </iterate>
             </iterate>
         </actions>
@@ -510,43 +510,30 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.product.ProductServices.find#ProductFeatures" out-map="context"
                 in-map="{productId:productId, applTypeEnumId:'PfatSelectable', productFeatureGroupIdSet:productFeatureGroupIdSet}"/>
 
-            <!-- split by feature type -->
-            <set field="featuresByType" from="{}"/>
-            <iterate list="productFeatureList" entry="productFeature">
-                <script>addToListInMap(productFeature.productFeatureTypeEnumId, productFeature, featuresByType)</script></iterate>
-            <!-- now we want an ordered list to track the index -->
-            <set field="featureListList" from="[]"/>
-            <!-- add each List to List ordered by the key for consistency -->
-            <set field="featureTypeTreeSet" from="new TreeSet(featuresByType.keySet())"/>
-            <iterate list="featureTypeTreeSet" entry="featureType"><script>featureListList.add(featuresByType.get(featureType))</script></iterate>
-
-            <!-- create a variant for each combination of features by type -->
+            <!-- split by feature type, then create a variant for each combination of one feature of each type, types in
+                key order (the TreeSet of Java) -->
             <script><![CDATA[
-                import org.moqui.context.ExecutionContext
-                import org.moqui.entity.EntityValue
-                import org.moqui.entity.EntityCondition
+                const featuresByType = {}
+                for (const productFeature of productFeatureList)
+                    (featuresByType[productFeature.productFeatureTypeEnumId] ??= []).push(productFeature)
+                const featureListList = Object.keys(featuresByType).sort().map((featureType) => featuresByType[featureType])
 
-                ExecutionContext ec = context.ec
-
-                def recursiveCreate(ExecutionContext ec, EntityValue product, List<List<EntityValue>> featureListList,
-                                    ArrayList<EntityValue> featureList, int level) {
-
-                    for (int i = 0; i < featureListList[level].size(); i++) {
-                        featureList[level] = featureListList.get(level).get(i)
-                        if (level == featureListList.size() - 1) {
+                const recursiveCreate = (featureList, level) => {
+                    for (const feature of featureListList[level]) {
+                        featureList[level] = feature
+                        if (level == featureListList.length - 1) {
                             // at the bottom, create the variant
                             ec.service.sync().name("mantle.product.ProductServices.create#VariantProduct")
-                                    .parameters({product:product, productTypeEnumId:productTypeEnumId,
-                                                 assetTypeEnumId:assetTypeEnumId, assetClassEnumId:assetClassEnumId,
-                                                 featureList:featureList, copyCategoryMembers:copyCategoryMembers})
+                                    .parameters({product: product, productTypeEnumId: productTypeEnumId,
+                                                 assetTypeEnumId: assetTypeEnumId, assetClassEnumId: assetClassEnumId,
+                                                 featureList: featureList.slice(), copyCategoryMembers: copyCategoryMembers})
                                     .call()
                         } else {
-                            recursiveCreate(ec, product, featureListList, featureList, level + 1)
+                            recursiveCreate(featureList, level + 1)
                         }
                     }
                 }
-
-                recursiveCreate(ec, product, featureListList, new ArrayList(featureListList.size()), 0)
+                if (featureListList.length > 0) recursiveCreate([], 0)
             ]]></script>
         </actions>
     </service>
@@ -573,41 +560,37 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
 
             <script><![CDATA[
-                import org.moqui.entity.EntityCondition
-
                 productId = product.pseudoId || product.productId
-                String productName = product.productName
-                for (EntityValue feature in featureList) {
-                    // get the feature type Enumeration record for the description
-                    EntityValue typeEnum = ec.entity.find("moqui.basic.Enumeration")
-                            .condition("enumId", feature.productFeatureTypeEnumId).useCache(true).one()
+                let productName = product.productName
+                for (const feature of featureList) {
                     productId = productId + "_" + (feature.abbrev || feature.productFeatureId)
                     productName = productName + " " + feature.description
                 }
 
                 // see if product exists (by ID) before creating
-                EntityValue existingProduct = ec.entity.find("mantle.product.Product")
-                        .condition("productId", productId).one()
+                const existingProduct = ec.entity.find("mantle.product.Product").condition("productId", productId).one()
                 if (existingProduct) return
 
                 // see if variant with the same features exists
-                EntityList allVariants = ec.entity.find("mantle.product.ProductAssoc")
+                const conditions = ec.entity.conditionFactory
+                const allVariants = ec.entity.find("mantle.product.ProductAssoc")
                         .condition({productId: product.productId, productAssocTypeEnumId: "PatVariant"})
-                        .conditionDate(null, null, null).list()
-                Set checkProductIds = new HashSet((Collection) allVariants.toProductId)
-                for (EntityValue feature in featureList) {
-                    if (!checkProductIds) break
-                    EntityList remainingWithFeature = ec.entity.find("mantle.product.feature.ProductFeatureAppl")
-                            .condition("productId", EntityCondition.IN, checkProductIds)
+                        .condition(conditions.makeConditionDate("fromDate", "thruDate", null, false, "false")).list()
+                let checkProductIds = [...new Set(Array.from(allVariants, (assoc) => assoc.toProductId))]
+                for (const feature of featureList) {
+                    if (checkProductIds.length == 0) break
+                    const remainingWithFeature = ec.entity.find("mantle.product.feature.ProductFeatureAppl")
+                            .condition(conditions.makeActionConditionDirect("productId", "in", checkProductIds, null, null,
+                                false, false, false, "false"))
                             .condition("productFeatureId", feature.productFeatureId).list()
-                    checkProductIds = new HashSet((Collection) remainingWithFeature.productId)
+                    checkProductIds = [...new Set(Array.from(remainingWithFeature, (appl) => appl.productId))]
                 }
-                if (checkProductIds) {
-                    productId = checkProductIds.iterator().next()
+                if (checkProductIds.length > 0) {
+                    productId = checkProductIds[0]
                     return
                 }
 
-                EntityValue newProduct = product.cloneValue()
+                const newProduct = product.cloneValue()
                 newProduct.productName = productName; newProduct.productId = productId
                 if (productTypeEnumId) newProduct.productTypeEnumId = productTypeEnumId
                 if (assetTypeEnumId) newProduct.assetTypeEnumId = assetTypeEnumId
@@ -615,30 +598,29 @@ along with this software (see the LICENSE.md file). If not, see
                 newProduct.pseudoId = null
                 newProduct.create()
 
-                ec.service.sync().name("create", "mantle.product.ProductAssoc")
-                        .parameters({productId:product.productId, toProductId:newProduct.productId,
-                                     productAssocTypeEnumId:"PatVariant", fromDate:ec.user.nowTimestamp}).call()
+                ec.service.sync().name("create#mantle.product.ProductAssoc")
+                        .parameters({productId: product.productId, toProductId: newProduct.productId,
+                                     productAssocTypeEnumId: "PatVariant", fromDate: ec.user.nowTimestamp}).call()
 
-                for (EntityValue feature in featureList) {
-                    ec.service.sync().name("create", "mantle.product.feature.ProductFeatureAppl")
-                            .parameters({productId:newProduct.productId, productFeatureId:feature.productFeatureId,
-                                         fromDate:ec.user.nowTimestamp, applTypeEnumId:"PfatDistinguishing"}).call()
+                for (const feature of featureList) {
+                    ec.service.sync().name("create#mantle.product.feature.ProductFeatureAppl")
+                            .parameters({productId: newProduct.productId, productFeatureId: feature.productFeatureId,
+                                         fromDate: ec.user.nowTimestamp, applTypeEnumId: "PfatDistinguishing"}).call()
                 }
 
-                for (EntityValue feature in standardFeatureList) {
-                    ec.service.sync().name("create", "mantle.product.feature.ProductFeatureAppl")
-                            .parameters({productId:newProduct.productId, productFeatureId:feature.productFeatureId,
-                                         fromDate:ec.user.nowTimestamp, applTypeEnumId:"PfatStandard"}).call()
+                for (const feature of (standardFeatureList ?? [])) {
+                    ec.service.sync().name("create#mantle.product.feature.ProductFeatureAppl")
+                            .parameters({productId: newProduct.productId, productFeatureId: feature.productFeatureId,
+                                         fromDate: ec.user.nowTimestamp, applTypeEnumId: "PfatStandard"}).call()
                 }
 
-                for (EntityValue pcm in pcmList) {
-                    ec.service.sync().name("create", "mantle.product.category.ProductCategoryMember")
-                            .parameters({productId:newProduct.productId, productCategoryId:pcm.productCategoryId,
-                                         fromDate:ec.user.nowTimestamp}).call()
+                for (const pcm of (pcmList ?? [])) {
+                    ec.service.sync().name("create#mantle.product.category.ProductCategoryMember")
+                            .parameters({productId: newProduct.productId, productCategoryId: pcm.productCategoryId,
+                                         fromDate: ec.user.nowTimestamp}).call()
                 }
 
-                ec.logger.info("Created variant of ${product.productId}: ${newProduct.productId}:${newProduct.productName}")
-
+                ec.logger.info(`Created variant of ${product.productId}: ${newProduct.productId}:${newProduct.productName}`)
             ]]></script>
         </actions>
     </service>
@@ -979,7 +961,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="contentRef != null &amp;&amp; contentRef.isText()">
                     <set field="contentText" from="contentRef.getText()"/>
                     <if condition="contentText">
-                        <script>contents.add({productContentId:productContent.productContentId, contentText:contentText,
+                        <script>contents.push({productContentId:productContent.productContentId, contentText:contentText,
                                               productContentTypeEnumId:productContent.productContentTypeEnumId})</script>
                     </if>
                 </if>
