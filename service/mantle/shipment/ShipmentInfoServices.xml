@@ -88,8 +88,8 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.shipment.ShipmentServices.get#ShipmentContactInfo" out-map="context" in-map="{shipmentId:shipmentId}"/>
             <set field="productStore" from="shipment.productStore"/>
 
-            <set field="statusItem" from="shipment.'Shipment#moqui.basic.StatusItem'"/>
-            <set field="shipmentTypeEnum" from="shipment.'ShipmentType#moqui.basic.Enumeration'"/>
+            <set field="statusItem" from="shipment['Shipment#moqui.basic.StatusItem']"/>
+            <set field="shipmentTypeEnum" from="shipment['ShipmentType#moqui.basic.Enumeration']"/>
             <set field="isIncoming" from="shipmentTypeEnum?.enumId == 'ShpTpIncoming' || shipmentTypeEnum?.parentEnumId == 'ShpTpIncoming'"/>
             <set field="isOutgoing" from="shipmentTypeEnum?.enumId == 'ShpTpOutgoing' || shipmentTypeEnum?.parentEnumId == 'ShpTpOutgoing'"/>
             <set field="isTransfer" from="shipmentTypeEnum?.enumId == 'ShpTpTransfer' || shipmentTypeEnum?.parentEnumId == 'ShpTpTransfer'"/>

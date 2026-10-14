@@ -992,11 +992,11 @@ along with this software (see the LICENSE.md file). If not, see
                 if (areaCode) {
                     if (areaCode.length() != 3) {
                         isValid = false
-                        ec.message.addMessage("Area code ${areaCode} not valid for North America, should be 3 digits", "warning")
+                        ec.message.addMessage(`Area code ${areaCode} not valid for North America, should be 3 digits`, "warning")
                     }
                     if (areaCode.charAt(0) == '0' as char || areaCode.charAt(0) == '1' as char) {
                         isValid = false
-                        ec.message.addMessage("Area code ${areaCode} not valid for North America, should not start with 0 or 1", "warning")
+                        ec.message.addMessage(`Area code ${areaCode} not valid for North America, should not start with 0 or 1`, "warning")
                     }
                 } else {
                     isValid = false
@@ -1006,11 +1006,11 @@ along with this software (see the LICENSE.md file). If not, see
                     String contactNumberOnly = contactNumber.trim().replaceAll(/\D/, "")
                     if (contactNumberOnly.length() != 7) {
                         isValid = false
-                        ec.message.addMessage("Contact number ${contactNumber} not valid for North America, should be 7 digits", "warning")
+                        ec.message.addMessage(`Contact number ${contactNumber} not valid for North America, should be 7 digits`, "warning")
                     }
                     if (contactNumberOnly.charAt(0) == '0' as char || contactNumberOnly.charAt(0) == '1' as char) {
                         isValid = false
-                        ec.message.addMessage("Contact number ${contactNumber} not valid for North America, should not start with 0 or 1", "warning")
+                        ec.message.addMessage(`Contact number ${contactNumber} not valid for North America, should not start with 0 or 1`, "warning")
                     }
                 } else {
                     isValid = false

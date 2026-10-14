@@ -203,13 +203,13 @@ along with this software (see the LICENSE.md file). If not, see
                     parmMap.put("storePromotionId", storePromotionId)
                     parmMap.put("promoCodeId", promoCodesByPromo.get(storePromotionId))
                     parmMap.put("useLimit", useLimitByPromo.get(storePromotionId))
-                    // ec.logger.warn("Calling store promotion service ${storePromotionId} promoCodeId ${promoCodesByPromo.get(storePromotionId)} useLimit ${useLimitByPromo.get(storePromotionId)}")
+                    // ec.logger.warn(`Calling store promotion service ${storePromotionId} promoCodeId ${promoCodesByPromo.get(storePromotionId)} useLimit ${useLimitByPromo.get(storePromotionId)}`)
 
                     Map serviceRegister = storePromo.serviceRegister
                     Map result = ec.service.sync().name(serviceRegister.serviceName).parameters(parmMap).softValidate(true).disableAuthz().call()
                     if (result != null && !ec.message.hasError()) ec.context.putAll(result)
                 } catch (Throwable t) {
-                    ec.logger.log(300, "Error calling store promotion service ${storePromotionId}", t)
+                    ec.logger.log(300, `Error calling store promotion service ${storePromotionId}`, t)
                 }
             }
             ]]></script>
@@ -233,21 +233,21 @@ along with this software (see the LICENSE.md file). If not, see
                     <field-map field-name="promoCodeId" from="promoCode"/></entity-find-one>
             </if>
             <if condition="storePromoCode == null">
-                <script>ec.message.addPublic("Promotion code ${promoCode} is not valid", "warning")</script>
+                <script>ec.message.addPublic(`Promotion code ${promoCode} is not valid`, "warning")</script>
                 <return/>
             </if>
             <!-- see if code already on order -->
             <entity-find-one entity-name="mantle.order.OrderPromoCode" value-field="existingOrderPromoCode">
                 <field-map field-name="orderId"/><field-map field-name="promoCodeId" from="storePromoCode.promoCodeId"/></entity-find-one>
             <if condition="existingOrderPromoCode != null">
-                <script>ec.message.addPublic("Promotion code ${promoCode} is already on this order", "success")</script>
+                <script>ec.message.addPublic(`Promotion code ${promoCode} is already on this order`, "success")</script>
                 <return/>
             </if>
 
             <!-- make sure has a promotion -->
             <set field="storePromotion" from="storePromoCode.storePromotion"/>
             <if condition="storePromotion == null">
-                <script>ec.message.addPublic("No promotion found for code ${promoCode}", "warning")</script>
+                <script>ec.message.addPublic(`No promotion found for code ${promoCode}`, "warning")</script>
                 <return/>
             </if>
             <!-- see if store matches order -->
@@ -255,27 +255,27 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
                 <!-- NOTE: could make more strict and require a store on the order to require code, but more flexible to not -->
                 <if condition="orderHeader.productStoreId &amp;&amp; storePromotion.productStoreId != orderHeader.productStoreId">
-                    <script>ec.message.addPublic("Promotion code ${promoCode} is not valid for this store", "warning")</script>
+                    <script>ec.message.addPublic(`Promotion code ${promoCode} is not valid for this store`, "warning")</script>
                     <return/>
                 </if>
             </if>
 
             <!-- check promo code from/thru dates -->
             <if condition="storePromoCode.fromDate != null &amp;&amp; ec.user.nowTimestamp &lt; storePromoCode.fromDate">
-                <script>ec.message.addPublic("Promotion code ${promoCode} is not valid until ${ec.l10n.format(storePromoCode.fromDate, 'dd MMM yyyy h:mm a')}", "warning")</script>
+                <script>ec.message.addPublic(`Promotion code ${promoCode} is not valid until ${ec.l10n.format(storePromoCode.fromDate, 'dd MMM yyyy h:mm a')}`, "warning")</script>
                 <return/>
             </if>
             <if condition="storePromoCode.thruDate != null &amp;&amp; ec.user.nowTimestamp &gt; storePromoCode.thruDate">
-                <script>ec.message.addPublic("Promotion code ${promoCode} expired at ${ec.l10n.format(storePromoCode.thruDate, 'dd MMM yyyy h:mm a')}", "warning")</script>
+                <script>ec.message.addPublic(`Promotion code ${promoCode} expired at ${ec.l10n.format(storePromoCode.thruDate, 'dd MMM yyyy h:mm a')}`, "warning")</script>
                 <return/>
             </if>
             <!-- check promotion from/thru dates -->
             <if condition="storePromotion.fromDate != null &amp;&amp; ec.user.nowTimestamp &lt; storePromotion.fromDate">
-                <script>ec.message.addPublic("Promotion for code ${promoCode} is not valid until ${ec.l10n.format(storePromotion.fromDate, 'dd MMM yyyy h:mm a')}", "warning")</script>
+                <script>ec.message.addPublic(`Promotion for code ${promoCode} is not valid until ${ec.l10n.format(storePromotion.fromDate, 'dd MMM yyyy h:mm a')}`, "warning")</script>
                 <return/>
             </if>
             <if condition="storePromotion.thruDate != null &amp;&amp; ec.user.nowTimestamp &gt; storePromotion.thruDate">
-                <script>ec.message.addPublic("Promotion for code ${promoCode} expired at ${ec.l10n.format(storePromotion.thruDate, 'dd MMM yyyy h:mm a')}", "warning")</script>
+                <script>ec.message.addPublic(`Promotion for code ${promoCode} expired at ${ec.l10n.format(storePromotion.thruDate, 'dd MMM yyyy h:mm a')}`, "warning")</script>
                 <return/>
             </if>
 
@@ -287,7 +287,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- check storePromoCode.requireParty -->
             <if condition="storePromoCode.requireParty == 'Y'">
                 <if condition="!customerPartyId">
-                    <script>ec.message.addPublic("Promotion code ${promoCode} requires that a customer be set on the order", "warning")</script>
+                    <script>ec.message.addPublic(`Promotion code ${promoCode} requires that a customer be set on the order`, "warning")</script>
                     <return/>
                 </if>
                 <entity-find-one entity-name="mantle.product.store.ProductStorePromoCodeParty" value-field="promoCodeParty">
@@ -295,7 +295,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <field-map field-name="partyId" from="customerPartyId"/>
                 </entity-find-one>
                 <if condition="promoCodeParty == null">
-                    <script>ec.message.addPublic("Customer not allowed to use promotion code ${promoCode}", "warning")</script>
+                    <script>ec.message.addPublic(`Customer not allowed to use promotion code ${promoCode}`, "warning")</script>
                     <return/>
                 </if>
             </if>
@@ -310,7 +310,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="promoTimesUsed" from="itemSummaryList?.first?.promoTimesUsed || 0.0"/>
                 <set field="curUseLimit" from="storePromoCode.useLimitPerCode - promoTimesUsed"/>
                 <if condition="curUseLimit &lt;= 0.0">
-                    <script>ec.message.addPublic("Promotion code ${promoCode} has already been used the maximum times allowed", "warning")</script>
+                    <script>ec.message.addPublic(`Promotion code ${promoCode} has already been used the maximum times allowed`, "warning")</script>
                     <return/>
                 </if>
             </if>
@@ -329,7 +329,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="curUseLimit" from="storePromoCode.useLimitPerCustomer"/>
                 </else></if>
                 <if condition="curUseLimit &lt;= 0.0">
-                    <script>ec.message.addPublic("You have used promotion code ${promoCode} as many times as allowed (${storePromoCode.useLimitPerCustomer})", "warning")</script>
+                    <script>ec.message.addPublic(`You have used promotion code ${promoCode} as many times as allowed (${storePromoCode.useLimitPerCustomer})`, "warning")</script>
                     <return/>
                 </if>
             </if>
@@ -344,7 +344,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="promoTimesUsed" from="itemSummaryList?.first?.promoTimesUsed || 0.0"/>
                 <set field="curUseLimit" from="storePromotion.useLimitPerPromotion - promoTimesUsed"/>
                 <if condition="curUseLimit &lt;= 0.0">
-                    <script>ec.message.addPublic("Promotion for code ${promoCode} has already been used the maximum times allowed", "warning")</script>
+                    <script>ec.message.addPublic(`Promotion for code ${promoCode} has already been used the maximum times allowed`, "warning")</script>
                     <return/>
                 </if>
             </if>
@@ -363,7 +363,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="curUseLimit" from="storePromotion.useLimitPerCustomer"/>
                 </else></if>
                 <if condition="curUseLimit &lt;= 0.0">
-                    <script>ec.message.addPublic("You have used the promotion for code ${promoCode} as many times as allowed (${storePromotion.useLimitPerCustomer})", "warning")</script>
+                    <script>ec.message.addPublic(`You have used the promotion for code ${promoCode} as many times as allowed (${storePromotion.useLimitPerCustomer})`, "warning")</script>
                     <return/>
                 </if>
             </if>

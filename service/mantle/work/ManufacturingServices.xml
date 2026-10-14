@@ -907,7 +907,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <field-map field-name="facilityId" from="asset.facilityId"/>
                         <field-map field-name="locationSeqId" from="asset.locationSeqId"/>
                     </entity-find-one>
-                    <set field="locationTypeEnum" from="facLoc?.'FacilityLocationType#moqui.basic.Enumeration'"/>
+                    <set field="locationTypeEnum" from="facLoc?.['FacilityLocationType#moqui.basic.Enumeration']"/>
 
                     <set field="locationInfo" from="locationInfoMap.get(assetLocKey)"/>
                     <if condition="!locationInfo">

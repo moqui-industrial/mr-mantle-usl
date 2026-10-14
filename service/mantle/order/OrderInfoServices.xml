@@ -424,7 +424,7 @@ along with this software (see the LICENSE.md file). If not, see
                         cardNumber = creditCard?.cardNumber
                         partPaymentInfo.maskedCardNumber = cardNumber ? '*'.padRight(cardNumber.length() - 4, '*') + cardNumber.substring(cardNumber.length() - 4, cardNumber.length()) : ''
                         partPaymentInfo.postalAddress = paymentMethod.PostalAddress
-                        partPaymentInfo.postalAddressStateGeo = partPaymentInfo.postalAddress?."StateProvince#moqui.basic.Geo"
+                        partPaymentInfo.postalAddressStateGeo = partPaymentInfo.postalAddress?.["StateProvince#moqui.basic.Geo"]
                         partPaymentInfo.telecomNumber = paymentMethod.TelecomNumber
                         partPaymentInfo.paymentMethodTypeEnum = paymentMethod.methodType
                     }
@@ -451,10 +451,10 @@ along with this software (see the LICENSE.md file). If not, see
                     partShipmentIdSet.add(sis.shipmentId)
                 }
 
-                EntityValue telecomNumber = (EntityValue) orderPart.'mantle.party.contact.TelecomNumber'
-                EntityValue postalAddress = (EntityValue) orderPart.'mantle.party.contact.PostalAddress'
-                EntityValue postalAddressStateGeo = (EntityValue) postalAddress?."StateProvince#moqui.basic.Geo"
-                EntityValue facility = (EntityValue) orderPart.'mantle.facility.Facility'
+                EntityValue telecomNumber = (EntityValue) orderPart['mantle.party.contact.TelecomNumber']
+                EntityValue postalAddress = (EntityValue) orderPart['mantle.party.contact.PostalAddress']
+                EntityValue postalAddressStateGeo = (EntityValue) postalAddress?.["StateProvince#moqui.basic.Geo"]
+                EntityValue facility = (EntityValue) orderPart['mantle.facility.Facility']
                 Map facilityContactInfo = null
                 if (facility) {
                     Map facShipOut = ec.service.sync().name("mantle.facility.ContactServices.get#FacilityDefaultShipDest")
@@ -482,7 +482,7 @@ along with this software (see the LICENSE.md file). If not, see
                         partNoParentOrderItemCount:partNoParentOrderItemCount,
                         hasShippableItems:hasShippableItems, singleLot:singleLot, newerInventory:newerInventory,
                         carrierPartyDetail:carrierPartyDetail,
-                        shipmentMethodEnum:orderPart."ShipmentMethod#moqui.basic.Enumeration",
+                        shipmentMethodEnum:orderPart["ShipmentMethod#moqui.basic.Enumeration"],
                         partPaymentList:partPaymentList, partPaymentInfoList:partPaymentInfoList,
                         paymentsTotal:paymentsTotal, partTotalUnpaid:partTotalUnpaid,
                         postalAddress:postalAddress, postalAddressStateGeo:postalAddressStateGeo,
@@ -911,7 +911,7 @@ along with this software (see the LICENSE.md file). If not, see
                         if (result != null && result.approveWarnings && !ec.message.hasError())
                             approveWarnings.addAll(result.approveWarnings)
                     } catch (Throwable t) {
-                        ec.logger.log(300, "Error calling store order approval validate service ${storeApproveId}", t)
+                        ec.logger.log(300, `Error calling store order approval validate service ${storeApproveId}`, t)
                     }
                 }
                 ]]></script>

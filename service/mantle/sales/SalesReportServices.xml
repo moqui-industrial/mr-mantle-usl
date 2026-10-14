@@ -47,7 +47,7 @@ along with this software (see the LICENSE.md file). If not, see
             ExecutionContext ec = context.ec
 
             def elasticClient = ec.factory.elastic.getClient((String) clusterName)
-            if (elasticClient == null) { ec.message.addMessage("No ElasticClient found for cluster ${clusterName}", "danger"); return }
+            if (elasticClient == null) { ec.message.addMessage(`No ElasticClient found for cluster ${clusterName}`, "danger"); return }
             String intervalName = elasticClient.isEsVersionUnder7() ? "interval" : "calendar_interval"
 
             int maInt = maPeriods
@@ -61,7 +61,7 @@ along with this software (see the LICENSE.md file). If not, see
             Timestamp thruTimestamp = curPer.get(1)
             def fromDateDt = java.time.ZonedDateTime.ofInstant(java.time.Instant.ofEpochMilli(curPer[0].time), TimeZone.getDefault().toZoneId())
             fromDateDt = fromDateDt.minus(searchIntervalCount, tempUnits.get(interval))
-            // ec.logger.warn("from ${fromDateDt} thru ${thruTimestamp}")
+            // ec.logger.warn(`from ${fromDateDt} thru ${thruTimestamp}`)
 
             List filterList = [
                     {range: {[dateField]: {gte:(fromDateDt.toInstant().toEpochMilli() as String), lt:(thruTimestamp.time?.toString()), format: 'epoch_millis'}}},
@@ -253,7 +253,7 @@ along with this software (see the LICENSE.md file). If not, see
             ExecutionContext ec = context.ec
 
             def elasticClient = ec.factory.elastic.getClient((String) clusterName)
-            if (elasticClient == null) { ec.message.addMessage("No ElasticClient found for cluster ${clusterName}", "danger"); return }
+            if (elasticClient == null) { ec.message.addMessage(`No ElasticClient found for cluster ${clusterName}`, "danger"); return }
             String intervalName = elasticClient.isEsVersionUnder7() ? "interval" : "calendar_interval"
 
             int maInt = maPeriods
@@ -267,7 +267,7 @@ along with this software (see the LICENSE.md file). If not, see
             Timestamp thruTimestamp = curPer.get(1)
             def fromDateDt = java.time.ZonedDateTime.ofInstant(java.time.Instant.ofEpochMilli(curPer[0].time), TimeZone.getDefault().toZoneId())
             fromDateDt = fromDateDt.minus(searchIntervalCount, tempUnits.get(interval))
-            // ec.logger.warn("from ${fromDateDt} thru ${thruTimestamp}")
+            // ec.logger.warn(`from ${fromDateDt} thru ${thruTimestamp}`)
 
             List filterList = [
                     {range: {[dateField]: {gte:(fromDateDt.toInstant().toEpochMilli() as String), lt:(thruTimestamp.time?.toString()), format: 'epoch_millis'}}},
@@ -390,7 +390,7 @@ along with this software (see the LICENSE.md file). If not, see
                 // don't include the first (most recent) period in the total and average
                 if (salesInvoiceSummaryList.size() > 1) addBigDecimalsInMap(invoicesTotal, curLine)
             }
-            ec.logger.info("In SalesInvoiceSummary invoiceTempMap remaining: ${invoiceTempMap}")
+            ec.logger.info(`In SalesInvoiceSummary invoiceTempMap remaining: ${invoiceTempMap}`)
 
             // get the this, last, prior periods before reversing list
             invoicesThis = salesInvoiceSummaryList.size() > 0 ? salesInvoiceSummaryList[0] : null
@@ -462,7 +462,7 @@ along with this software (see the LICENSE.md file). If not, see
             ExecutionContext ec = context.ec
 
             def elasticClient = ec.factory.elastic.getClient((String) clusterName)
-            if (elasticClient == null) { ec.message.addMessage("No ElasticClient found for cluster ${clusterName}", "danger"); return }
+            if (elasticClient == null) { ec.message.addMessage(`No ElasticClient found for cluster ${clusterName}`, "danger"); return }
 
             Map<String, String> perMap = {d:'day', w:'week', M:'month', q:'quarter', y:'year'}
             ArrayList<Timestamp> curPer = ec.user.getPeriodRange(perMap.get(interval), poffset, thruDate)
@@ -530,7 +530,7 @@ along with this software (see the LICENSE.md file). If not, see
             ExecutionContext ec = context.ec
 
             def elasticClient = ec.factory.elastic.getClient((String) clusterName)
-            if (elasticClient == null) { ec.message.addMessage("No ElasticClient found for cluster ${clusterName}", "danger"); return }
+            if (elasticClient == null) { ec.message.addMessage(`No ElasticClient found for cluster ${clusterName}`, "danger"); return }
 
             Map<String, String> perMap = {d:'day', w:'week', M:'month', q:'quarter', y:'year'}
             ArrayList<Timestamp> curPer = ec.user.getPeriodRange(perMap.get(interval), poffset, thruDate)

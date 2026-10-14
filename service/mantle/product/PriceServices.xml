@@ -161,10 +161,10 @@ along with this software (see the LICENSE.md file). If not, see
 
                 Map serviceRegister = priceModify.serviceRegister
                 Map result = ec.service.sync().name(serviceRegister.serviceName).parameters(parmMap).disableAuthz().call()
-                // ec.logger.warn("Ran price service ${serviceRegister.serviceName} result: ${result}")
+                // ec.logger.warn(`Ran price service ${serviceRegister.serviceName} result: ${result}`)
                 if (!ec.message.hasError()) ec.context.putAll(result)
             } catch (Throwable t) {
-                ec.logger.log(300, "Error calling price modify ${priceModify.priceModifyId}", t)
+                ec.logger.log(300, `Error calling price modify ${priceModify.priceModifyId}`, t)
             } }
             ]]></script>
 

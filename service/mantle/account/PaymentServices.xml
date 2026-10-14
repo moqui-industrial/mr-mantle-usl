@@ -171,8 +171,8 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="paymentDescription"/></out-parameters>
         <actions>
             <if condition="payment == null"><entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment"/></if>
-            <set field="typeEnum" from="payment.'PaymentInstrument#moqui.basic.Enumeration'"/>
-            <set field="paymentMethod" from="payment.'mantle.account.method.PaymentMethod'"/>
+            <set field="typeEnum" from="payment['PaymentInstrument#moqui.basic.Enumeration']"/>
+            <set field="paymentMethod" from="payment['mantle.account.method.PaymentMethod']"/>
             <set field="paymentDescription" from="paymentMethod?.description ? paymentMethod.description : (typeEnum?.description || '')"/>
         </actions>
     </service>
@@ -1483,7 +1483,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
 
                 <!-- clear CreditCard.cardSecurityCode if present, required by PCI rules (and generally good practice) -->
-                <set field="creditCard" from="payment.'mantle.account.method.CreditCard'"/>
+                <set field="creditCard" from="payment['mantle.account.method.CreditCard']"/>
                 <if condition="creditCard?.cardSecurityCode">
                     <set field="creditCard.cardSecurityCode" from="null"/>
                     <entity-update value-field="creditCard"/>

@@ -225,7 +225,7 @@ along with this software (see the LICENSE.md file). If not, see
                         statusCodes.each{k, v -> totalAmount += v}
                         controlSum = fields[1] ? new BigDecimal(fields[1])/100 : 0
                         if (totalAmount != controlSum) {
-                            ec.message.addError("Control sum ${controlSum} did not match total ${totalAmount} in BAI file dated ${postedDate} for Bank Account ${paymentMethodId}")
+                            ec.message.addError(`Control sum ${controlSum} did not match total ${totalAmount} in BAI file dated ${postedDate} for Bank Account ${paymentMethodId}`)
                         }
                     }
                     // close the group of accounts

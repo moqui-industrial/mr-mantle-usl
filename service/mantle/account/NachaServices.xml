@@ -288,7 +288,7 @@ along with this software (see the LICENSE.md file). If not, see
                     entryCount++
                     paymentList.add(payment)
 
-                    // ec.logger.warn("routingNumber ${routingNumber} routingCheckDigit ${routingCheckDigit} accountNumber ${accountNumber}")
+                    // ec.logger.warn(`routingNumber ${routingNumber} routingCheckDigit ${routingCheckDigit} accountNumber ${accountNumber}`)
 
                     // Entry Detail (6)
                     StringBuilder entry = new StringBuilder()

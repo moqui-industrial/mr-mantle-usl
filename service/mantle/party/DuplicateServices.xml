@@ -344,7 +344,7 @@ along with this software (see the LICENSE.md file). If not, see
                         .condition((org.moqui.entity.EntityCondition) ec.entity.conditionFactory.makeActionConditionDirect("hasDuplicates", "equals", null, "N", null, false, false, true, "false"))
                         .condition((org.moqui.entity.EntityCondition) ec.entity.conditionFactory.makeActionConditionDirect("lastDupCheckDate", "less", new Timestamp(oneDayAgo), null, null, false, false, true, "false"))
                         .selectField("partyId").list()
-                ec.logger.info("Found ${partyList.size()} parties to check for duplicates")
+                ec.logger.info(`Found ${partyList.size()} parties to check for duplicates`)
                 ArrayList partyIdList = new ArrayList(threads)
                 Iterator<EntityValue> iterator = partyList.iterator()
                 while (iterator.hasNext()) {
@@ -368,13 +368,13 @@ along with this software (see the LICENSE.md file). If not, see
                             if (dupOut?.matchingInfoByPartyId) duplicatesFound = (duplicatesFound + 1)
                             partiesChecked = (partiesChecked + 1)
                         } catch (Throwable t) { ec.logger.log("warn", "Error checking party duplicate results", t) } }
-                        if (partiesChecked % 100 == 0) ec.logger.log("info", "Progress: checked ${partiesChecked} parties at ${System.currentTimeMillis() - startTime}ms, found ${duplicatesFound} duplicates", null)
+                        if (partiesChecked % 100 == 0) ec.logger.log("info", `Progress: checked ${partiesChecked} parties at ${System.currentTimeMillis() - startTime}ms, found ${duplicatesFound} duplicates`, null)
                         // clear out list for next set
                         partyIdList.clear()
                     }
                 }
                 if (partyList instanceof org.moqui.entity.EntityListIterator) partyList.close()
-                ec.logger.log("info", "Completed. Checked ${partiesChecked} parties in ${System.currentTimeMillis() - startTime}ms, found ${duplicatesFound} duplicates", null)
+                ec.logger.log("info", `Completed. Checked ${partiesChecked} parties in ${System.currentTimeMillis() - startTime}ms, found ${duplicatesFound} duplicates`, null)
                 ]]></script>
         </actions>
     </service>
@@ -506,7 +506,7 @@ along with this software (see the LICENSE.md file). If not, see
                     toOrganization.update()
                 } else if (fromPerson != null && toOrganization != null) {
                     if (!toOrganization.organizationName) {
-                        toOrganization.organizationName = "${fromPerson.firstName?:''}${fromPerson.middleName ? ' ' + fromPerson.middleName : ''}${fromPerson.lastName ? ' ' + fromPerson.lastName : ''}"
+                        toOrganization.organizationName = `${fromPerson.firstName?:''}${fromPerson.middleName ? ' ' + fromPerson.middleName : ''}${fromPerson.lastName ? ' ' + fromPerson.lastName : ''}`
                         toOrganization.update()
                     }
                 }
@@ -528,7 +528,7 @@ along with this software (see the LICENSE.md file). If not, see
 
                 // PartyContent
                 contentCount = ec.entity.find("mantle.party.PartyContent").condition("partyId", fromPartyId).updateAll({partyId:toPartyId})
-                if (contentCount) ec.message.addMessage("Moved ${contentCount} Content records from Party ${fromPartyId} to ${toPartyId}")
+                if (contentCount) ec.message.addMessage(`Moved ${contentCount} Content records from Party ${fromPartyId} to ${toPartyId}`)
 
                 // PartyIdentification
                 for (EntityValue value in ec.entity.find("mantle.party.PartyIdentification").condition("partyId", fromPartyId).list()) {
@@ -549,7 +549,7 @@ along with this software (see the LICENSE.md file). If not, see
                 // PartyRelationship
                 relCount = ec.entity.find("mantle.party.PartyRelationship").condition("fromPartyId", fromPartyId).updateAll({fromPartyId:toPartyId})
                 relCount += ec.entity.find("mantle.party.PartyRelationship").condition("toPartyId", fromPartyId).updateAll({toPartyId:toPartyId})
-                if (relCount) ec.message.addMessage("Moved ${relCount} Relationships from Party ${fromPartyId} to ${toPartyId}")
+                if (relCount) ec.message.addMessage(`Moved ${relCount} Relationships from Party ${fromPartyId} to ${toPartyId}`)
 
                 // PartyRole (add all on to party that it doesn't already have)
                 roleCount = 0

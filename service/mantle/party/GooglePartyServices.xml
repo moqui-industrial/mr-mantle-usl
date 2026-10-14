@@ -62,7 +62,7 @@ along with this software (see the LICENSE.md file). If not, see
                 if (postalCode || country) uriBuilder.parameter("components", (postalCode ? "postal_code:" + postalCode : "") + (postalCode && country ? "|" : "") +  (country ? "country:" + country : ""))
                 if (resultType) uriBuilder.parameter("result_type", (String) resultType.trim())
                 uriBuilder.build()
-                // ec.logger.warn("getUriString ${restClient.getUriString()}")
+                // ec.logger.warn(`getUriString ${restClient.getUriString()}`)
 
                 org.moqui.util.RestClient.RestResponse restResponse = restClient.call()
                 responseMap = (Map) restResponse.jsonObject()
@@ -71,13 +71,13 @@ along with this software (see the LICENSE.md file). If not, see
                     return
                 }
                 if (restResponse.statusCode < 200 || restResponse.statusCode >= 300 || responseMap?.status != 'OK') {
-                    ec.logger.warn("Unsuccessful geocode response for address ${address} postalCode ${postalCode} country ${country} resultType ${resultType} http status ${restResponse.statusCode}: ${responseMap}")
+                    ec.logger.warn(`Unsuccessful geocode response for address ${address} postalCode ${postalCode} country ${country} resultType ${resultType} http status ${restResponse.statusCode}: ${responseMap}`)
                     ec.message.addPublic("Could not find address", "warning")
                     resultList = []
                     return
                 }
 
-                // ec.logger.info("Successful geocode location: ${responseMap}")
+                // ec.logger.info(`Successful geocode location: ${responseMap}`)
                 resultList = responseMap.results
             ]]></script>
         </actions>
@@ -124,17 +124,17 @@ along with this software (see the LICENSE.md file). If not, see
                 if (region) uriBuilder.parameter("region", (String) region.trim())
                 // if (postalCode || country) uriBuilder.parameter("components", (postalCode ? "postal_code:" + postalCode : "") + (postalCode && country ? "|" : "") +  (country ? "country:" + country : ""))
                 uriBuilder.build()
-                ec.logger.warn("getUriString ${restClient.getUriString()}")
+                ec.logger.warn(`getUriString ${restClient.getUriString()}`)
 
                 org.moqui.util.RestClient.RestResponse restResponse = restClient.call()
                 responseMap = (Map) restResponse.jsonObject()
-                // ec.logger.warn("responseMap: ${responseMap}")
+                // ec.logger.warn(`responseMap: ${responseMap}`)
                 if (responseMap?.status == 'ZERO_RESULTS') {
                     resultList = []
                     return
                 }
                 if (restResponse.statusCode < 200 || restResponse.statusCode >= 300 || responseMap?.status != 'OK') {
-                    ec.logger.warn("Unsuccessful Place Search response for input ${input} http status ${restResponse.statusCode}: ${responseMap}")
+                    ec.logger.warn(`Unsuccessful Place Search response for input ${input} http status ${restResponse.statusCode}: ${responseMap}`)
                     ec.message.addPublic("Could not find address", "warning")
                     resultList = []
                     return
@@ -176,17 +176,17 @@ along with this software (see the LICENSE.md file). If not, see
                         .parameter("place_id", (String) placeId)
                         .parameter("fields", (String) fields)
                 uriBuilder.build()
-                // ec.logger.warn("getUriString ${restClient.getUriString()}")
+                // ec.logger.warn(`getUriString ${restClient.getUriString()}`)
 
                 org.moqui.util.RestClient.RestResponse restResponse = restClient.call()
                 responseMap = (Map) restResponse.jsonObject()
-                // ec.logger.warn("responseMap: ${responseMap}")
+                // ec.logger.warn(`responseMap: ${responseMap}`)
                 if (responseMap?.status == 'ZERO_RESULTS') {
                     resultList = []
                     return
                 }
                 if (restResponse.statusCode < 200 || restResponse.statusCode >= 300 || responseMap?.status != 'OK') {
-                    ec.logger.warn("Unsuccessful Place Details response for placeId ${placeId} http status ${restResponse.statusCode}: ${responseMap}")
+                    ec.logger.warn(`Unsuccessful Place Details response for placeId ${placeId} http status ${restResponse.statusCode}: ${responseMap}`)
                     ec.message.addPublic("Could not find address", "warning")
                     resultList = []
                     return

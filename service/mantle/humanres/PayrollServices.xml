@@ -881,7 +881,7 @@ along with this software (see the LICENSE.md file). If not, see
                     Map result = ec.service.sync().name(serviceRegister.serviceName).parameters(parmMap).disableAuthz().call()
                     if (!ec.message.hasError()) ec.context.putAll(result)
                 } catch (Throwable t) {
-                    ec.logger.log(300, "Error calling payroll adjustment calc service ${adjCalcService.adjCalcServiceId}", t)
+                    ec.logger.log(300, `Error calling payroll adjustment calc service ${adjCalcService.adjCalcServiceId}`, t)
                 } }
                 ]]></script>
 

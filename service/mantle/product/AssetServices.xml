@@ -37,7 +37,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <set field="isFixedAsset" from="!(asset.assetTypeEnumId in ['AstTpInventory', 'AstTpSupplies'])"/>
 
-            <set field="statusItem" from="asset.'Asset#moqui.basic.StatusItem'"/>
+            <set field="statusItem" from="asset['Asset#moqui.basic.StatusItem']"/>
             <entity-find entity-name="moqui.entity.EntityAuditLog" list="statusHistoryList">
                 <econdition field-name="changedEntityName" value="mantle.product.asset.Asset"/>
                 <econdition field-name="changedFieldName" value="statusId"/>
@@ -46,10 +46,10 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <set field="statusId" from="asset.statusId"/>
 
-            <set field="facility" from="asset.'mantle.facility.Facility'"/>
-            <set field="facilityLocation" from="asset.'mantle.facility.FacilityLocation'"/>
-            <set field="product" from="asset.'mantle.product.Product'"/>
-            <set field="originFacility" from="asset.'Origin#mantle.facility.Facility'"/>
+            <set field="facility" from="asset['mantle.facility.Facility']"/>
+            <set field="facilityLocation" from="asset['mantle.facility.FacilityLocation']"/>
+            <set field="product" from="asset['mantle.product.Product']"/>
+            <set field="originFacility" from="asset['Origin#mantle.facility.Facility']"/>
 
             <entity-find entity-name="mantle.product.asset.AssetDetail" list="assetDetailList" limit="20">
                 <econdition field-name="assetId"/><order-by field-name="-effectiveDate"/></entity-find>
@@ -581,7 +581,7 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <actions>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
-            <set field="productStore" from="orderHeader.'mantle.product.store.ProductStore'"/>
+            <set field="productStore" from="orderHeader['mantle.product.store.ProductStore']"/>
 
             <!-- return early if doesn't appear to be sales order (vendor OrgInternal) or store setting is no res -->
             <if condition="!forceReserve">
@@ -2007,7 +2007,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
                 <!-- still no facilityId? look at ProductStore.inventoryFacilityId -->
                 <if condition="!facilityId">
-                    <set field="productStore" from="orderHeader.'mantle.product.store.ProductStore'"/>
+                    <set field="productStore" from="orderHeader['mantle.product.store.ProductStore']"/>
                     <set field="facilityId" from="productStore?.inventoryFacilityId"/>
                 </if>
 
@@ -2033,7 +2033,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="ownerPartyId" from="productStore?.organizationPartyId"/>
             <!-- no ProductStore organizationPartyId? try OrderPart.vendorPartyId (for sales orders should be an internal org) -->
             <if condition="!ownerPartyId &amp;&amp; orderItem != null">
-                <if condition="orderPart == null"><set field="orderPart" from="orderItem.'mantle.order.OrderPart'"/></if>
+                <if condition="orderPart == null"><set field="orderPart" from="orderItem['mantle.order.OrderPart']"/></if>
                 <set field="ownerPartyId" from="orderPart.vendorPartyId"/>
                 <!-- if still not found, ignore -->
             </if>
@@ -2667,7 +2667,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- get ownerPartyId from OrderPart.customerPartyId if needed (who bought it) -->
             <if condition="!ownerPartyId &amp;&amp; orderItem">
-                <set field="orderPart" from="orderItem?.'mantle.order.OrderPart'"/>
+                <set field="orderPart" from="orderItem?.['mantle.order.OrderPart']"/>
                 <set field="ownerPartyId" from="orderPart?.customerPartyId"/>
             </if>
             <!-- get ownerPartyId from WorkEffort if needed (who made it within the system on a production run WorkEffort) -->

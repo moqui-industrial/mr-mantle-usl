@@ -989,7 +989,7 @@ General Order Placement and eCommerce Usage
                         ec.service.sync().name(serviceRegister.serviceName).parameters(context).softValidate(true).disableAuthz().call()
                         if (ec.message.hasError()) return
                     } catch (Throwable t) {
-                        ec.logger.log(300, "Error calling auto order payments service for SettlementTerm ${settlementTermId}", t)
+                        ec.logger.log(300, `Error calling auto order payments service for SettlementTerm ${settlementTermId}`, t)
                     }
                 ]]></script>
             </then><else>
@@ -1712,7 +1712,7 @@ General Order Placement and eCommerce Usage
             </then><else>
                 <set field="childCancelRatio" from="(quantityCancelled == null ? null : toDecimal(quantityCancelled)).divide((itemQuantity == null ? null : toDecimal(itemQuantity)), 6, BigDecimal.ROUND_HALF_EVEN)"/>
             </else></if>
-            <set field="childOrderItemList" from="orderItem.'Child#mantle.order.OrderItem'"/>
+            <set field="childOrderItemList" from="orderItem['Child#mantle.order.OrderItem']"/>
             <order-map-list list="childOrderItemList"><order-by field-name="orderItemSeqId"/></order-map-list>
             <iterate list="childOrderItemList" entry="childOrderItem">
                 <if condition="childOrderItem.quantity == 0.0 || childOrderItem.unitAmount == 0.0"><continue/></if>
@@ -1967,7 +1967,7 @@ General Order Placement and eCommerce Usage
             </then><else>
                 <set field="childCancelRatio" from="(quantityCancelled == null ? null : toDecimal(quantityCancelled)).divide((itemQuantity == null ? null : toDecimal(itemQuantity)), 6, BigDecimal.ROUND_HALF_EVEN)"/>
             </else></if>
-            <set field="childOrderItemList" from="orderItem.'Child#mantle.order.OrderItem'"/>
+            <set field="childOrderItemList" from="orderItem['Child#mantle.order.OrderItem']"/>
             <order-map-list list="childOrderItemList"><order-by field-name="orderItemSeqId"/></order-map-list>
             <iterate list="childOrderItemList" entry="childOrderItem">
                 <if condition="childOrderItem.quantity == 0.0 || childOrderItem.unitAmount == 0.0"><continue/></if>
@@ -2239,7 +2239,7 @@ General Order Placement and eCommerce Usage
             <!-- make sure cron expr is valid -->
             <script>
                 try { org.moqui.impl.service.ScheduledJobRunner.getExecutionTime((String) recurCronExpression) } catch (Exception e) {
-                    ec.message.addError("Invalid Cron expression '${recurCronExpression}': ${e.message}")
+                    ec.message.addError(`Invalid Cron expression '${recurCronExpression}': ${e.message}`)
                     return
                 }
             </script>

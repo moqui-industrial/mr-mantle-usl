@@ -887,7 +887,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-one entity-name="mantle.party.time.TimePeriod" value-field="curPeriod">
                     <field-map field-name="timePeriodId" from="timePeriodIds.last()"/></entity-find-one>
                 <script>
-                    periodLabels.add(curPeriod != null ? ec.l10n.format(curPeriod.thruDate, 'MMM yyyy') : "Period ${timePeriodIds_index}")
+                    periodLabels.add(curPeriod != null ? ec.l10n.format(curPeriod.thruDate, 'MMM yyyy') : `Period ${timePeriodIds_index}`)
                     allPeriods.addAll(timePeriodIds)
                 </script>
             </iterate>

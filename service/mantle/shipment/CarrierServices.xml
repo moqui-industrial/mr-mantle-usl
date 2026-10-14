@@ -944,8 +944,8 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="totalWeight" from="0.0" type="BigDecimal"/>
             <set field="totalAmount" from="0.0" type="BigDecimal"/>
             <iterate list="orderItemList" entry="orderItem">
-                <set field="product" from="orderItem.'mantle.product.Product'"/>
-                <set field="typeEnum" from="product?.'ProductType#moqui.basic.Enumeration'"/>
+                <set field="product" from="orderItem['mantle.product.Product']"/>
+                <set field="typeEnum" from="product?.['ProductType#moqui.basic.Enumeration']"/>
                 <if condition="(!product?.chargeShipping || product?.chargeShipping == 'Y') &amp;&amp;
                         product?.productTypeEnumId in ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly']">
                     <set field="itemCount" from="itemCount + 1.0"/>

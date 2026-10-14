@@ -86,7 +86,7 @@ along with this software (see the LICENSE.md file). If not, see
                             String orderId = orderOut.orderId
                             String orderPartSeqId = orderOut.orderPartSeqId
 
-                            ec.logger.warn("Creating order ${orderId} date ${orderTs} customer ${customerPartyId}")
+                            ec.logger.warn(`Creating order ${orderId} date ${orderTs} customer ${customerPartyId}`)
 
                             int itemCount = rand.nextInt(maxItems) + 1
                             for (int itemIdx = 0; itemIdx < itemCount; itemIdx++) {
@@ -94,7 +94,7 @@ along with this software (see the LICENSE.md file). If not, see
                                 int itemQuantity = rand.nextInt(maxQuantity)
                                 ec.service.sync().name("mantle.order.OrderServices.add#OrderProductQuantity").parameters({orderId:orderId,
                                         orderPartSeqId:orderPartSeqId, productId:productId, quantity:itemQuantity}).call()
-                                ec.logger.warn("Add order ${orderId} item ${itemIdx} product ${productId} quantity ${itemQuantity}")
+                                ec.logger.warn(`Add order ${orderId} item ${itemIdx} product ${productId} quantity ${itemQuantity}`)
                             }
 
                             String paymentMethodId = null, paymentInstrumentEnumId = null, shippingPostalContactMechId = null

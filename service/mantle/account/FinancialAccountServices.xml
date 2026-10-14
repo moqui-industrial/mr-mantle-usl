@@ -42,7 +42,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <script><![CDATA[
                 if (fromDate == null && thruDate == null && year && month) {
-                    fromCal = ec.l10n.parseDateTime("${year}-${month}-01 00:00:00", "yyyy-MM-dd HH:mm:ss")
+                    fromCal = ec.l10n.parseDateTime(`${year}-${month}-01 00:00:00`, "yyyy-MM-dd HH:mm:ss")
                     thruCal = fromCal.clone()
                     thruCal.add(Calendar.MONTH, 1)
                     thruCal.add(Calendar.SECOND, -1)

@@ -196,7 +196,7 @@ along with this software (see the LICENSE.md file). If not, see
                         3. have no items with a Product in no inventory category (double sub-select, yeah!)
                     -->
                     <script><![CDATA[
-                    inventoryCategoryCond = ec.entity.getConditionFactory().makeConditionWhere("""EXISTS (
+                    inventoryCategoryCond = ec.entity.getConditionFactory().makeConditionWhere(`EXISTS (
                             SELECT OITM_PCM.ORDER_ITEM_SEQ_ID FROM ORDER_ITEM OITM_PCM
                                 INNER JOIN PRODUCT_CATEGORY_MEMBER PCM ON PCM.PRODUCT_ID = OITM_PCM.PRODUCT_ID
                             WHERE OITM_PCM.ORDER_ID = OPRT.ORDER_ID AND OITM_PCM.ORDER_PART_SEQ_ID = OPRT.ORDER_PART_SEQ_ID AND OITM_PCM.ITEM_TYPE_ENUM_ID = 'ItemProduct'
@@ -218,7 +218,7 @@ along with this software (see the LICENSE.md file). If not, see
                                     WHERE PCM.PRODUCT_ID = OITM_PCM.PRODUCT_ID AND
                                         (PCM.FROM_DATE IS NULL OR PCM.FROM_DATE <= '${nowString}') AND (PCM.THRU_DATE IS NULL OR PCM.THRU_DATE >= '${nowString}')
                                 )
-                        )""")
+                        )`)
                 ]]></script>
                 </if>
             </if>

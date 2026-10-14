@@ -119,7 +119,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="combinedQuantity" from="(orderItem.quantity != null ? orderItem.quantity : 1.0) * (orderItem.selectedAmount || 1.0)"/>
                     <if condition="combinedQuantity == 0.0"><continue/></if>
 
-                    <set field="product" from="orderItem.'mantle.product.Product'"/>
+                    <set field="product" from="orderItem['mantle.product.Product']"/>
                     <if condition="!product?.taxable || product?.taxable == 'Y'">
                         <!-- NOTE: CurrencyRoundingMarker scale here may vary by currency, make configurable -->
                         <set field="itemTotal" from="(combinedQuantity * (orderItem.unitAmount || 0.0)).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
@@ -407,9 +407,9 @@ along with this software (see the LICENSE.md file). If not, see
 
             <service-call name="mantle.party.ContactServices.get#PartyContactInfo" out-map="homeContactInfo"
                     in-map="{partyId:partyId, postalContactMechPurposeId:'PostalPayment'}"/>
-            <script>homeStreetString = """${homeContactInfo?.postalAddress?.address1 ? homeContactInfo.postalAddress.address1 + (homeContactInfo.postalAddress.unitNumber ? ' #' + homeContactInfo.postalAddress.unitNumber : '') : ''}${homeContactInfo?.postalAddress?.address2 ? '\n' + homeContactInfo.postalAddress.address2 : ''}"""</script>
-            <script>homeCszString = """${homeContactInfo?.postalAddress ? (homeContactInfo.postalAddress.city ?: '') + (homeContactInfo.postalAddressStateGeo?.geoCodeAlpha2 ? ', ' + homeContactInfo.postalAddressStateGeo.geoCodeAlpha2 : '') + ' ' + (homeContactInfo.postalAddress.postalCode ?: '') + (homeContactInfo.postalAddress.postalCodeExt ? '-' + homeContactInfo.postalAddress.postalCodeExt : '') + (homeContactInfo.postalAddressCountryGeo?.geoCodeAlpha3 ? ' ' + homeContactInfo.postalAddressCountryGeo.geoCodeAlpha3 : '') : ''}"""</script>
-            <script>homeString = """${homeStreetString}\n${homeCszString}"""</script>
+            <script>homeStreetString = `${homeContactInfo?.postalAddress?.address1 ? homeContactInfo.postalAddress.address1 + (homeContactInfo.postalAddress.unitNumber ? ' #' + homeContactInfo.postalAddress.unitNumber : '') : ''}${homeContactInfo?.postalAddress?.address2 ? '\n' + homeContactInfo.postalAddress.address2 : ''}`</script>
+            <script>homeCszString = `${homeContactInfo?.postalAddress ? (homeContactInfo.postalAddress.city ?: '') + (homeContactInfo.postalAddressStateGeo?.geoCodeAlpha2 ? ', ' + homeContactInfo.postalAddressStateGeo.geoCodeAlpha2 : '') + ' ' + (homeContactInfo.postalAddress.postalCode ?: '') + (homeContactInfo.postalAddress.postalCodeExt ? '-' + homeContactInfo.postalAddress.postalCodeExt : '') + (homeContactInfo.postalAddressCountryGeo?.geoCodeAlpha3 ? ' ' + homeContactInfo.postalAddressCountryGeo.geoCodeAlpha3 : '') : ''}`</script>
+            <script>homeString = `${homeStreetString}\n${homeCszString}`</script>
         </actions>
     </service>
     <service verb="get" noun="PayerTaxInfo">
@@ -435,8 +435,8 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.party.ContactServices.get#PartyContactInfo" out-map="contactInfo"
                     in-map="{partyId:partyId, postalContactMechPurposeId:'PostalTax', telecomContactMechPurposeId:'PhoneTax',
                             emailContactMechPurposeId:'EmailPrimary'}"/>
-            <script>addressString = """${contactInfo?.postalAddress?.address1 ? contactInfo.postalAddress.address1 + (contactInfo.postalAddress.unitNumber ? ' #' + contactInfo.postalAddress.unitNumber : '') + '\n' : ''}${contactInfo?.postalAddress?.address2 ? contactInfo.postalAddress.address2 + '\n' : ''}${contactInfo?.postalAddress ? (contactInfo.postalAddress.city ?: '') + (contactInfo.postalAddressStateGeo?.geoCodeAlpha2 ? ', ' + contactInfo.postalAddressStateGeo.geoCodeAlpha2 : '') + ' ' + (contactInfo.postalAddress.postalCode ?: '') + (contactInfo.postalAddress.postalCodeExt ? '-' + contactInfo.postalAddress.postalCodeExt : '') + (contactInfo.postalAddressCountryGeo?.geoCodeAlpha3 ? ' ' + contactInfo.postalAddressCountryGeo.geoCodeAlpha3 : '') : ''}"""</script>
-            <script>phoneString = """${contactInfo?.telecomNumber ? (contactInfo.telecomNumber.countryCode ? contactInfo.telecomNumber.countryCode + '-' : '') + (contactInfo.telecomNumber.areaCode ? contactInfo.telecomNumber.areaCode + '-' : '') + (contactInfo.telecomNumber.contactNumber ?: '') : ''}"""</script>
+            <script>addressString = `${contactInfo?.postalAddress?.address1 ? contactInfo.postalAddress.address1 + (contactInfo.postalAddress.unitNumber ? ' #' + contactInfo.postalAddress.unitNumber : '') + '\n' : ''}${contactInfo?.postalAddress?.address2 ? contactInfo.postalAddress.address2 + '\n' : ''}${contactInfo?.postalAddress ? (contactInfo.postalAddress.city ?: '') + (contactInfo.postalAddressStateGeo?.geoCodeAlpha2 ? ', ' + contactInfo.postalAddressStateGeo.geoCodeAlpha2 : '') + ' ' + (contactInfo.postalAddress.postalCode ?: '') + (contactInfo.postalAddress.postalCodeExt ? '-' + contactInfo.postalAddress.postalCodeExt : '') + (contactInfo.postalAddressCountryGeo?.geoCodeAlpha3 ? ' ' + contactInfo.postalAddressCountryGeo.geoCodeAlpha3 : '') : ''}`</script>
+            <script>phoneString = `${contactInfo?.telecomNumber ? (contactInfo.telecomNumber.countryCode ? contactInfo.telecomNumber.countryCode + '-' : '') + (contactInfo.telecomNumber.areaCode ? contactInfo.telecomNumber.areaCode + '-' : '') + (contactInfo.telecomNumber.contactNumber ?: '') : ''}`</script>
             <script>faxString = ""</script> <!-- TODO: Fax number needs to be retrieved as well; should be 10 digits, without country code -->
 
             <service-call name="mantle.ledger.LedgerServices.find#PartyAcctgPreference" out-map="context"

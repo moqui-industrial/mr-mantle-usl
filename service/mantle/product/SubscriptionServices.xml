@@ -129,7 +129,7 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.product.subscription.SubscriptionResource" value-field="subscriptionResource"/>
             <entity-find-one entity-name="mantle.product.subscription.ProductSubscriptionResource" value-field="psr"/>
             <entity-find-one entity-name="mantle.order.OrderItem" value-field="orderItem"/>
-            <set field="orderPart" from="orderItem.'mantle.order.OrderPart'"/>
+            <set field="orderPart" from="orderItem['mantle.order.OrderPart']"/>
             <set field="customerPartyId" from="orderPart.customerPartyId"/>
 
             <!-- determine fromDate (either last Subscription.thruDate if in future, or nowTimestamp -->

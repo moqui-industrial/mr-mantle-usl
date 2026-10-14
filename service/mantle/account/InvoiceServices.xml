@@ -1094,7 +1094,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <set field="orderHeaderMap" from="{}"/>
             <iterate list="shipmentItemSourceList" entry="shipmentItemSource">
-                <set field="orderItem" from="shipmentItemSource.'mantle.order.OrderItem'"/>
+                <set field="orderItem" from="shipmentItemSource['mantle.order.OrderItem']"/>
                 <if condition="orderItem == null"><continue/></if>
                 <set field="orderItemQty" from="(orderItem.quantity != null ? orderItem.quantity : 1.0) * (orderItem.selectedAmount || 1.0)"/>
                 <!-- invoice even if unitAmount is zero, otherwise no record of sales for inventory/etc purposes (sales invoice analysis)
@@ -1116,14 +1116,14 @@ along with this software (see the LICENSE.md file). If not, see
 
                 <set field="orderHeader" from="orderHeaderMap.get(shipmentItemSource.orderId)"/>
                 <if condition="orderHeader == null">
-                    <set field="orderHeader" from="shipmentItemSource.'mantle.order.OrderHeader'"/>
+                    <set field="orderHeader" from="shipmentItemSource['mantle.order.OrderHeader']"/>
                     <script>orderHeaderMap.put(shipmentItemSource.orderId, orderHeader)</script>
                 </if>
                 <set field="invoiceId" from="invoiceIdByOrderPartIdMap.get(orderItem.orderId + ':' + orderItem.orderPartSeqId)"/>
 
                 <if condition="!invoiceId">
                     <!-- find the OrderPart for the from/toPartyId, etc -->
-                    <set field="orderPart" from="orderItem.'mantle.order.OrderPart'"/>
+                    <set field="orderPart" from="orderItem['mantle.order.OrderPart']"/>
                     <if condition="orderPart">
                         <set field="toPartyId" from="orderPart.customerPartyId"/>
                         <entity-find entity-name="mantle.order.OrderPartParty" list="billToList">
@@ -1305,7 +1305,7 @@ along with this software (see the LICENSE.md file). If not, see
                     </if>
 
                     <!-- also invoice child OrderItems (adjustments, etc) -->
-                    <set field="childOrderItemList" from="orderItem.'Child#mantle.order.OrderItem'"/>
+                    <set field="childOrderItemList" from="orderItem['Child#mantle.order.OrderItem']"/>
                     <order-map-list list="childOrderItemList"><order-by field-name="orderItemSeqId"/></order-map-list>
                     <iterate list="childOrderItemList" entry="childOrderItem">
                         <!-- only ship if not a product item, that should be shipped before invoiced -->
@@ -1412,7 +1412,7 @@ along with this software (see the LICENSE.md file). If not, see
                     </if>
 
                     <!-- also invoice child OrderItems (adjustments, taxes, etc) -->
-                    <set field="childOrderItemList" from="otherOrderItem.'Child#mantle.order.OrderItem'"/>
+                    <set field="childOrderItemList" from="otherOrderItem['Child#mantle.order.OrderItem']"/>
                     <order-map-list list="childOrderItemList"><order-by field-name="orderItemSeqId"/></order-map-list>
                     <iterate list="childOrderItemList" entry="childOrderItem">
                         <!-- only ship if not a product item, that should be shipped before invoiced -->
@@ -1509,7 +1509,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <entity-find-one entity-name="mantle.shipment.Shipment" value-field="shipment"/>
             <if condition="shipment == null"><return error="true" message="Shipment not found with ID ${shipmentId}"/></if>
-            <set field="shipmentTypeEnum" from="shipment.'ShipmentType#moqui.basic.Enumeration'"/>
+            <set field="shipmentTypeEnum" from="shipment['ShipmentType#moqui.basic.Enumeration']"/>
             <if condition="shipmentTypeEnum?.enumId == 'ShpTpIncoming' || shipmentTypeEnum?.parentEnumId == 'ShpTpIncoming'">
                 <set field="handleIssuances" from="false"/>
                 <set field="applyPayments" from="false"/>
@@ -2271,7 +2271,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- check and warn about price diff -->
                 <if condition="invoiceItem.amount != orderItem.unitAmount">
                     <if condition="invoiceItem.itemTypeEnumId in productItemTypes"><then>
-                        <script>ec.message.addMessage("Invoice ${invoiceId} item ${invoiceItemSeqId} amount ${invoiceItem.amount} different from order ${orderId} item ${orderItem.orderItemSeqId} amount ${orderItem.unitAmount} but is product so applying anyway", 'warning')</script>
+                        <script>ec.message.addMessage(`Invoice ${invoiceId} item ${invoiceItemSeqId} amount ${invoiceItem.amount} different from order ${orderId} item ${orderItem.orderItemSeqId} amount ${orderItem.unitAmount} but is product so applying anyway`, 'warning')</script>
                     </then><else>
                         <continue/>
                     </else></if>
@@ -2366,11 +2366,11 @@ along with this software (see the LICENSE.md file). If not, see
             </iterate>
 
             <if condition="invoiceQtyRemaining == 0.0"><then>
-                <script>ec.message.addMessage("Invoice ${invoiceId} item ${invoiceItemSeqId} now fully applied", 'success')</script>
+                <script>ec.message.addMessage(`Invoice ${invoiceId} item ${invoiceItemSeqId} now fully applied`, 'success')</script>
             </then><else-if condition="invoiceQtyRemaining &lt; invoiceQtyOrig">
-                <script>ec.message.addMessage("Invoice ${invoiceId} item ${invoiceItemSeqId} partially applied", 'warning')</script>
+                <script>ec.message.addMessage(`Invoice ${invoiceId} item ${invoiceItemSeqId} partially applied`, 'warning')</script>
             </else-if><else>
-                <script>ec.message.addMessage("No order item matches found for invoice ${invoiceId} item ${invoiceItemSeqId}", 'warning')</script>
+                <script>ec.message.addMessage(`No order item matches found for invoice ${invoiceId} item ${invoiceItemSeqId}`, 'warning')</script>
             </else></if>
         </actions>
     </service>
