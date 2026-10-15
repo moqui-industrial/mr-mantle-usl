@@ -40,12 +40,15 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="timeEntryId">
                 <entity-find-one entity-name="mantle.work.time.TimeEntry" value-field="timeEntry" for-update="true"/>
                 <if condition="timeEntry != null">
-                    <set field="entryHasHours" from="timeEntry.hours != null &amp;&amp; timeEntry.hours != 0.0"/>
+                    <set field="entryHasHours" from="timeEntry.hours != null &amp;&amp; !toDecimal(timeEntry.hours).isZero()"/>
                     <!-- fill in field values not passed into this service so that calcs can run -->
-                    <iterate list="timeEntry" entry="fieldValue" key="fieldName">
-                        <if condition="fieldValue != null &amp;&amp; !context.containsKey(fieldName)">
-                            <script>context.put(fieldName, fieldValue)</script></if>
-                    </iterate>
+                    <script><![CDATA[
+                        const timeEntryFields = Object.assign({}, timeEntry)
+                        for (const fieldName of Object.keys(timeEntryFields)) {
+                            const fieldValue = timeEntryFields[fieldName]
+                            if (fieldValue != null && !(fieldName in context)) globalThis[fieldName] = fieldValue
+                        }
+                    ]]></script>
                 </if>
             </if>
             <if condition="teamPartyId">
@@ -62,25 +65,31 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- TODO Should we allow negative numbers? -->
 
-            <!-- calculate thruDate based from fromDate/hours/breakHours -->
-            <if condition="hours &amp;&amp; fromDate &amp;&amp; !thruDate">
-                <set field="thruDate" from="new Timestamp((Long) (fromDate.time + (hours*60*60*1000) + (breakHours ? (breakHours*60*60*1000) : 0)))"/>
-            </if>
-            <!-- at this point if there is no thruDate default to now -->
-            <if condition="thruDate == null"><set field="thruDate" from="ec.user.nowTimestamp"/></if>
+            <!-- calculate thruDate from fromDate/hours/breakHours, fromDate from thruDate/hours/breakHours, or hours from
+                 fromDate/thruDate/breakHours; a timestamp reaches a script as epoch millis text -->
+            <script><![CDATA[
+                const millisOf = (value) => {
+                    const text = String(value)
+                    return /^-?\d+$/.test(text) ? Number(text) : Date.parse(text.length === 10 ? text + 'T00:00:00Z' : text)
+                }
+                const hourMillis = 60 * 60 * 1000
+                const hasHours = hours != null && !toDecimal(hours).isZero()
+                const hasBreak = breakHours != null && !toDecimal(breakHours).isZero()
+                const hoursMillis = hasHours ? toDecimal(hours).multiply(hourMillis).toNumber() : 0
+                const breakMillis = hasBreak ? toDecimal(breakHours).multiply(hourMillis).toNumber() : 0
 
-            <!-- calculate fromDate based on thruDate/hours/breakHours -->
-            <if condition="hours &amp;&amp; !fromDate &amp;&amp; thruDate">
-                <set field="fromDate" from="new Timestamp((Long) (thruDate.time - (hours*60*60*1000) - (breakHours ? (breakHours*60*60*1000) : 0)))"/>
-            </if>
+                if (hasHours && fromDate && !thruDate) thruDate = String(Math.trunc(millisOf(fromDate) + hoursMillis + breakMillis))
+                // at this point if there is no thruDate default to now
+                if (thruDate == null) thruDate = ec.user.nowTimestamp
+                if (hasHours && !fromDate && thruDate) fromDate = String(Math.trunc(millisOf(thruDate) - hoursMillis - breakMillis))
 
-            <if condition="fromDate &amp;&amp; thruDate &amp;&amp; fromDate &gt; thruDate">
-                <return error="true" message="From date ${fromDate} is after thru date ${thruDate}"/></if>
-
-            <!-- calculate hours using fromDate/thruDate/breakHours -->
-            <if condition="hours == null &amp;&amp; fromDate &amp;&amp; thruDate">
-                <set field="hours" from="((thruDate.time - fromDate.time)/(60*60*1000)) - (breakHours || 0)"/>
-            </if>
+                fromAfterThru = !!(fromDate && thruDate && millisOf(fromDate) > millisOf(thruDate))
+                if (!fromAfterThru && hours == null && fromDate && thruDate) {
+                    hours = toDecimal(millisOf(thruDate) - millisOf(fromDate)).divide(hourMillis).subtract(breakHours ?? 0)
+                }
+            ]]></script>
+            <if condition="fromAfterThru">
+                <return error="true" message="From date ${ec.l10n.format(fromDate, 'yyyy-MM-dd HH:mm:ss.SSS')} is after thru date ${ec.l10n.format(thruDate, 'yyyy-MM-dd HH:mm:ss.SSS')}"/></if>
 
             <!-- what is the party's emplPositionClassId? try WorkEffortParty with task first, then root/project, then try EmplPositionClassParty -->
             <if condition="workEffortId">
@@ -250,10 +259,16 @@ along with this software (see the LICENSE.md file). If not, see
 
             <set field="hasModifiedRates" value="N"/>
             <if condition="ec.user.hasPermission('TIME_ENTRY_RATE')"><then>
-                <if condition="(clientHourRate &amp;&amp; (timeEntry?.hasModifiedRates || clientHourRate != timeEntry?.clientHourRate)) ||
-                        (vendorHourRate &amp;&amp; (timeEntry?.hasModifiedRates || vendorHourRate != timeEntry?.vendorHourRate)) ||
-                        (clientPieceRate &amp;&amp; (timeEntry?.hasModifiedRates || clientPieceRate != timeEntry?.clientPieceRate)) ||
-                        (vendorPieceRate &amp;&amp; (timeEntry?.hasModifiedRates || vendorPieceRate != timeEntry?.vendorPieceRate))">
+                <script><![CDATA[
+                    // a rate is modified when it is given and either the entry was already modified or the rate differs from the stored one
+                    const rateModified = (rate, stored) => rate != null && !toDecimal(rate).isZero() &&
+                        (timeEntry?.hasModifiedRates || stored == null || toDecimal(rate).compare(stored) !== 0)
+                    anyRateModified = rateModified(clientHourRate, timeEntry?.clientHourRate) ||
+                        rateModified(vendorHourRate, timeEntry?.vendorHourRate) ||
+                        rateModified(clientPieceRate, timeEntry?.clientPieceRate) ||
+                        rateModified(vendorPieceRate, timeEntry?.vendorPieceRate)
+                ]]></script>
+                <if condition="anyRateModified">
                     <set field="hasModifiedRates" value="Y"/>
                 </if>
             </then><else>
@@ -267,19 +282,26 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.work.TimeServices.get#TimeEntryRate" out-map="context" in-map="context"/>
 
             <!-- If any rate increments were provided, add them to the Time Entry -->
-            <if condition="vendorHourRateIncrement || vendorPieceRateIncrement || clientHourRateIncrement || clientPieceRateIncrement">
+            <script>
+                const nonZero = (value) => value != null &amp;&amp; !toDecimal(value).isZero()
+                hasVendorHourInc = nonZero(vendorHourRateIncrement)
+                hasVendorPieceInc = nonZero(vendorPieceRateIncrement)
+                hasClientHourInc = nonZero(clientHourRateIncrement)
+                hasClientPieceInc = nonZero(clientPieceRateIncrement)
+            </script>
+            <if condition="hasVendorHourInc || hasVendorPieceInc || hasClientHourInc || hasClientPieceInc">
                 <entity-find-one entity-name="mantle.work.time.TimeEntry" value-field="timeEntry" for-update="true"/>
-                <if condition="vendorHourRateIncrement">
-                    <set field="timeEntry.vendorHourRate" from="(timeEntry.vendorHourRate||0.0)+vendorHourRateIncrement"/>
+                <if condition="hasVendorHourInc">
+                    <set field="timeEntry.vendorHourRate" from="toDecimal(timeEntry.vendorHourRate ?? 0).add(vendorHourRateIncrement)"/>
                 </if>
-                <if condition="vendorPieceRateIncrement">
-                    <set field="timeEntry.vendorPieceRate" from="(timeEntry.vendorPieceRate||0.0)+vendorPieceRateIncrement"/>
+                <if condition="hasVendorPieceInc">
+                    <set field="timeEntry.vendorPieceRate" from="toDecimal(timeEntry.vendorPieceRate ?? 0).add(vendorPieceRateIncrement)"/>
                 </if>
-                <if condition="clientHourRateIncrement">
-                    <set field="timeEntry.clientHourRate" from="(timeEntry.clientHourRate||0.0)+clientHourRateIncrement"/>
+                <if condition="hasClientHourInc">
+                    <set field="timeEntry.clientHourRate" from="toDecimal(timeEntry.clientHourRate ?? 0).add(clientHourRateIncrement)"/>
                 </if>
-                <if condition="clientPieceRateIncrement">
-                    <set field="timeEntry.clientPieceRate" from="(timeEntry.clientPieceRate||0.0)+clientPieceRateIncrement"/>
+                <if condition="hasClientPieceInc">
+                    <set field="timeEntry.clientPieceRate" from="toDecimal(timeEntry.clientPieceRate ?? 0).add(clientPieceRateIncrement)"/>
                 </if>
                 <set field="timeEntry.hasModifiedRates" value="Y"/>
                 <entity-update value-field="timeEntry"/>
@@ -290,12 +312,12 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="remainingWorkTime != null"><then>
                     <service-call name="update#mantle.work.effort.WorkEffort"
                             in-map="{workEffortId:workEffortId, remainingWorkTime:remainingWorkTime}"/>
-                </then><else-if condition="hours &amp;&amp; !entryHasHours">
+                </then><else-if condition="hours != null &amp;&amp; !toDecimal(hours).isZero() &amp;&amp; !entryHasHours">
                     <!-- auto deduct from remainingWorkTime -->
                     <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="task"/>
-                    <if condition="task?.remainingWorkTime">
-                        <set field="task.remainingWorkTime" from="task.remainingWorkTime - hours"/>
-                        <if condition="task.remainingWorkTime &lt; 0.0"><set field="task.remainingWorkTime" from="0.0"/></if>
+                    <if condition="task?.remainingWorkTime != null &amp;&amp; !toDecimal(task.remainingWorkTime).isZero()">
+                        <set field="newRemainingWorkTime" from="toDecimal(task.remainingWorkTime).subtract(hours)"/>
+                        <set field="task.remainingWorkTime" from="newRemainingWorkTime.compare(0) &lt; 0 ? toDecimal(0) : newRemainingWorkTime"/>
                         <entity-update value-field="task"/>
                     </if>
                 </else-if></if>
@@ -392,7 +414,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="store#mantle.work.effort.WorkEffort" in-map="context" out-map="context"/>
             <service-call name="mantle.work.WorkEffortServices.replace#WorkEffortParty"
                           in-map="{workEffortId:workEffortId, roleTypeId:'Customer', newPartyId:clientPartyId}"/>
-            <if condition="actualPaidBreakDuration"><then>
+            <if condition="actualPaidBreakDuration != null &amp;&amp; !toDecimal(actualPaidBreakDuration).isZero()"><then>
                 <service-call name="store#mantle.work.effort.WorkEffort"
                               in-map="Object.assign({}, context, {workEffortId:childWorkEffortId,actualWorkDuration:actualPaidBreakDuration,actualBreakDuration:null,parentWorkEffortId:workEffortId,workTypeEnumId:'WktpPaidBreak'})"/>
             </then></if>
@@ -454,13 +476,15 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
 
             <service-call name="mantle.work.TimeServices.store#TimeEntry" in-map="context" out-map="context"/>
-            <if condition="paidBreakHours"><then>
+            <if condition="paidBreakHours != null &amp;&amp; !toDecimal(paidBreakHours).isZero()"><then>
                 <service-call name="mantle.work.TimeServices.store#TimeEntry"
                               in-map="Object.assign({}, context, {timeEntryId:childTimeEntryId,parentEntryId:timeEntryId,hours:paidBreakHours,breakHours:null,workTypeEnumId:'WktpPaidBreak'})"/>
                 <entity-find-one entity-name="mantle.work.time.TimeEntry" value-field="timeEntry">
                     <field-map field-name="timeEntryId"/></entity-find-one>
+                <!-- the thru date as epoch millis text, moved out by the paid break -->
+                <set field="paidBreakThruDate" from="String(Math.trunc(Number(timeEntry.thruDate) + toDecimal(paidBreakHours).multiply(60 * 60 * 1000).toNumber()))"/>
                 <service-call name="mantle.work.TimeServices.store#TimeEntry"
-                              in-map="Object.assign({}, context, {thruDate: new Timestamp((Long) (timeEntry.thruDate.time + (paidBreakHours*60*60*1000)))})" out-map="context"/>
+                              in-map="Object.assign({}, context, {thruDate:paidBreakThruDate})" out-map="context"/>
             </then></if>
 
             <if condition="teamPartyId &amp;&amp; moveToTeam == 'Y'">
@@ -521,7 +545,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="teamMemberInfoList" from="[]"/>
 
             <!-- get all TimeEntry records for this team and WorkEffort; this will include temporary team members with a TimeEntry but no PartyRelationship to the team -->
-            <set field="memberIds" from="new HashSet()"/>
+            <set field="memberIds" from="[]"/>
             <if condition="workEffort != null">
                 <entity-find entity-name="mantle.work.time.TimeEntry" list="teamTimeEntryList">
                     <econdition field-name="teamPartyId" from="partyId"/>
@@ -529,12 +553,12 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="parentEntryId" operator="is-null"/>
                 </entity-find>
                 <iterate list="teamTimeEntryList" entry="timeEntry">
-                    <script>memberIds.add(timeEntry.partyId)</script>
+                    <script>if (!memberIds.includes(timeEntry.partyId)) memberIds.push(timeEntry.partyId)</script>
                     <entity-find-one entity-name="mantle.party.PartyDetail" value-field="memberDetail">
                         <field-map field-name="partyId" from="timeEntry.partyId"/></entity-find-one>
                     <entity-find-one entity-name="mantle.work.time.TimeEntry" value-field="childTimeEntry">
                         <field-map field-name="parentEntryId" from="timeEntry.timeEntryId"/></entity-find-one>
-                    <set field="teamMemberInfo" from="memberDetail.getMap()"/>
+                    <set field="teamMemberInfo" from="Object.assign({}, memberDetail)"/>
                     <set field="teamMemberInfo.fromPartyId" from="timeEntry.partyId"/><!-- so fits with direct team members -->
                     <set field="teamMemberInfo.timeEntry" from="timeEntry"/>
                     <set field="teamMemberInfo.childTimeEntry" from="childTimeEntry"/>
@@ -548,7 +572,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="relationshipTypeEnumId" value="PrtMember"/>
                     </entity-find-count>
                     <set field="teamMemberInfo.teamMember" from="memberRelCount ? 'Y' : 'N'"/>
-                    <script>teamMemberInfoList.add(teamMemberInfo)</script>
+                    <script>teamMemberInfoList.push(teamMemberInfo)</script>
                 </iterate>
             </if>
 
@@ -561,9 +585,9 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="relationshipTypeEnumId" value="PrtMember"/>
             </entity-find>
             <iterate list="teamMemberList" entry="teamMember">
-                <set field="teamMemberInfo" from="teamMember.getMap()"/>
+                <set field="teamMemberInfo" from="Object.assign({}, teamMember)"/>
                 <set field="teamMemberInfo.teamMember" value="Y"/>
-                <script>teamMemberInfoList.add(teamMemberInfo)</script>
+                <script>teamMemberInfoList.push(teamMemberInfo)</script>
             </iterate>
 
             <order-map-list list="teamMemberInfoList"><order-by field-name="firstName,lastName,organizationName"/></order-map-list>
@@ -594,10 +618,10 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <if condition="timeEntry == null"><entity-find-one entity-name="mantle.work.time.TimeEntry" value-field="timeEntry"/></if>
 
-            <set field="hours" from="timeEntry.hours || 0.0"/>
-            <set field="pieceCount" from="timeEntry.pieceCount || 0.0"/>
+            <set field="hours" from="toDecimal(timeEntry.hours ?? 0)"/>
+            <set field="pieceCount" from="toDecimal(timeEntry.pieceCount ?? 0)"/>
 
-            <if condition="hours"><then>
+            <if condition="!hours.isZero()"><then>
                 <set field="hourlyAmount" from="ratePurposeEnumId == 'RaprVendor' ? timeEntry.vendorHourRate : timeEntry.clientHourRate"/>
                 <if condition="hourlyAmount == null"><then>
                     <set field="rateAmountId" from="ratePurposeEnumId == 'RaprVendor' ? timeEntry.vendorRateAmountId : timeEntry.rateAmountId"/>
@@ -616,7 +640,7 @@ along with this software (see the LICENSE.md file). If not, see
                     </else></if>
                     <if condition="rateAmount"><then>
                         <set field="hourlyAmount" from="rateAmount.rateAmount"/>
-                        <set field="hourlyAmountTotal" from="hours * hourlyAmount"/>
+                        <set field="hourlyAmountTotal" from="hours.multiply(hourlyAmount)"/>
                         <set field="currencyUomId" from="rateAmount.rateCurrencyUomId"/>
                     </then><else>
                         <set field="purposeDesc" from="ec.entity.find('enums').condition('enumId', ratePurposeEnumId).one()?.description"/>
@@ -625,13 +649,13 @@ along with this software (see the LICENSE.md file). If not, see
                         <message error="true">No hourly ${purposeDesc} rate amount found for time entry ${timeEntryId} for worker ${ec.resource.expand('PartyNameTemplate','',workerParty)}</message>
                     </else></if>
                 </then><else>
-                    <set field="hourlyAmountTotal" from="hours * hourlyAmount"/>
+                    <set field="hourlyAmountTotal" from="hours.multiply(hourlyAmount)"/>
                 </else></if>
             </then><else>
-                <set field="hourlyAmount" from="0.0"/>
-                <set field="hourlyAmountTotal" from="0.0"/>
+                <set field="hourlyAmount" from="toDecimal(0)"/>
+                <set field="hourlyAmountTotal" from="toDecimal(0)"/>
             </else></if>
-            <if condition="pieceCount"><then>
+            <if condition="!pieceCount.isZero()"><then>
                 <set field="pieceAmount" from="ratePurposeEnumId == 'RaprVendor' ? timeEntry.vendorPieceRate : timeEntry.clientPieceRate"/>
                 <if condition="pieceAmount == null"><then>
                     <set field="pieceRateAmountId" from="ratePurposeEnumId == 'RaprVendor' ? timeEntry.vendorPieceRateAmountId : timeEntry.pieceRateAmountId"/>
@@ -650,43 +674,43 @@ along with this software (see the LICENSE.md file). If not, see
                     </else></if>
                     <if condition="pieceRateAmount"><then>
                         <set field="pieceAmount" from="pieceRateAmount.rateAmount"/>
-                        <set field="pieceAmountTotal" from="pieceCount * pieceAmount"/>
-                        <set field="currencyUomId" from="rateAmount.rateCurrencyUomId"/>
+                        <set field="pieceAmountTotal" from="pieceCount.multiply(pieceAmount)"/>
+                        <set field="currencyUomId" from="pieceRateAmount.rateCurrencyUomId"/>
                     </then><else>
                         <set field="purposeDesc" from="ec.entity.find('enums').condition('enumId', ratePurposeEnumId).one()?.description"/>
                         <message>No ${purposeDesc} piece rate amount found for time entry ${timeEntryId}</message>
                     </else></if>
                 </then><else>
-                    <set field="pieceAmountTotal" from="pieceCount * pieceAmount"/>
+                    <set field="pieceAmountTotal" from="pieceCount.multiply(pieceAmount)"/>
                 </else></if>
             </then><else>
-                <set field="pieceAmount" from="0.0"/>
-                <set field="pieceAmountTotal" from="0.0"/>
+                <set field="pieceAmount" from="toDecimal(0)"/>
+                <set field="pieceAmountTotal" from="toDecimal(0)"/>
             </else></if>
 
             <check-errors/>
 
-            <if condition="pieceAmountTotal"><then>
-                <if condition="pieceRateAmount?.rateTypeEnumId == 'RatpPiecePlusHour'"><then>
-                    <set field="amountTotal" from="(hourlyAmountTotal || 0.0) + pieceAmountTotal"/>
-                    <set field="amount" from="amountTotal"/>
-                    <set field="quantity" from="1.0"/>
-                </then><else>
-                    <if condition="hourlyAmountTotal &gt; pieceAmountTotal"><then>
-                        <set field="amountTotal" from="hourlyAmountTotal"/>
-                        <set field="amount" from="hourlyAmount"/>
-                        <set field="quantity" from="hours"/>
-                    </then><else>
-                        <set field="amountTotal" from="pieceAmountTotal"/>
-                        <set field="amount" from="pieceAmount"/>
-                        <set field="quantity" from="pieceCount"/>
-                    </else></if>
-                </else></if>
-            </then><else>
-                <set field="amountTotal" from="hourlyAmountTotal"/>
-                <set field="amount" from="hourlyAmount"/>
-                <set field="quantity" from="hours"/>
-            </else></if>
+            <script><![CDATA[
+                if (pieceAmountTotal != null && !toDecimal(pieceAmountTotal).isZero()) {
+                    if (pieceRateAmount?.rateTypeEnumId === 'RatpPiecePlusHour') {
+                        amountTotal = toDecimal(hourlyAmountTotal ?? 0).add(pieceAmountTotal)
+                        amount = amountTotal
+                        quantity = toDecimal(1)
+                    } else if (toDecimal(hourlyAmountTotal ?? 0).compare(pieceAmountTotal) > 0) {
+                        amountTotal = hourlyAmountTotal
+                        amount = hourlyAmount
+                        quantity = hours
+                    } else {
+                        amountTotal = pieceAmountTotal
+                        amount = pieceAmount
+                        quantity = pieceCount
+                    }
+                } else {
+                    amountTotal = hourlyAmountTotal
+                    amount = hourlyAmount
+                    quantity = hours
+                }
+            ]]></script>
         </actions>
     </service>
 
@@ -997,7 +1021,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- get all possible rates in one query, then do maximal match -->
             <entity-find entity-name="mantle.humanres.rate.RateAmount" list="rateAmountList">
-                <date-filter valid-date="fromDate ?: ec.user.nowTimestamp"/>
+                <date-filter valid-date="fromDate || ec.user.nowTimestamp"/>
                 <econdition field-name="partyId" from="partyId" or-null="true"/>
                 <econditions combine="or">
                     <econdition field-name="workEffortId" from="taskWorkEffort?.workEffortId" ignore-if-empty="true"/>
@@ -1017,12 +1041,12 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- if there is a taskWorkEffort and rates are associated with it or the project only use those -->
             <if condition="taskWorkEffort != null">
-                <set field="taskRaList" from="rateAmountList.findAll({ it.workEffortId == taskWorkEffort.workEffortId })"/>
-                <if condition="taskRaList"><then>
+                <set field="taskRaList" from="rateAmountList.filter((ra) => ra.workEffortId === taskWorkEffort.workEffortId)"/>
+                <if condition="taskRaList.length"><then>
                     <set field="rateAmountList" from="taskRaList"/>
                 </then><else-if condition="taskWorkEffort.rootWorkEffortId">
-                    <set field="rootWeRaList" from="rateAmountList.findAll({ it.workEffortId == taskWorkEffort.rootWorkEffortId })"/>
-                    <if condition="rootWeRaList"><set field="rateAmountList" from="rootWeRaList"/></if>
+                    <set field="rootWeRaList" from="rateAmountList.filter((ra) => ra.workEffortId === taskWorkEffort.rootWorkEffortId)"/>
+                    <if condition="rootWeRaList.length"><set field="rateAmountList" from="rootWeRaList"/></if>
                 </else-if></if>
             </if>
             <set field="workTypeEnumId" from="workTypeEnumId || taskWorkEffort?.workTypeEnumId"/>
@@ -1038,7 +1062,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="fromPartyId" from="partyId" ignore-if-empty="true"/>
                         <econdition field-name="toPartyId" from="employerPartyId" ignore-if-empty="true"/>
                     </entity-find>
-                    <set field="employment" from="employmentList ? employmentList[0] : null"/>
+                    <set field="employment" from="employmentList?.length ? employmentList[0] : null"/>
                     <set field="partyId" from="partyId || employment?.fromPartyId || null"/> <!-- Need party from employment if not set -->
                 </then><else-if condition="partyId &amp;&amp; employerPartyId">
                     <entity-find entity-name="mantle.humanres.employment.EmploymentAndRelationship" list="employmentList">
@@ -1046,7 +1070,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="fromPartyId" from="partyId"/>
                         <econdition field-name="toPartyId" from="employerPartyId"/>
                     </entity-find>
-                    <set field="employment" from="employmentList ? employmentList[0] : null"/>
+                    <set field="employment" from="employmentList?.length ? employmentList[0] : null"/>
                 </else-if></if>
 
                 <if condition="employment?.emplPositionId">
@@ -1057,26 +1081,46 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="payGradeId" from="payGradeId || emplPosition?.payGradeId"/>
                 <set field="emplPositionClassId" from="emplPositionClassId || emplPosition?.emplPositionClassId"/>
 
-                <set field="partyRaList" from="rateAmountList.findAll({ it.partyId == partyId })"/>
-                <if condition="partyRaList">
-                    <set field="partyRateAmountToUse" from="findMaximalMatch(partyRaList,
-                        {workTypeEnumId:workTypeEnumId, payGradeId:payGradeId, emplPositionClassId:emplPositionClassId})"/>
-
-                </if>
+                <set field="partyRaList" from="rateAmountList.filter((ra) => ra.partyId === partyId)"/>
             </if>
-            <!--<log level="warn" message="=============== partyRaList=${partyRaList}"/>-->
 
-            <!-- Do a maximal match on the rates that do not have a partyId. -->
-            <set field="nonPartyRaList" from="rateAmountList.findAll({it.partyId == null })"/>
-            <set field="nonPartyRateAmountToUse" from="findMaximalMatch(nonPartyRaList,
-                    {workTypeEnumId:workTypeEnumId, payGradeId:payGradeId, emplPositionClassId:emplPositionClassId})"/>
-            <!--<log level="warn" message="=============== nonPartyRaList=${nonPartyRaList}"/>-->
+            <!-- Maximal match: for each rate, a null field matches any value but adds nothing to the score, otherwise the field must
+                 equal the value to be a candidate; an earlier field in fieldsByPriority and more matched fields score higher -->
+            <script><![CDATA[
+                const findMaximalMatch = (mapList, fieldsByPriority) => {
+                    const fieldNames = Object.keys(fieldsByPriority)
+                    const numFields = fieldNames.length
+                    let highScore = -1
+                    let highMap = null
+                    for (const curMap of mapList) {
+                        let curScore = 0
+                        let skipMap = false
+                        for (let i = 0; i < numFields; i++) {
+                            const curValue = curMap[fieldNames[i]]
+                            // a null value in the rate allows any match value
+                            if (curValue == null) continue
+                            if (curValue !== fieldsByPriority[fieldNames[i]]) { skipMap = true; break }
+                            curScore += (numFields - i) + numFields
+                        }
+                        if (skipMap) continue
+                        if (curScore > highScore) { highScore = curScore; highMap = curMap }
+                    }
+                    return highMap
+                }
+                const matchFields = {workTypeEnumId: workTypeEnumId, payGradeId: payGradeId, emplPositionClassId: emplPositionClassId}
+
+                partyRateAmountToUse = (partyRaList != null && partyRaList.length) ? findMaximalMatch(partyRaList, matchFields) : null
+
+                // Do a maximal match on the rates that do not have a partyId.
+                nonPartyRaList = rateAmountList.filter((ra) => ra.partyId == null)
+                nonPartyRateAmountToUse = findMaximalMatch(nonPartyRaList, matchFields)
+            ]]></script>
 
             <!-- Take the greater of the matched rates. This allows one to set a base rate for an employee, but allow
                  specific rates to exceed the employee rate.  This does preclude paying less than the employee rate. -->
             <if condition="partyRateAmountToUse"><then>
                 <if condition="nonPartyRateAmountToUse &amp;&amp;
-                               (nonPartyRateAmountToUse.rateAmount &gt; partyRateAmountToUse.rateAmount)"><then>
+                               toDecimal(nonPartyRateAmountToUse.rateAmount ?? 0).compare(partyRateAmountToUse.rateAmount ?? 0) &gt; 0"><then>
                     <set field="rateAmountId" from="nonPartyRateAmountToUse.rateAmountId"/>
                     <set field="rateAmount" from="nonPartyRateAmountToUse.rateAmount"/>
                 </then><else>
@@ -1141,7 +1185,6 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <actions>
             <script>
-            org.moqui.context.ExecutionContext ec = context.ec
             recordsLoaded = ec.entity.makeDataLoader().csvText(fileText)
                     .csvEntityName("mantle.work.TimeServices.import#TimeSummaryRecord")
                     .csvFieldNames(['employeeId', 'emplPositionClassId', 'standardHours', 'overtimeHours',
@@ -1174,13 +1217,13 @@ along with this software (see the LICENSE.md file). If not, see
                 <field-map field-name="pseudoId" from="employeeId"/></entity-find-one></if>
             <if condition="!party"><return error="true" message="Could not find employee with ID ${employeeId}"/></if>
 
-            <if condition="standardHours || standardPieces"><service-call name="mantle.work.TimeServices.store#TimeEntry"
+            <if condition="(standardHours != null &amp;&amp; !toDecimal(standardHours).isZero()) || (standardPieces != null &amp;&amp; !toDecimal(standardPieces).isZero())"><service-call name="mantle.work.TimeServices.store#TimeEntry"
                     in-map="{partyId:party.partyId, rateTypeEnumId:'RatpStandard', rateModifierEnumId:'RatmRegular', emplPositionClassId:emplPositionClassId,
                         clientPartyId:clientPartyId, thruDate:effectiveDate, hours:standardHours, pieceCount:standardPieces}"/></if>
-            <if condition="overtimeHours || overtimePieces"><service-call name="mantle.work.TimeServices.store#TimeEntry"
+            <if condition="(overtimeHours != null &amp;&amp; !toDecimal(overtimeHours).isZero()) || (overtimePieces != null &amp;&amp; !toDecimal(overtimePieces).isZero())"><service-call name="mantle.work.TimeServices.store#TimeEntry"
                     in-map="{partyId:party.partyId, rateTypeEnumId:'RatpStandard', rateModifierEnumId:'RatmOvertime', emplPositionClassId:emplPositionClassId,
                         clientPartyId:clientPartyId, thruDate:effectiveDate, hours:overtimeHours, pieceCount:overtimePieces}"/></if>
-            <if condition="doubleTimeHours || doubleTimePieces"><service-call name="mantle.work.TimeServices.store#TimeEntry"
+            <if condition="(doubleTimeHours != null &amp;&amp; !toDecimal(doubleTimeHours).isZero()) || (doubleTimePieces != null &amp;&amp; !toDecimal(doubleTimePieces).isZero())"><service-call name="mantle.work.TimeServices.store#TimeEntry"
                     in-map="{partyId:party.partyId, rateTypeEnumId:'RatpStandard', rateModifierEnumId:'RatmDouble', emplPositionClassId:emplPositionClassId,
                         clientPartyId:clientPartyId, thruDate:effectiveDate, hours:doubleTimeHours, pieceCount:doubleTimePieces}"/></if>
         </actions>
@@ -1205,7 +1248,6 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <actions>
             <script>
-            org.moqui.context.ExecutionContext ec = context.ec
             recordsLoaded = ec.entity.makeDataLoader().csvText(fileText)
                     .csvEntityName("mantle.work.TimeServices.import#TimeDetailRecord")
                     .csvFieldNames(['employeeId', 'emplPositionClassId', 'rateType', 'startDateTime',

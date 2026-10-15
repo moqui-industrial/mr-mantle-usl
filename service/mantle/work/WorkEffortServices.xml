@@ -56,8 +56,8 @@ along with this software (see the LICENSE.md file). If not, see
             </then><else>
                 <if condition="idPrefix"><then>
                     <if condition="baseIdPrefix &amp;&amp; baseWorkEffortId.startsWith(baseIdPrefix)"><then>
-                        <set field="idRest" from="baseWorkEffortId.substring(baseIdPrefix.length()+1)"/>
-                        <if condition="idRest &amp;&amp; idRest.charAt(0) == '-'"><set field="idRest" from="idRest.substring(1)"/></if>
+                        <set field="idRest" from="baseWorkEffortId.substring(baseIdPrefix.length + 1)"/>
+                        <if condition="idRest &amp;&amp; idRest.charAt(0) === '-'"><set field="idRest" from="idRest.substring(1)"/></if>
                         <set field="workEffort.workEffortId" value="${idPrefix}-${idRest}"/>
                     </then><else>
                         <set field="seqName" value="Project_${idPrefix}"/>
@@ -132,7 +132,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="passThroughParms" from="['clearDates', 'copyAssetAssign', 'copyAssetNeeded', 'copyAssoc', 'copyCommEvent',
                     'copyContactMech', 'copyContent', 'copyNote', 'copyParty', 'copyProduct', 'copySkillStandard', 'idPrefix', 'baseIdPrefix']"/>
                 <set field="subMap" from="{deepClone:true, deepIdIsPrefix:false}"/>
-                <iterate list="passThroughParms" entry="parmName"><script>subMap.put(parmName, context.get(parmName))</script></iterate>
+                <iterate list="passThroughParms" entry="parmName"><script>subMap[parmName] = context[parmName]</script></iterate>
 
                 <!-- for cloning from a root set the rootWorkEffortId for all descendants -->
                 <set field="subMap.rootWorkEffortId" from="rootWorkEffortId"/>
@@ -147,7 +147,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="parentWorkEffortId" from="baseWorkEffortId"/></entity-find>
                 <iterate list="childList" entry="child">
                     <service-call name="mantle.work.WorkEffortServices.clone#WorkEffort"
-                            in-map="subMap + [baseWorkEffortId:child.workEffortId, parentWorkEffortId:workEffortId]"/>
+                            in-map="Object.assign({}, subMap, {baseWorkEffortId:child.workEffortId, parentWorkEffortId:workEffortId})"/>
                 </iterate>
                 <entity-find entity-name="mantle.work.effort.WorkEffort" list="childList">
                     <econdition field-name="rootWorkEffortId" from="baseWorkEffortId"/>
@@ -155,7 +155,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </entity-find>
                 <iterate list="childList" entry="child">
                     <service-call name="mantle.work.WorkEffortServices.clone#WorkEffort"
-                            in-map="subMap + [baseWorkEffortId:child.workEffortId, parentWorkEffortId:null]"/>
+                            in-map="Object.assign({}, subMap, {baseWorkEffortId:child.workEffortId, parentWorkEffortId:null})"/>
                 </iterate>
             </if>
         </actions>
@@ -192,8 +192,8 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="(workEffortParties?.length > 0) &amp;&amp; !deleteWorkEffortParties">
                 <message error="true">Cannot delete work effort ${workEffortId}. Found Work Efforty Parties.</message></if>
 
-            <set field="relatedValues" from="workEffort.findRelatedFk(new HashSet(
-                ['mantle.work.effort.WorkEffort', 'mantle.work.time.TimeEntry', 'mantle.work.effort.WorkEffortParty']))"/>
+            <set field="relatedValues" from="workEffort.findRelatedFk(
+                ['mantle.work.effort.WorkEffort', 'mantle.work.time.TimeEntry', 'mantle.work.effort.WorkEffortParty'])"/>
             <iterate list="relatedValues" entry="relatedValue">
                 <message error="true">Cannot delete work effort ${workEffortId}. Found ${relatedValue.getEntityNamePretty()}.</message></iterate>
             <check-errors/>
@@ -303,7 +303,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="typeEnumId"/></entity-find>
             <if condition="(existingWepList?.length > 0)">
                 <set field="existingWep" from="existingWepList[0]"/>
-                <set field="estimatedQuantity" from="(estimatedQuantity || 0) + (existingWep.estimatedQuantity || 0)"/>
+                <set field="estimatedQuantity" from="toDecimal(estimatedQuantity ?? 0).add(existingWep.estimatedQuantity ?? 0)"/>
                 <entity-set value-field="existingWep" include="nonpk"/>
                 <entity-update value-field="existingWep"/>
 
@@ -343,17 +343,17 @@ along with this software (see the LICENSE.md file). If not, see
                 </else-if></if>
             </if>
             <if condition="endDate == null">
-                <set field="duration" from="(workEffort.actualWorkDuration || workEffort.estimatedWorkDuration) || workEffort.estimatedWorkTime"/>
+                <set field="duration" from="[workEffort.actualWorkDuration, workEffort.estimatedWorkDuration, workEffort.estimatedWorkTime].find((value) => value != null &amp;&amp; !toDecimal(value).isZero()) ?? null"/>
                 <if condition="duration">
-                    <!-- convert to minutes because Java Calendar class take an integer and we may have something like 2.5 hours -->
+                    <!-- convert to minutes because the end is computed with whole minutes and we may have something like 2.5 hours -->
                     <service-call name="org.moqui.impl.BasicServices.convert#Uom" out-map="convertDurOut"
                             in-map="{uomId:(workEffort.timeUomId || 'TF_hr'), toUomId:'TF_min', amount:duration}"/>
-                    <set field="durationMinutes" from="((convertDurOut.convertedAmount || 60) == null ? null : Math.trunc(toDecimal((convertDurOut.convertedAmount || 60)).toNumber()))"/>
                     <script>
-                        Calendar endCal = ec.user.getCalendarSafe()
-                        endCal.setTimeInMillis(startDate.time)
-                        endCal.add(Calendar.MINUTE, durationMinutes)
-                        endDate = new Timestamp(endCal.getTimeInMillis())
+                        // timestamps reach a script as epoch millis text; whole minutes add the same in any time zone
+                        const convertedAmount = convertDurOut.convertedAmount
+                        const durationMinutes = (convertedAmount == null || toDecimal(convertedAmount).isZero()) ? 60 : Math.trunc(toDecimal(convertedAmount).toNumber())
+                        const startMillis = /^-?\d+$/.test(String(startDate)) ? Number(startDate) : Date.parse(String(startDate))
+                        endDate = String(startMillis + durationMinutes * 60000)
                     </script>
                 </if>
             </if>

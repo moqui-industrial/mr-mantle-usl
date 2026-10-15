@@ -141,7 +141,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <return error="true" message="Project's new end date puts one or more tasks out of date range."/>
                 </if>
             </iterate>
-            <if condition="!taskList?.length">
+            <if condition="!tasksList?.length">
                 <entity-find entity-name="mantle.work.time.TimeEntry" list="timeEntryList">
                     <econdition field-name="workEffortId"/>
                 </entity-find>
@@ -219,32 +219,45 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="workEffort == null">
                 <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="workEffort"/></if>
 
-            <set field="actualProfit" from="(workEffort.actualClientCost || 0) - (workEffort.actualCost || 0)"/>
-            <set field="clientBudgetRemaining" from="(workEffort.totalClientCostAllowed || 0) - (workEffort.actualClientCost || 0)"/>
-            <set field="clientBudgetUsedPercent" from="workEffort.totalClientCostAllowed ? ((workEffort.actualClientCost || 0) / workEffort.totalClientCostAllowed) * 100 : 0"/>
-            <set field="clientActualOverBudget" from="workEffort.actualClientCost &gt; workEffort.totalClientCostAllowed &amp;&amp; workEffort.totalClientCostAllowed"/>
+            <script><![CDATA[
+                const D = (value) => toDecimal(value ?? 0)
+                const hundred = toDecimal(100)
+                const zero = toDecimal(0)
+                const we = workEffort
+                const actualClientCost = D(we.actualClientCost)
+                const totalClientCostAllowed = D(we.totalClientCostAllowed)
+                const remainingWorkTime = D(we.remainingWorkTime)
+                const actualWorkTime = D(we.actualWorkTime)
+                const totalTimeAllowed = D(we.totalTimeAllowed)
+                const hasEstimate = we.estimatedWorkTime != null && !D(we.estimatedWorkTime).isZero()
 
-            <set field="actualPlusRemainingTime" from="(workEffort.actualWorkTime || 0) + (workEffort.remainingWorkTime || 0)"/>
-            <set field="bestTimeEstimate" from="actualPlusRemainingTime &gt; workEffort.estimatedWorkTime ? actualPlusRemainingTime : workEffort.estimatedWorkTime "/>
-            <set field="estimatedCompletePercent" from="workEffort.estimatedWorkTime ? ((workEffort.actualWorkTime || 0) / workEffort.estimatedWorkTime) * 100 : 0"/>
-            <set field="estimatedRemainingPercent" from="workEffort.estimatedWorkTime ? ((workEffort.remainingWorkTime || 0) / workEffort.estimatedWorkTime) * 100 : 0"/>
-            <set field="estimatedActualPlusRemainingDiff" from="(workEffort.estimatedWorkTime || 0) - actualPlusRemainingTime"/>
-            <set field="actualPlusRemainingOverEstimated" from="actualPlusRemainingTime &gt; (workEffort.estimatedWorkTime || 0)"/>
+                actualProfit = actualClientCost.subtract(D(we.actualCost))
+                clientBudgetRemaining = totalClientCostAllowed.subtract(actualClientCost)
+                clientBudgetUsedPercent = totalClientCostAllowed.isZero() ? zero : actualClientCost.divide(totalClientCostAllowed).multiply(hundred)
+                clientActualOverBudget = actualClientCost.compare(totalClientCostAllowed) > 0 && !totalClientCostAllowed.isZero()
 
-            <set field="timeBudgetCompletePercent" from="workEffort.totalTimeAllowed ? ((workEffort.actualWorkTime || 0) / workEffort.totalTimeAllowed) * 100 : 0"/>
-            <set field="timeBudgetRemainingPercent" from="workEffort.totalTimeAllowed ? ((workEffort.remainingWorkTime || 0) / workEffort.totalTimeAllowed) * 100 : 0"/>
-            <set field="timeBudgetActualPlusRemainingDiff" from="(workEffort.totalTimeAllowed || 0) - actualPlusRemainingTime"/>
-            <set field="actualPlusRemainingOverTimeBudget" from="actualPlusRemainingTime &gt; (workEffort.totalTimeAllowed || 0)"/>
+                actualPlusRemainingTime = actualWorkTime.add(remainingWorkTime)
+                bestTimeEstimate = (we.estimatedWorkTime == null || actualPlusRemainingTime.compare(we.estimatedWorkTime) > 0) ? actualPlusRemainingTime : we.estimatedWorkTime
+                estimatedCompletePercent = hasEstimate ? actualWorkTime.divide(we.estimatedWorkTime).multiply(hundred) : zero
+                estimatedRemainingPercent = hasEstimate ? remainingWorkTime.divide(we.estimatedWorkTime).multiply(hundred) : zero
+                estimatedActualPlusRemainingDiff = D(we.estimatedWorkTime).subtract(actualPlusRemainingTime)
+                actualPlusRemainingOverEstimated = actualPlusRemainingTime.compare(D(we.estimatedWorkTime)) > 0
 
-            <set field="clientAverageHourCost" from="workEffort.actualWorkTime ? ((workEffort.actualClientCost || 0) / workEffort.actualWorkTime) : 0"/>
-            <set field="clientEstimatedCost" from="clientAverageHourCost * bestTimeEstimate"/>
-            <set field="clientBudgetEstimateDiff" from="(workEffort.totalClientCostAllowed || 0) - clientEstimatedCost"/>
+                timeBudgetCompletePercent = totalTimeAllowed.isZero() ? zero : actualWorkTime.divide(totalTimeAllowed).multiply(hundred)
+                timeBudgetRemainingPercent = totalTimeAllowed.isZero() ? zero : remainingWorkTime.divide(totalTimeAllowed).multiply(hundred)
+                timeBudgetActualPlusRemainingDiff = totalTimeAllowed.subtract(actualPlusRemainingTime)
+                actualPlusRemainingOverTimeBudget = actualPlusRemainingTime.compare(totalTimeAllowed) > 0
 
-            <set field="estimatedCompleteBudgetPercentGap" from="(estimatedCompletePercent || 0) - clientBudgetUsedPercent"/>
-            <set field="estimatedCompleteOverBudget" from="estimatedCompletePercent &lt; clientBudgetUsedPercent"/>
+                clientAverageHourCost = actualWorkTime.isZero() ? zero : actualClientCost.divide(actualWorkTime)
+                clientEstimatedCost = clientAverageHourCost.multiply(bestTimeEstimate)
+                clientBudgetEstimateDiff = totalClientCostAllowed.subtract(clientEstimatedCost)
 
-            <set field="projectDanger" from="clientActualOverBudget | actualPlusRemainingOverEstimated"/>
-            <set field="projectWarning" from="estimatedCompleteOverBudget"/>
+                estimatedCompleteBudgetPercentGap = estimatedCompletePercent.subtract(clientBudgetUsedPercent)
+                estimatedCompleteOverBudget = estimatedCompletePercent.compare(clientBudgetUsedPercent) < 0
+
+                projectDanger = clientActualOverBudget || actualPlusRemainingOverEstimated
+                projectWarning = estimatedCompleteOverBudget
+            ]]></script>
 
             <entity-find-count entity-name="mantle.work.effort.WorkEffort" count-field="taskCount">
                 <econdition field-name="rootWorkEffortId" from="workEffort.workEffortId"/>
@@ -256,7 +269,7 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <set field="taskCountByStatusMap" from="{}"/>
             <iterate list="taskStatusCountList" entry="taskStatusCount">
-                <script>taskCountByStatusMap.put(taskStatusCount.statusId, taskStatusCount.taskCount)</script></iterate>
+                <script>taskCountByStatusMap[taskStatusCount.statusId] = taskStatusCount.taskCount</script></iterate>
         </actions>
     </service>
 
@@ -306,7 +319,7 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
 
             <set field="milestoneStatsTotals" from="{workEffortId: 'Total', workEffortName: '', estimatedStartDate: ''}"/>
-            <script>for (String statsField in statsFields) milestoneStatsTotals.put(statsField, 0.0)</script>
+            <script>for (const statsField of statsFields) milestoneStatsTotals[statsField] = toDecimal(0)</script>
 
             <set field="milestoneStatsList" from="[]"/>
             <iterate list="milestoneList" entry="milestone">
@@ -317,35 +330,34 @@ along with this software (see the LICENSE.md file). If not, see
                     <select-field field-name="estimatedWorkTime,estimatedSetupTime,remainingWorkTime,actualWorkTime,actualSetupTime,totalTimeAllowed,actualCost,actualClientCost,totalClientCostAllowed"/>
                 </entity-find>
                 <if condition="(msSummaryList?.length > 0)"><script>
-                    Map msSummary = msSummaryList.get(0)
-                    for (String statsField in statsFields) milestoneStats.put(statsField, msSummary.get(statsField) || 0.0)
-
-                    milestoneStats.estimatedWorkDays = milestoneStats.estimatedWorkTime / timePerDay
-                    milestoneStats.remainingWorkDays = milestoneStats.remainingWorkTime / timePerDay
-                    milestoneStats.actualWorkDays = milestoneStats.actualWorkTime / timePerDay
-                    milestoneStats.totalTimeAllowedDays = milestoneStats.totalTimeAllowed / timePerDay
-                    milestoneStats.workTimePercentComplete = milestoneStats.estimatedWorkTime ? ((milestoneStats.estimatedWorkTime - milestoneStats.remainingWorkTime) / milestoneStats.estimatedWorkTime) * 100 : 0.0
-                    milestoneStats.workRemainingPercent = milestoneStats.estimatedWorkTime ? (milestoneStats.remainingWorkTime / milestoneStats.estimatedWorkTime) * 100 : 0.0
-                    milestoneStats.workActualPercent = milestoneStats.estimatedWorkTime ? (milestoneStats.actualWorkTime / milestoneStats.estimatedWorkTime) * 100 : 0.0
-                    milestoneStats.workActRemPercent = milestoneStats.estimatedWorkTime ? ((milestoneStats.actualWorkTime + milestoneStats.remainingWorkTime) / milestoneStats.estimatedWorkTime) * 100 : 0.0
-
-                    milestoneStatsList.add(milestoneStats)
+                    const msSummary = msSummaryList[0]
+                    for (const statsField of statsFields) milestoneStats[statsField] = toDecimal(msSummary[statsField] ?? 0)
+                    milestoneStatsList.push(milestoneStats)
 
                     // add current values to stats totals
-                    for (String statsField in statsFields) milestoneStatsTotals[statsField] += milestoneStats[statsField]
+                    for (const statsField of statsFields) milestoneStatsTotals[statsField] = milestoneStatsTotals[statsField].add(milestoneStats[statsField])
                 </script></if>
             </iterate>
             <script>
-                // add the totals Map to the end of the list
-                milestoneStatsTotals.estimatedWorkDays = milestoneStatsTotals.estimatedWorkTime / timePerDay
-                milestoneStatsTotals.remainingWorkDays = milestoneStatsTotals.remainingWorkTime / timePerDay
-                milestoneStatsTotals.actualWorkDays = milestoneStatsTotals.actualWorkTime / timePerDay
-                milestoneStatsTotals.totalTimeAllowedDays = milestoneStatsTotals.totalTimeAllowed / timePerDay
-                milestoneStatsTotals.workTimePercentComplete = milestoneStatsTotals.estimatedWorkTime ? ((milestoneStatsTotals.estimatedWorkTime - milestoneStatsTotals.remainingWorkTime) / milestoneStatsTotals.estimatedWorkTime) * 100 : 0.0
-                milestoneStatsTotals.workRemainingPercent = milestoneStatsTotals.estimatedWorkTime ? (milestoneStatsTotals.remainingWorkTime / milestoneStatsTotals.estimatedWorkTime) * 100 : 0.0
-                milestoneStatsTotals.workActualPercent = milestoneStatsTotals.estimatedWorkTime ? (milestoneStatsTotals.actualWorkTime / milestoneStatsTotals.estimatedWorkTime) * 100 : 0.0
-                milestoneStatsTotals.workActRemPercent = milestoneStatsTotals.estimatedWorkTime ? ((milestoneStatsTotals.actualWorkTime + milestoneStatsTotals.remainingWorkTime) / milestoneStatsTotals.estimatedWorkTime) * 100 : 0.0
-                milestoneStatsList.add(milestoneStatsTotals)
+                // derived values, for each milestone and then for the totals Map added to the end of the list
+                const perDay = toDecimal(timePerDay)
+                const zero = toDecimal(0)
+                const hundred = toDecimal(100)
+                const derive = (stats) => {
+                    const est = stats.estimatedWorkTime
+                    const hasEst = !est.isZero()
+                    stats.estimatedWorkDays = est.divide(perDay)
+                    stats.remainingWorkDays = stats.remainingWorkTime.divide(perDay)
+                    stats.actualWorkDays = stats.actualWorkTime.divide(perDay)
+                    stats.totalTimeAllowedDays = stats.totalTimeAllowed.divide(perDay)
+                    stats.workTimePercentComplete = hasEst ? est.subtract(stats.remainingWorkTime).divide(est).multiply(hundred) : zero
+                    stats.workRemainingPercent = hasEst ? stats.remainingWorkTime.divide(est).multiply(hundred) : zero
+                    stats.workActualPercent = hasEst ? stats.actualWorkTime.divide(est).multiply(hundred) : zero
+                    stats.workActRemPercent = hasEst ? stats.actualWorkTime.add(stats.remainingWorkTime).divide(est).multiply(hundred) : zero
+                }
+                for (const stats of milestoneStatsList) derive(stats)
+                derive(milestoneStatsTotals)
+                milestoneStatsList.push(milestoneStatsTotals)
             </script>
         </actions>
     </service>
@@ -419,76 +431,72 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="parentWorkEffortId" operator="is-not-null"/>
                 <select-field field-name="parentWorkEffortId"/>
             </entity-find>
-            <set field="withChildrenIdSet" from="new HashSet(allUsedAsParent.parentWorkEffortId)"/>
+            <set field="withChildrenIdSet" from="allUsedAsParent.map((used) => used.parentWorkEffortId)"/>
             <!-- <log message="========= withChildrenIdSet: ${withChildrenIdSet}"/> -->
 
             <script><![CDATA[
-                import org.moqui.entity.EntityList
-                import org.moqui.entity.EntityValue
-                import org.moqui.impl.context.ExecutionContextImpl
+                const zero = toDecimal(0)
+                const hundred = toDecimal(100)
+                const perDay = toDecimal(timePerDay)
+                const derive = (stats) => {
+                    const est = stats.estimatedWorkTime
+                    const budget = stats.totalTimeAllowed
+                    const hasEst = !est.isZero()
+                    const hasBudget = !budget.isZero()
+                    stats.estimatedWorkDays = est.divide(perDay)
+                    stats.remainingWorkDays = stats.remainingWorkTime.divide(perDay)
+                    stats.actualWorkDays = stats.actualWorkTime.divide(perDay)
+                    stats.totalTimeAllowedDays = budget.divide(perDay)
 
-                Map childStatsTotals = {workEffortId: 'Total', workEffortName: '', priority: ''}
-                for (String statsField in statsFields) childStatsTotals.put(statsField, 0.0)
+                    stats.workTimePercentComplete = hasEst ? est.subtract(stats.remainingWorkTime).divide(est).multiply(hundred) : zero
+                    stats.workRemainingPercent = hasEst ? stats.remainingWorkTime.divide(est).multiply(hundred) : zero
+                    stats.workActualPercent = hasEst ? stats.actualWorkTime.divide(est).multiply(hundred) : zero
+                    stats.workActRemPercent = hasEst ? stats.actualWorkTime.add(stats.remainingWorkTime).divide(est).multiply(hundred) : zero
 
-                childStatsList = new ArrayList<>(directChildren.size())
-                for (EntityValue directChild in directChildren) {
-                    Map topLevelStats = {workEffortId: directChild.workEffortId, workEffortName: directChild.workEffortName,
+                    stats.budgetTimePercentComplete = hasBudget ? budget.subtract(stats.remainingWorkTime).divide(budget).multiply(hundred) : zero
+                    stats.budgetRemainingPercent = hasBudget ? stats.remainingWorkTime.divide(budget).multiply(hundred) : zero
+                    stats.budgetActualPercent = hasBudget ? stats.actualWorkTime.divide(budget).multiply(hundred) : zero
+                    stats.budgetActRemPercent = hasBudget ? stats.actualWorkTime.add(stats.remainingWorkTime).divide(budget).multiply(hundred) : zero
+                }
+
+                // adds a work effort and all its descendants to stats
+                const addChildStats = (current, stats) => {
+                    if (current == null || current.statusId === "WeCancelled") return
+                    // add current values
+                    for (const statsField of statsFields) {
+                        if (current[statsField] != null && !toDecimal(current[statsField]).isZero()) stats[statsField] = stats[statsField].add(current[statsField])
+                    }
+
+                    // recurse for each child
+                    if (!withChildrenIdSet.includes(current.workEffortId)) return
+                    const childList = ec.entity.find("mantle.work.effort.WorkEffort")
+                            .condition("parentWorkEffortId", current.workEffortId).list()
+                    for (const child of childList) addChildStats(child, stats)
+                }
+
+                const childStatsTotals = {workEffortId: 'Total', workEffortName: '', priority: ''}
+                for (const statsField of statsFields) childStatsTotals[statsField] = zero
+
+                childStatsList = []
+                for (const directChild of directChildren) {
+                    const topLevelStats = {workEffortId: directChild.workEffortId, workEffortName: directChild.workEffortName,
                             priority: directChild.priority}
-                    for (String statsField in statsFields) topLevelStats.put(statsField, 0.0)
-                    addChildStats(directChild, topLevelStats, ec)
+                    for (const statsField of statsFields) topLevelStats[statsField] = zero
+                    addChildStats(directChild, topLevelStats)
 
                     // calc derived values
-                    topLevelStats.estimatedWorkDays = topLevelStats.estimatedWorkTime / timePerDay
-                    topLevelStats.remainingWorkDays = topLevelStats.remainingWorkTime / timePerDay
-                    topLevelStats.actualWorkDays = topLevelStats.actualWorkTime / timePerDay
-                    topLevelStats.totalTimeAllowedDays = topLevelStats.totalTimeAllowed / timePerDay
-
-                    topLevelStats.workTimePercentComplete = topLevelStats.estimatedWorkTime ? ((topLevelStats.estimatedWorkTime - topLevelStats.remainingWorkTime) / topLevelStats.estimatedWorkTime) * 100 : 0.0
-                    topLevelStats.workRemainingPercent = topLevelStats.estimatedWorkTime ? (topLevelStats.remainingWorkTime / topLevelStats.estimatedWorkTime) * 100 : 0.0
-                    topLevelStats.workActualPercent = topLevelStats.estimatedWorkTime ? (topLevelStats.actualWorkTime / topLevelStats.estimatedWorkTime) * 100 : 0.0
-                    topLevelStats.workActRemPercent = topLevelStats.estimatedWorkTime ? ((topLevelStats.actualWorkTime + topLevelStats.remainingWorkTime) / topLevelStats.estimatedWorkTime) * 100 : 0.0
-
-                    topLevelStats.budgetTimePercentComplete = topLevelStats.totalTimeAllowed ? ((topLevelStats.totalTimeAllowed - topLevelStats.remainingWorkTime) / topLevelStats.totalTimeAllowed) * 100 : 0.0
-                    topLevelStats.budgetRemainingPercent = topLevelStats.totalTimeAllowed ? (topLevelStats.remainingWorkTime / topLevelStats.totalTimeAllowed) * 100 : 0.0
-                    topLevelStats.budgetActualPercent = topLevelStats.totalTimeAllowed ? (topLevelStats.actualWorkTime / topLevelStats.totalTimeAllowed) * 100 : 0.0
-                    topLevelStats.budgetActRemPercent = topLevelStats.totalTimeAllowed ? ((topLevelStats.actualWorkTime + topLevelStats.remainingWorkTime) / topLevelStats.totalTimeAllowed) * 100 : 0.0
+                    derive(topLevelStats)
 
                     // add current values to stats totals
-                    for (String statsField in statsFields) childStatsTotals[statsField] += topLevelStats[statsField]
+                    for (const statsField of statsFields) childStatsTotals[statsField] = childStatsTotals[statsField].add(topLevelStats[statsField])
 
                     // all done, add to the list
-                    childStatsList.add(topLevelStats)
+                    childStatsList.push(topLevelStats)
                 }
 
                 // add the totals Map to the end of the list
-                childStatsTotals.estimatedWorkDays = childStatsTotals.estimatedWorkTime / timePerDay
-                childStatsTotals.remainingWorkDays = childStatsTotals.remainingWorkTime / timePerDay
-                childStatsTotals.actualWorkDays = childStatsTotals.actualWorkTime / timePerDay
-                childStatsTotals.totalTimeAllowedDays = childStatsTotals.totalTimeAllowed / timePerDay
-
-                childStatsTotals.workTimePercentComplete = childStatsTotals.estimatedWorkTime ? ((childStatsTotals.estimatedWorkTime - childStatsTotals.remainingWorkTime) / childStatsTotals.estimatedWorkTime) * 100 : 0.0
-                childStatsTotals.workRemainingPercent = childStatsTotals.estimatedWorkTime ? (childStatsTotals.remainingWorkTime / childStatsTotals.estimatedWorkTime) * 100 : 0.0
-                childStatsTotals.workActualPercent = childStatsTotals.estimatedWorkTime ? (childStatsTotals.actualWorkTime / childStatsTotals.estimatedWorkTime) * 100 : 0.0
-                childStatsTotals.workActRemPercent = childStatsTotals.estimatedWorkTime ? ((childStatsTotals.actualWorkTime + childStatsTotals.remainingWorkTime) / childStatsTotals.estimatedWorkTime) * 100 : 0.0
-
-                childStatsTotals.budgetTimePercentComplete = childStatsTotals.totalTimeAllowed ? ((childStatsTotals.totalTimeAllowed - childStatsTotals.remainingWorkTime) / childStatsTotals.totalTimeAllowed) * 100 : 0.0
-                childStatsTotals.budgetRemainingPercent = childStatsTotals.totalTimeAllowed ? (childStatsTotals.remainingWorkTime / childStatsTotals.totalTimeAllowed) * 100 : 0.0
-                childStatsTotals.budgetActualPercent = childStatsTotals.totalTimeAllowed ? (childStatsTotals.actualWorkTime / childStatsTotals.totalTimeAllowed) * 100 : 0.0
-                childStatsTotals.budgetActRemPercent = childStatsTotals.totalTimeAllowed ? ((childStatsTotals.actualWorkTime + childStatsTotals.remainingWorkTime) / childStatsTotals.totalTimeAllowed) * 100 : 0.0
-
-                childStatsList.add(childStatsTotals)
-
-                void addChildStats(EntityValue current, Map stats, ExecutionContextImpl ec) {
-                    if (current == null || current.statusId == "WeCancelled") return
-                    // add current values
-                    for (String statsField in statsFields) if (current[statsField]) stats[statsField] += current[statsField]
-
-                    // recurse for each child
-                    if (!withChildrenIdSet.contains(current.workEffortId)) return
-                    EntityList childList = ec.entity.find("mantle.work.effort.WorkEffort")
-                            .condition("parentWorkEffortId", current.workEffortId).list()
-                    if (childList) for (EntityValue child in childList) addChildStats(child, stats, ec)
-                }
+                derive(childStatsTotals)
+                childStatsList.push(childStatsTotals)
                 ]]></script>
         </actions>
     </service>
@@ -513,7 +521,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="roleGroupEnumId" operator="in" value="RgpTask,RgpProject"/>
                     <order-by field-name="roleTypeId"/>
                 </entity-find>
-                <set field="roleTypeId" from="projectRoleList*.roleTypeId.join(',')"/>
+                <set field="roleTypeId" from="projectRoleList.map((role) => role.roleTypeId).join(',')"/>
             </if>
             <if condition="rootWorkEffortId"><then>
                 <entity-find entity-name="mantle.work.effort.WorkEffortAndPartyDetail" list="partyList" limit="20">
@@ -530,8 +538,8 @@ along with this software (see the LICENSE.md file). If not, see
                 </entity-find>
                 <script>
                     resultList = []
-                    if (addOptional) resultList.add({partyId:"", name:"None"})
-                    for (party in partyList) resultList.add({partyId:party.partyId, name:ec.resource.expand('PartyNameTemplate', '', party)})
+                    if (addOptional) resultList.push({partyId:"", name:"None"})
+                    for (const party of partyList) resultList.push({partyId:party.partyId, name:ec.resource.expand('PartyNameTemplate', '', party)})
                 </script>
             </then><else>
                 <set field="term" from="term || '*'"/>
@@ -586,7 +594,7 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <script>
                 resultList = [{partyId:"", name:"None"}]
-                for (weapd in weapdList) resultList.add({partyId:weapd.partyId, name:ec.resource.expand('PartyNameTemplate', '', weapd)})
+                for (const weapd of weapdList) resultList.push({partyId:weapd.partyId, name:ec.resource.expand('PartyNameTemplate', '', weapd)})
             </script>
         </actions>
     </service>
@@ -605,7 +613,7 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <script>
                 resultList = []
-                for (task in taskList) resultList.add({workEffortId:task.workEffortId, taskLabel:ec.resource.expand('WorkEffortNameTemplate', '', task)})
+                for (const task of taskList) resultList.push({workEffortId:task.workEffortId, taskLabel:ec.resource.expand('WorkEffortNameTemplate', '', task)})
             </script>
         </actions>
     </service>
@@ -623,7 +631,7 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <script>
                 resultList = []
-                for (milestone in milestoneList) resultList.add({workEffortId:milestone.workEffortId, milestoneLabel:ec.resource.expand('WorkEffortNameTemplate', '', milestone)})
+                for (const milestone of milestoneList) resultList.push({workEffortId:milestone.workEffortId, milestoneLabel:ec.resource.expand('WorkEffortNameTemplate', '', milestone)})
             </script>
         </actions>
     </service>
