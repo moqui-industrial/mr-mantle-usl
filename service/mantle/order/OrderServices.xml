@@ -1660,7 +1660,7 @@ General Order Placement and eCommerce Usage
             <entity-find entity-name="moqui.basic.EnumGroupMember" list="productItemTypeEgms" cache="true">
                 <econdition field-name="enumGroupEnumId" value="EngItemsProduct"/></entity-find>
             <set field="productItemTypes" from="Array.from(productItemTypeEgms).map((it) =&gt; it.enumId)"/>
-            <if condition="!productItemTypes.contains(orderItem.itemTypeEnumId)">
+            <if condition="!productItemTypes.includes(orderItem.itemTypeEnumId)">
                 <return type="warning" message="Item ${orderItemSeqId} is not a product type item, not closing"/></if>
 
             <!-- check quantity issued -->
@@ -1680,17 +1680,17 @@ General Order Placement and eCommerce Usage
             <set field="itemQuantityIssued" from="toDecimal(0)"/>
             <iterate list="itemAssetIssuanceList" entry="itemAssetIssuance">
                 <set field="itemQuantityIssued" from="itemQuantityIssued.add(itemAssetIssuance.quantity ?? 0)"/></iterate>
-            <set field="hasIssuedQuantity" from="itemQuantityIssued &gt; 0.0"/>
+            <set field="hasIssuedQuantity" from="itemQuantityIssued.compare(0) &gt; 0"/>
 
             <!-- determine quantity to cancel -->
-            <set field="itemQuantity" from="orderItem.quantity != null ? orderItem.quantity : 1.0"/>
-            <set field="notIssuedQuantity" from="itemQuantity - itemQuantityIssued"/>
-            <if condition="notIssuedQuantity &lt; 0.0">
+            <set field="itemQuantity" from="toDecimal(orderItem.quantity ?? 1)"/>
+            <set field="notIssuedQuantity" from="itemQuantity.subtract(itemQuantityIssued)"/>
+            <if condition="notIssuedQuantity.compare(0) &lt; 0">
                 <log level="warn" message="In cancel#OrderItem itemQuantityIssued ${itemQuantityIssued} is greater than itemQuantity ${itemQuantity}, using 0.0 for notIssuedQuantity instead of ${notIssuedQuantity}"/>
-                <set field="notIssuedQuantity" from="0.0"/>
+                <set field="notIssuedQuantity" from="toDecimal(0)"/>
             </if>
-            <if condition="cancelQuantity"><then>
-                <if condition="cancelQuantity &gt; notIssuedQuantity"><then>
+            <if condition="cancelQuantity != null &amp;&amp; !toDecimal(cancelQuantity).isZero()"><then>
+                <if condition="toDecimal(cancelQuantity).compare(notIssuedQuantity) &gt; 0"><then>
                     <set field="quantityCancelled" from="notIssuedQuantity"/>
                     <message type="warning">Cannot cancel quantity ${cancelQuantity}, only ${notIssuedQuantity} not yet shipped for Order Item ${orderId}:${orderItemSeqId}</message>
                 </then><else>
@@ -1700,35 +1700,35 @@ General Order Placement and eCommerce Usage
                 <set field="quantityCancelled" from="notIssuedQuantity"/>
             </else></if>
 
-            <if condition="!quantityCancelled"><return/></if>
+            <if condition="quantityCancelled == null || toDecimal(quantityCancelled).isZero()"><return/></if>
 
             <!-- update the OrderItem -->
             <service-call name="update#mantle.order.OrderItem" in-map="{orderId:orderId,
                         orderItemSeqId:orderItem.orderItemSeqId,
-                        quantityCancelled:(quantityCancelled + (orderItem.quantityCancelled || 0)),
-                        quantity:(itemQuantity - quantityCancelled)}"/>
+                        quantityCancelled:toDecimal(quantityCancelled).add(orderItem.quantityCancelled ?? 0),
+                        quantity:itemQuantity.subtract(quantityCancelled)}"/>
 
             <!-- adjust child items (usually discount and tax) for new quantity -->
             <!-- NOTE this is simpler than other prorating because it is only done once, then the item is either completed if partially filled or cancelled otherwise -->
             <!-- NOTE skip discounts if isPromo=Y? those will be handled by order update triggers, if enabled; maybe best to calc here and disable promo calc (are disabled by default for orders Approved, etc) -->
-            <if condition="itemQuantity == quantityCancelled"><then>
-                <set field="childCancelRatio" from="1.0"/>
+            <if condition="itemQuantity.eq(quantityCancelled)"><then>
+                <set field="childCancelRatio" from="toDecimal(1)"/>
             </then><else>
-                <set field="childCancelRatio" from="(quantityCancelled == null ? null : toDecimal(quantityCancelled)).divide((itemQuantity == null ? null : toDecimal(itemQuantity)), 6, BigDecimal.ROUND_HALF_EVEN)"/>
+                <set field="childCancelRatio" from="toDecimal(quantityCancelled).divide(itemQuantity, 6, 'HALF_EVEN')"/>
             </else></if>
             <set field="childOrderItemList" from="orderItem['Child#mantle.order.OrderItem']"/>
             <order-map-list list="childOrderItemList"><order-by field-name="orderItemSeqId"/></order-map-list>
             <iterate list="childOrderItemList" entry="childOrderItem">
-                <if condition="childOrderItem.quantity == 0.0 || childOrderItem.unitAmount == 0.0"><continue/></if>
-                <if condition="childOrderItem.quantity == itemQuantity"><then>
+                <if condition="(childOrderItem.quantity != null &amp;&amp; toDecimal(childOrderItem.quantity).isZero()) || (childOrderItem.unitAmount != null &amp;&amp; toDecimal(childOrderItem.unitAmount).isZero())"><continue/></if>
+                <if condition="childOrderItem.quantity != null &amp;&amp; itemQuantity.eq(childOrderItem.quantity)"><then>
                     <!-- if child qty == parent qty no need to prorate, just adjust quantities to match -->
                     <service-call name="update#mantle.order.OrderItem" in-map="{orderId:orderId,
                         orderItemSeqId:childOrderItem.orderItemSeqId,
-                        quantityCancelled:(quantityCancelled + (childOrderItem.quantityCancelled || 0)),
-                        quantity:(itemQuantity - quantityCancelled)}"/>
+                        quantityCancelled:toDecimal(quantityCancelled).add(childOrderItem.quantityCancelled ?? 0),
+                        quantity:itemQuantity.subtract(quantityCancelled)}"/>
                 </then><else>
                     <!-- quantity doesn't match, leave quantity alone and prorate unitAmount -->
-                    <set field="newUnitAmount" from="childOrderItem.unitAmount - ((childCancelRatio == null ? null : toDecimal(childCancelRatio)) * (childOrderItem.unitAmount == null ? null : toDecimal(childOrderItem.unitAmount))).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+                    <set field="newUnitAmount" from="toDecimal(childOrderItem.unitAmount ?? 0).subtract(childCancelRatio.multiply(childOrderItem.unitAmount ?? 0).setScale(2, 'HALF_UP'))"/>
                     <service-call name="update#mantle.order.OrderItem" in-map="{orderId:orderId,
                         orderItemSeqId:childOrderItem.orderItemSeqId, unitAmount:newUnitAmount}"/>
                 </else></if>
@@ -1744,34 +1744,34 @@ General Order Placement and eCommerce Usage
             </else></if>
 
             <set field="shipmentItemQuantityReducedMap" from="{}"/>
-            <set field="shipQuantityRemaining" from="quantityCancelled"/>
+            <set field="shipQuantityRemaining" from="toDecimal(quantityCancelled)"/>
             <iterate list="itemShipmentItemSourceList" entry="itemShipmentItemSource">
-                <set field="shipQuantityToReduce" from="shipQuantityRemaining &gt; itemShipmentItemSource.quantityNotHandled ?
-                        itemShipmentItemSource.quantityNotHandled : shipQuantityRemaining"/>
-                <if condition="!shipQuantityToReduce"><continue/></if>
-                <script>addToBigDecimalInMap(itemShipmentItemSource.shipmentId, shipQuantityToReduce, shipmentItemQuantityReducedMap)</script>
+                <set field="shipQuantityToReduce" from="shipQuantityRemaining.compare(itemShipmentItemSource.quantityNotHandled ?? 0) &gt; 0 ?
+                        toDecimal(itemShipmentItemSource.quantityNotHandled ?? 0) : shipQuantityRemaining"/>
+                <if condition="shipQuantityToReduce.isZero()"><continue/></if>
+                <script>shipmentItemQuantityReducedMap[itemShipmentItemSource.shipmentId] = toDecimal(shipmentItemQuantityReducedMap[itemShipmentItemSource.shipmentId] ?? 0).add(shipQuantityToReduce)</script>
                 <!-- reduce quantity by quantityNotHandled -->
                 <service-call name="update#mantle.shipment.ShipmentItemSource"
                         in-map="{shipmentItemSourceId:itemShipmentItemSource.shipmentItemSourceId, quantityNotHandled:0,
-                                quantity:(itemShipmentItemSource.quantity - shipQuantityToReduce)}"/>
+                                quantity:toDecimal(itemShipmentItemSource.quantity ?? 0).subtract(shipQuantityToReduce)}"/>
 
-                <set field="shipQuantityRemaining" from="shipQuantityRemaining - shipQuantityToReduce"/>
+                <set field="shipQuantityRemaining" from="shipQuantityRemaining.subtract(shipQuantityToReduce)"/>
             </iterate>
 
             <iterate list="shipmentItemQuantityReducedMap" entry="shipmentItemQuantityReduced" key="shipmentId">
                 <entity-find-one entity-name="mantle.shipment.ShipmentItem" value-field="shipmentItem">
                     <field-map field-name="shipmentId"/><field-map field-name="productId" from="orderItem.productId"/></entity-find-one>
                 <if condition="shipmentItem != null">
-                    <set field="newSiQuantity" from="shipmentItem.quantity &gt; shipmentItemQuantityReduced ?
-                                shipmentItem.quantity - shipmentItemQuantityReduced : 0.0"/>
+                    <set field="newSiQuantity" from="toDecimal(shipmentItem.quantity ?? 0).compare(shipmentItemQuantityReduced) &gt; 0 ?
+                                toDecimal(shipmentItem.quantity).subtract(shipmentItemQuantityReduced) : toDecimal(0)"/>
                     <service-call name="update#mantle.shipment.ShipmentItem"
                             in-map="{shipmentId:shipmentId, productId:orderItem.productId, quantity:newSiQuantity}"/>
 
-                    <if condition="newSiQuantity == 0.0">
+                    <if condition="newSiQuantity.isZero()">
                         <!-- if no ShipmentItems have quantity greater than 0.0 cancel Shipment -->
                         <entity-find-count entity-name="mantle.shipment.ShipmentItem" count-field="nonZeroShipItemCount">
                             <econdition field-name="shipmentId"/>
-                            <econdition field-name="quantity" operator="greater" from="0.0"/>
+                            <econdition field-name="quantity" operator="greater" from="0"/>
                         </entity-find-count>
                         <if condition="nonZeroShipItemCount == 0">
                             <!-- cancel#Shipment won't do what it normally does reducing quantities, but just in case other cleanups needed -->
@@ -1781,18 +1781,18 @@ General Order Placement and eCommerce Usage
                 </if>
             </iterate>
 
-            <if condition="quantityCancelled == notIssuedQuantity"><then>
+            <if condition="toDecimal(quantityCancelled).eq(notIssuedQuantity)"><then>
                 <!-- if quantityCancelled == notIssuedQuantity remove all OrderItem Reservations -->
                 <service-call name="mantle.product.AssetServices.remove#OrderItemReservations"
                               in-map="{orderId:orderId, orderItemSeqId:orderItem.orderItemSeqId}"/>
 
-                <if condition="checkCancelPart &amp;&amp; quantityCancelled == notIssuedQuantity">
+                <if condition="checkCancelPart &amp;&amp; toDecimal(quantityCancelled).eq(notIssuedQuantity)">
                     <!-- first see if all OrderItem in part have quantity 0, if so cancel order -->
                     <entity-find-count entity-name="mantle.order.OrderItem" count-field="partItemQtyOverZeroCount">
                         <econdition field-name="orderId"/>
                         <econdition field-name="orderPartSeqId" from="orderItem.orderPartSeqId"/>
                         <econdition field-name="itemTypeEnumId" operator="in" from="productItemTypes"/>
-                        <econdition field-name="quantity" operator="greater" from="0.0"/>
+                        <econdition field-name="quantity" operator="greater" from="0"/>
                     </entity-find-count>
                     <if condition="partItemQtyOverZeroCount == 0"><then>
                         <service-call name="update#mantle.order.OrderPart" out-map="context"
@@ -1915,7 +1915,7 @@ General Order Placement and eCommerce Usage
             <entity-find entity-name="moqui.basic.EnumGroupMember" list="productItemTypeEgms" cache="true">
                 <econdition field-name="enumGroupEnumId" value="EngItemsProduct"/></entity-find>
             <set field="productItemTypes" from="Array.from(productItemTypeEgms).map((it) =&gt; it.enumId)"/>
-            <if condition="!productItemTypes.contains(orderItem.itemTypeEnumId)">
+            <if condition="!productItemTypes.includes(orderItem.itemTypeEnumId)">
                 <return type="warning" message="Item ${orderItemSeqId} is not a product type item, not rejecting"/></if>
 
             <!-- check quantity issued -->
@@ -1935,17 +1935,17 @@ General Order Placement and eCommerce Usage
             <set field="itemQuantityIssued" from="toDecimal(0)"/>
             <iterate list="itemAssetIssuanceList" entry="itemAssetIssuance">
                 <set field="itemQuantityIssued" from="itemQuantityIssued.add(itemAssetIssuance.quantity ?? 0)"/></iterate>
-            <set field="hasIssuedQuantity" from="itemQuantityIssued &gt; 0.0"/>
+            <set field="hasIssuedQuantity" from="itemQuantityIssued.compare(0) &gt; 0"/>
 
             <!-- determine quantity to cancel -->
-            <set field="itemQuantity" from="orderItem.quantity != null ? orderItem.quantity : 1.0"/>
-            <set field="notIssuedQuantity" from="itemQuantity - itemQuantityIssued"/>
-            <if condition="notIssuedQuantity &lt; 0.0">
+            <set field="itemQuantity" from="toDecimal(orderItem.quantity ?? 1)"/>
+            <set field="notIssuedQuantity" from="itemQuantity.subtract(itemQuantityIssued)"/>
+            <if condition="notIssuedQuantity.compare(0) &lt; 0">
                 <log level="warn" message="In reject#OrderItem itemQuantityIssued ${itemQuantityIssued} is greater than itemQuantity ${itemQuantity}, using 0.0 for notIssuedQuantity instead of ${notIssuedQuantity}"/>
-                <set field="notIssuedQuantity" from="0.0"/>
+                <set field="notIssuedQuantity" from="toDecimal(0)"/>
             </if>
-            <if condition="cancelQuantity"><then>
-                <if condition="cancelQuantity &gt; notIssuedQuantity"><then>
+            <if condition="cancelQuantity != null &amp;&amp; !toDecimal(cancelQuantity).isZero()"><then>
+                <if condition="toDecimal(cancelQuantity).compare(notIssuedQuantity) &gt; 0"><then>
                     <set field="quantityCancelled" from="notIssuedQuantity"/>
                     <message type="warning">Cannot reject quantity ${cancelQuantity}, only ${notIssuedQuantity} not yet shipped for Order Item ${orderId}:${orderItemSeqId}</message>
                 </then><else>
@@ -1955,35 +1955,35 @@ General Order Placement and eCommerce Usage
                 <set field="quantityCancelled" from="notIssuedQuantity"/>
             </else></if>
 
-            <if condition="!quantityCancelled"><return/></if>
+            <if condition="quantityCancelled == null || toDecimal(quantityCancelled).isZero()"><return/></if>
 
             <!-- update the OrderItem -->
             <service-call name="update#mantle.order.OrderItem" in-map="{orderId:orderId,
                         orderItemSeqId:orderItem.orderItemSeqId,
-                        quantityCancelled:(quantityCancelled + (orderItem.quantityCancelled || 0)),
-                        quantity:(itemQuantity - quantityCancelled)}"/>
+                        quantityCancelled:toDecimal(quantityCancelled).add(orderItem.quantityCancelled ?? 0),
+                        quantity:itemQuantity.subtract(quantityCancelled)}"/>
 
             <!-- adjust child items (usually discount and tax) for new quantity -->
             <!-- NOTE this is simpler than other prorating because it is only done once, then the item is either completed if partially filled or cancelled otherwise -->
             <!-- NOTE skip discounts if isPromo=Y? those will be handled by order update triggers, if enabled; maybe best to calc here and disable promo calc (are disabled by default for orders Approved, etc) -->
-            <if condition="itemQuantity == quantityCancelled"><then>
-                <set field="childCancelRatio" from="1.0"/>
+            <if condition="itemQuantity.eq(quantityCancelled)"><then>
+                <set field="childCancelRatio" from="toDecimal(1)"/>
             </then><else>
-                <set field="childCancelRatio" from="(quantityCancelled == null ? null : toDecimal(quantityCancelled)).divide((itemQuantity == null ? null : toDecimal(itemQuantity)), 6, BigDecimal.ROUND_HALF_EVEN)"/>
+                <set field="childCancelRatio" from="toDecimal(quantityCancelled).divide(itemQuantity, 6, 'HALF_EVEN')"/>
             </else></if>
             <set field="childOrderItemList" from="orderItem['Child#mantle.order.OrderItem']"/>
             <order-map-list list="childOrderItemList"><order-by field-name="orderItemSeqId"/></order-map-list>
             <iterate list="childOrderItemList" entry="childOrderItem">
-                <if condition="childOrderItem.quantity == 0.0 || childOrderItem.unitAmount == 0.0"><continue/></if>
-                <if condition="childOrderItem.quantity == itemQuantity"><then>
+                <if condition="(childOrderItem.quantity != null &amp;&amp; toDecimal(childOrderItem.quantity).isZero()) || (childOrderItem.unitAmount != null &amp;&amp; toDecimal(childOrderItem.unitAmount).isZero())"><continue/></if>
+                <if condition="childOrderItem.quantity != null &amp;&amp; itemQuantity.eq(childOrderItem.quantity)"><then>
                     <!-- if child qty == parent qty no need to prorate, just adjust quantities to match -->
                     <service-call name="update#mantle.order.OrderItem" in-map="{orderId:orderId,
                         orderItemSeqId:childOrderItem.orderItemSeqId,
-                        quantityCancelled:(quantityCancelled + (childOrderItem.quantityCancelled || 0)),
-                        quantity:(itemQuantity - quantityCancelled)}"/>
+                        quantityCancelled:toDecimal(quantityCancelled).add(childOrderItem.quantityCancelled ?? 0),
+                        quantity:itemQuantity.subtract(quantityCancelled)}"/>
                 </then><else>
                     <!-- quantity doesn't match, leave quantity alone and prorate unitAmount -->
-                    <set field="newUnitAmount" from="childOrderItem.unitAmount - ((childCancelRatio == null ? null : toDecimal(childCancelRatio)) * (childOrderItem.unitAmount == null ? null : toDecimal(childOrderItem.unitAmount))).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+                    <set field="newUnitAmount" from="toDecimal(childOrderItem.unitAmount ?? 0).subtract(childCancelRatio.multiply(childOrderItem.unitAmount ?? 0).setScale(2, 'HALF_UP'))"/>
                     <service-call name="update#mantle.order.OrderItem" in-map="{orderId:orderId,
                         orderItemSeqId:childOrderItem.orderItemSeqId, unitAmount:newUnitAmount}"/>
                 </else></if>
@@ -1999,34 +1999,34 @@ General Order Placement and eCommerce Usage
             </else></if>
 
             <set field="shipmentItemQuantityReducedMap" from="{}"/>
-            <set field="shipQuantityRemaining" from="quantityCancelled"/>
+            <set field="shipQuantityRemaining" from="toDecimal(quantityCancelled)"/>
             <iterate list="itemShipmentItemSourceList" entry="itemShipmentItemSource">
-                <set field="shipQuantityToReduce" from="shipQuantityRemaining &gt; itemShipmentItemSource.quantityNotHandled ?
-                        itemShipmentItemSource.quantityNotHandled : shipQuantityRemaining"/>
-                <if condition="!shipQuantityToReduce"><continue/></if>
-                <script>addToBigDecimalInMap(itemShipmentItemSource.shipmentId, shipQuantityToReduce, shipmentItemQuantityReducedMap)</script>
+                <set field="shipQuantityToReduce" from="shipQuantityRemaining.compare(itemShipmentItemSource.quantityNotHandled ?? 0) &gt; 0 ?
+                        toDecimal(itemShipmentItemSource.quantityNotHandled ?? 0) : shipQuantityRemaining"/>
+                <if condition="shipQuantityToReduce.isZero()"><continue/></if>
+                <script>shipmentItemQuantityReducedMap[itemShipmentItemSource.shipmentId] = toDecimal(shipmentItemQuantityReducedMap[itemShipmentItemSource.shipmentId] ?? 0).add(shipQuantityToReduce)</script>
                 <!-- reduce quantity by quantityNotHandled -->
                 <service-call name="update#mantle.shipment.ShipmentItemSource"
                         in-map="{shipmentItemSourceId:itemShipmentItemSource.shipmentItemSourceId, quantityNotHandled:0,
-                                quantity:(itemShipmentItemSource.quantity - shipQuantityToReduce)}"/>
+                                quantity:toDecimal(itemShipmentItemSource.quantity ?? 0).subtract(shipQuantityToReduce)}"/>
 
-                <set field="shipQuantityRemaining" from="shipQuantityRemaining - shipQuantityToReduce"/>
+                <set field="shipQuantityRemaining" from="shipQuantityRemaining.subtract(shipQuantityToReduce)"/>
             </iterate>
 
             <iterate list="shipmentItemQuantityReducedMap" entry="shipmentItemQuantityReduced" key="shipmentId">
                 <entity-find-one entity-name="mantle.shipment.ShipmentItem" value-field="shipmentItem">
                     <field-map field-name="shipmentId"/><field-map field-name="productId" from="orderItem.productId"/></entity-find-one>
                 <if condition="shipmentItem != null">
-                    <set field="newSiQuantity" from="shipmentItem.quantity &gt; shipmentItemQuantityReduced ?
-                                shipmentItem.quantity - shipmentItemQuantityReduced : 0.0"/>
+                    <set field="newSiQuantity" from="toDecimal(shipmentItem.quantity ?? 0).compare(shipmentItemQuantityReduced) &gt; 0 ?
+                                toDecimal(shipmentItem.quantity).subtract(shipmentItemQuantityReduced) : toDecimal(0)"/>
                     <service-call name="update#mantle.shipment.ShipmentItem"
                             in-map="{shipmentId:shipmentId, productId:orderItem.productId, quantity:newSiQuantity}"/>
 
-                    <if condition="newSiQuantity == 0.0">
+                    <if condition="newSiQuantity.isZero()">
                         <!-- if no ShipmentItems have quantity greater than 0.0 cancel Shipment -->
                         <entity-find-count entity-name="mantle.shipment.ShipmentItem" count-field="nonZeroShipItemCount">
                             <econdition field-name="shipmentId"/>
-                            <econdition field-name="quantity" operator="greater" from="0.0"/>
+                            <econdition field-name="quantity" operator="greater" from="0"/>
                         </entity-find-count>
                         <if condition="nonZeroShipItemCount == 0">
                             <!-- cancel#Shipment won't do what it normally does reducing quantities, but just in case other cleanups needed -->
@@ -2036,18 +2036,18 @@ General Order Placement and eCommerce Usage
                 </if>
             </iterate>
 
-            <if condition="quantityCancelled == notIssuedQuantity"><then>
+            <if condition="toDecimal(quantityCancelled).eq(notIssuedQuantity)"><then>
                 <!-- if quantityCancelled == notIssuedQuantity remove all OrderItem Reservations -->
                 <service-call name="mantle.product.AssetServices.remove#OrderItemReservations"
                         in-map="{orderId:orderId, orderItemSeqId:orderItem.orderItemSeqId}"/>
 
-                <if condition="checkCancelPart &amp;&amp; quantityCancelled == notIssuedQuantity">
+                <if condition="checkCancelPart &amp;&amp; toDecimal(quantityCancelled).eq(notIssuedQuantity)">
                     <!-- first see if all OrderItem in part have quantity 0, if so cancel order -->
                     <entity-find-count entity-name="mantle.order.OrderItem" count-field="partItemQtyOverZeroCount">
                         <econdition field-name="orderId"/>
                         <econdition field-name="orderPartSeqId" from="orderItem.orderPartSeqId"/>
                         <econdition field-name="itemTypeEnumId" operator="in" from="productItemTypes"/>
-                        <econdition field-name="quantity" operator="greater" from="0.0"/>
+                        <econdition field-name="quantity" operator="greater" from="0"/>
                     </entity-find-count>
                     <if condition="partItemQtyOverZeroCount == 0"><then>
                         <service-call name="update#mantle.order.OrderPart" out-map="context"
@@ -2156,7 +2156,7 @@ General Order Placement and eCommerce Usage
             <entity-find entity-name="mantle.order.OrderItem" list="valueList">
                 <econdition field-name="orderId" from="baseOrderId"/><order-by field-name="orderItemSeqId"/></entity-find>
             <iterate list="valueList" entry="value">
-                <if condition="productItemsOnly &amp;&amp; (!value.productId || !productItemTypes.contains(value.itemTypeEnumId))"><continue/></if>
+                <if condition="productItemsOnly &amp;&amp; (!value.productId || !productItemTypes.includes(value.itemTypeEnumId))"><continue/></if>
                 <set field="value.orderId" from="orderId"/>
                 <set field="value.orderItemSeqId" from="null"/>
                 <entity-sequenced-id-secondary value-field="value"/>
