@@ -1769,7 +1769,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- for debugging
             <entity-find entity-name="mantle.product.issuance.AssetReservation" list="assetAllResList">
                 <econdition field-name="assetId"/></entity-find>
-            <log level="warn" message="Post Displace asset ${assetId} assetAllResList ${assetAllResList.collect({[assetReservationId:it.assetReservationId, assetId:it.assetId, orderId:it.orderId, quantity:it.quantity]})}"/>
+            <log level="warn" message="Post Displace asset ${assetId} assetAllResList ${Array.from(assetAllResList, (it) =&gt; '[assetReservationId:' + it.assetReservationId + ', assetId:' + it.assetId + ', orderId:' + it.orderId + ', quantity:' + it.quantity + ']').join(', ')}"/>
             -->
         </actions>
     </service>

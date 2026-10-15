@@ -189,9 +189,9 @@ along with this software (see the LICENSE.md file). If not, see
                     <if condition="!timePeriodTypeId"><set field="timePeriodTypeId" from="payGradeSalary.timePeriodTypeId"/></if>
                     <if condition="!currencyUomId"><set field="currencyUomId" from="payGradeSalary.currencyUomId"/></if>
                     <if condition="!amount"><set field="amount" from="payGradeSalary.amount"/></if>
-                    <if condition="payGradeSalary.minAmount &amp;&amp; amount &lt; payGradeSalary.minAmount">
+                    <if condition="payGradeSalary.minAmount != null &amp;&amp; !toDecimal(payGradeSalary.minAmount).isZero() &amp;&amp; amount != null &amp;&amp; toDecimal(amount).compare(payGradeSalary.minAmount) &lt; 0">
                         <message>Warning: salary amount ${amount} is less than pay grade minimum amount (${payGradeSalary.minAmount})</message></if>
-                    <if condition="payGradeSalary.maxAmount &amp;&amp; amount &gt; payGradeSalary.maxAmount">
+                    <if condition="payGradeSalary.maxAmount != null &amp;&amp; !toDecimal(payGradeSalary.maxAmount).isZero() &amp;&amp; amount != null &amp;&amp; toDecimal(amount).compare(payGradeSalary.maxAmount) &gt; 0">
                         <message>Warning: salary amount ${amount} is greater than pay grade maximum amount (${payGradeSalary.maxAmount})</message></if>
                 </if>
             </if>

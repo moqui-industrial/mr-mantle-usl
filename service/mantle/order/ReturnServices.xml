@@ -776,7 +776,7 @@ along with this software (see the LICENSE.md file). If not, see
                     </iterate>
 
                     <!- - save the amountRemaining so if there is any credit or refund it is only that amount - ->
-                    <script>remainingAmountBySeqId.put(returnItem.returnItemSeqId, amountRemaining)</script>
+                    <script>remainingAmountBySeqId[returnItem.returnItemSeqId] = amountRemaining</script>
                     -->
                 </if>
 
@@ -836,7 +836,7 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
             <!-- old approach, one direct FA transaction per item:
             <iterate list="creditItemList" entry="returnItem">
-                <set field="itemTotal" from="remainingAmountBySeqId.get(returnItem.returnItemSeqId)"/>
+                <set field="itemTotal" from="remainingAmountBySeqId[returnItem.returnItemSeqId]"/>
                 <if condition="itemTotal == 0.0"><continue/></if>
 
                 <set field="finAccountId" from="returnHeader.finAccountId"/>
@@ -1106,7 +1106,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <entity-find-one entity-name="mantle.order.return.ReturnItem" value-field="returnItem"/>
             <!-- TODO further restrict fields updatable based on statusId (itemChangeable), responseAmount, etc; like restrictions on EditReturnItems screen
-            <set field="itemChangeable" from="returnItem.statusId in ['ReturnCreated', 'ReturnRequested', 'ReturnApproved']"/>
+            <set field="itemChangeable" from="['ReturnCreated', 'ReturnRequested', 'ReturnApproved'].includes(returnItem.statusId)"/>
             -->
 
             <!-- if responseImmediate set also set on child items -->

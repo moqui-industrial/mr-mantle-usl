@@ -2003,7 +2003,7 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <set field="foundBadCc" from="false"/>
             <iterate list="shipmentPaymentList" entry="shipmentPayment">
-                <if condition="shipmentPayment.paymentInstrumentEnumId == 'PiCreditCard' &amp;&amp; !(shipmentPayment.statusId in ['PmntDelivered', 'PmntConfirmed'])">
+                <if condition="shipmentPayment.paymentInstrumentEnumId == 'PiCreditCard' &amp;&amp; !['PmntDelivered', 'PmntConfirmed'].includes(shipmentPayment.statusId)">
                     <entity-find-one entity-name="moqui.basic.StatusItem" value-field="pmntStatus">
                         <field-map field-name="statusId" from="shipmentPayment.statusId"/></entity-find-one>
                     <message type="warning">Credit Card Payment ${shipmentPayment.paymentId} not captured (${pmntStatus?.description}), not getting labels</message>

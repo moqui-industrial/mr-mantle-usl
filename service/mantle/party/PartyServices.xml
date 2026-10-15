@@ -449,7 +449,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="!userId &amp;&amp; !partyId"><return error="true" message="To update account must specify either userId or partyId"/></if>
             <if condition="!userId"><then>
                 <entity-find entity-name="moqui.security.UserAccount" list="userAccountList"><econdition field-name="partyId"/></entity-find>
-                <set field="userId" from="userAccountList?.first?.userId"/>
+                <set field="userId" from="userAccountList?.[0]?.userId"/>
             </then><else-if condition="!partyId">
                 <entity-find-one entity-name="moqui.security.UserAccount" value-field="userAccount"/>
                 <set field="partyId" from="userAccount.partyId"/>
@@ -600,7 +600,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="partyId"/>
                     <order-by field-name="userId"/>
                 </entity-find>
-                <set field="userId" from="userAccountList?.first?.userId"/>
+                <set field="userId" from="userAccountList?.[0]?.userId"/>
             </if>
 
             <if condition="userId"><service-call name="org.moqui.impl.UserServices.update#UserAccount" in-map="context"/></if>

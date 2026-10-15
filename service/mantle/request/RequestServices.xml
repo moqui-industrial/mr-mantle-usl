@@ -101,7 +101,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <entity-find-one entity-name="mantle.party.PartyDetail" value-field="party">
                         <field-map field-name="partyId" from="emailPcm.partyId"/></entity-find-one>
                     <if condition="party.disabled == 'Y' || party.partyTypeEnumId != 'PtyPerson'"><continue/></if>
-                    <if condition="!firstName.equalsIgnoreCase(party.firstName?.trim())"><continue/></if>
+                    <if condition="String(firstName).toLowerCase() !== String(party.firstName ?? '').trim().toLowerCase()"><continue/></if>
                     <set field="customerPartyId" from="emailPcm.partyId"/>
                     <set field="emailContactMechId" from="emailPcm.contactMechId"/>
                     <break/>

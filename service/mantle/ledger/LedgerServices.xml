@@ -424,7 +424,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="acctgTrans.isPosted == 'Y'"><return error="true" message="Cannot create entry for transaction [${acctgTransId}], already posted."/></if>
             <if condition="toDecimal(amount).compare(0) &lt; 0">
                 <!-- if negative abs the amount and reverse the debit/credit flag -->
-                <set field="amount" from="amount.abs()"/>
+                <set field="amount" from="toDecimal(amount).abs()"/>
                 <set field="debitCreditFlag" from="debitCreditFlag == 'D' ? 'C' : 'D'"/>
             </if>
             <service-call name="create#mantle.ledger.transaction.AcctgTransEntry" in-map="context" out-map="context"/>

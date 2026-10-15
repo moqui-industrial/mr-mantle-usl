@@ -34,7 +34,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <date-filter/><econdition field-name="facilityId"/>
                         <econdition field-name="contactMechPurposeId" value="PostalPrimary"/></entity-find>
                 </if>
-                <if condition="(fcmList?.length > 0)"><set field="postalContactMechId" from="fcmList.first().contactMechId"/></if>
+                <if condition="(fcmList?.length > 0)"><set field="postalContactMechId" from="fcmList[0].contactMechId"/></if>
             </if>
             <if condition="facilityId &amp;&amp; !telecomContactMechId">
                 <entity-find entity-name="mantle.facility.FacilityContactMech" list="fcmList">
@@ -45,7 +45,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <date-filter/><econdition field-name="facilityId"/>
                         <econdition field-name="contactMechPurposeId" value="PhonePrimary"/></entity-find>
                 </if>
-                <if condition="(fcmList?.length > 0)"><set field="telecomContactMechId" from="fcmList.first().contactMechId"/></if>
+                <if condition="(fcmList?.length > 0)"><set field="telecomContactMechId" from="fcmList[0].contactMechId"/></if>
             </if>
         </actions>
     </service>
@@ -69,7 +69,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <date-filter/><econdition field-name="facilityId"/>
                         <econdition field-name="contactMechPurposeId" value="PostalPrimary"/></entity-find>
                 </if>
-                <if condition="(fcmList?.length > 0)"><set field="postalContactMechId" from="fcmList.first().contactMechId"/></if>
+                <if condition="(fcmList?.length > 0)"><set field="postalContactMechId" from="fcmList[0].contactMechId"/></if>
             </if>
             <if condition="facilityId &amp;&amp; !telecomContactMechId">
                 <entity-find entity-name="mantle.facility.FacilityContactMech" list="fcmList">
@@ -80,7 +80,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <date-filter/><econdition field-name="facilityId"/>
                         <econdition field-name="contactMechPurposeId" value="PhonePrimary"/></entity-find>
                 </if>
-                <if condition="(fcmList?.length > 0)"><set field="telecomContactMechId" from="fcmList.first().contactMechId"/></if>
+                <if condition="(fcmList?.length > 0)"><set field="telecomContactMechId" from="fcmList[0].contactMechId"/></if>
             </if>
         </actions>
     </service>
