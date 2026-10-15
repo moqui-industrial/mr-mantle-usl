@@ -94,7 +94,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </entity-find>
             </if>
             <script>
-                if (typeof facList !== 'undefined' && facList) for (const fac of facList) resultList.push({facilityId:fac.facilityId, label:ec.resource.expand('FacilityNameTemplate', '', fac)})
+                if (typeof facList !== 'undefined' &amp;&amp; facList) for (const fac of facList) resultList.push({facilityId:fac.facilityId, label:ec.resource.expand('FacilityNameTemplate', '', fac)})
             </script>
         </actions>
     </service>
