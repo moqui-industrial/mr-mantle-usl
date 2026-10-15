@@ -873,8 +873,8 @@ General Order Placement and eCommerce Usage
                 <!-- Update shipment method and shipping address on the last route segment(s) of this order part -->
                 <iterate list="partShipmentIdSet" entry="shipmentId">
                     <entity-find-one entity-name="mantle.shipment.Shipment" value-field="shipment"/>
-                    <if condition="shipment.statusId in ['ShipRejected', 'ShipCancelled']"><continue/></if>
-                    <if condition="shipment.statusId in ['ShipPacked', 'ShipShipped', 'ShipDelivered']">
+                    <if condition="['ShipRejected', 'ShipCancelled'].includes(shipment.statusId)"><continue/></if>
+                    <if condition="['ShipPacked', 'ShipShipped', 'ShipDelivered'].includes(shipment.statusId)">
                         <message type="danger" public="true">Not updating shipping info, Shipment ${shipmentId} is ${shipment.status?.description}</message>
                         <set field="canUpdateShippingInfo" from="false"/>
                     </if>
@@ -1126,7 +1126,7 @@ General Order Placement and eCommerce Usage
 
                     <entity-find-one entity-name="mantle.product.Product" value-field="product" cache="true">
                         <field-map field-name="productId" from="orderItem.productId"/></entity-find-one>
-                    <if condition="!(product?.productTypeEnumId in ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'])">
+                    <if condition="!(['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'].includes(product?.productTypeEnumId))">
                         <continue/></if>
 
                     <!-- get current available inventory -->
@@ -1333,7 +1333,7 @@ General Order Placement and eCommerce Usage
                 <entity-find-one entity-name="mantle.product.Product" value-field="product" cache="true">
                     <field-map field-name="productId" from="orderItem.productId"/></entity-find-one>
 
-                <if condition="product.productTypeEnumId in ['PtDigital', 'PtDigitalAsset']">
+                <if condition="['PtDigital', 'PtDigitalAsset'].includes(product.productTypeEnumId)">
                     <if condition="orderSubscriptionList == null">
                         <entity-find entity-name="mantle.product.subscription.Subscription" list="orderSubscriptionList">
                             <econdition field-name="orderId"/><econdition field-name="orderItemSeqId"/></entity-find>
@@ -1351,7 +1351,7 @@ General Order Placement and eCommerce Usage
                         </if>
                     </iterate>
                 </if>
-                <if condition="isFulfilled &amp;&amp; product.productTypeEnumId in ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly']">
+                <if condition="isFulfilled &amp;&amp; ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'].includes(product.productTypeEnumId)">
                     <if condition="orderAssetIssuanceList == null"><then>
                         <entity-find entity-name="mantle.product.issuance.AssetIssuance" list="currentAssetIssuanceList">
                             <econdition field-name="orderId"/><econdition field-name="orderItemSeqId"/></entity-find>
@@ -1402,7 +1402,7 @@ General Order Placement and eCommerce Usage
                             <select-field field-name="workEffortId,statusId"/>
                         </entity-find>
                         <iterate list="workEffortList" entry="workEffort">
-                            <if condition="!(workEffort.statusId in ['WeComplete', 'WeClosed', 'WeCancelled'])">
+                            <if condition="!(['WeComplete', 'WeClosed', 'WeCancelled'].includes(workEffort.statusId))">
                                 <set field="isFulfilled" from="false"/>
                                 <break/>
                             </if>
@@ -1426,7 +1426,7 @@ General Order Placement and eCommerce Usage
         <actions>
             <entity-find-one entity-name="mantle.order.OrderPart" value-field="orderPart"/>
             <if condition="orderPart == null"><return error="true" message="Order Part ${orderId}:${orderPartSeqId} not found"/></if>
-            <if condition="!(orderPart?.statusId in ['OrderApproved', 'OrderSent'])"><return/></if>
+            <if condition="!(['OrderApproved', 'OrderSent'].includes(orderPart?.statusId))"><return/></if>
 
             <service-call name="mantle.order.OrderServices.isFulfilled#OrderPart" out-map="isFulfilledOut"
                     in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId}"/>
@@ -1479,7 +1479,7 @@ General Order Placement and eCommerce Usage
             <set field="anyCompleted" from="false"/>
             <set field="allCancelledOrCompleted" from="true"/>
             <iterate list="orderPartList" entry="curOrderPart">
-                <if condition="curOrderPart.statusId in ['OrderRejected', 'OrderCancelled']"><continue/></if>
+                <if condition="['OrderRejected', 'OrderCancelled'].includes(curOrderPart.statusId)"><continue/></if>
                 <if condition="curOrderPart.statusId == 'OrderCompleted'">
                     <set field="allCancelled" from="false"/>
                     <set field="anyCompleted" from="true"/>
@@ -1506,7 +1506,7 @@ General Order Placement and eCommerce Usage
             <set field="anyCompleted" from="false"/>
             <set field="allRejectedOrCompleted" from="true"/>
             <iterate list="orderPartList" entry="curOrderPart">
-                <if condition="curOrderPart.statusId in ['OrderRejected', 'OrderCancelled']"><continue/></if>
+                <if condition="['OrderRejected', 'OrderCancelled'].includes(curOrderPart.statusId)"><continue/></if>
                 <if condition="curOrderPart.statusId == 'OrderCompleted'">
                     <set field="allRejected" from="false"/>
                     <set field="anyCompleted" from="true"/>
@@ -1566,7 +1566,7 @@ General Order Placement and eCommerce Usage
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader" for-update="true"/>
             <if condition="orderHeader == null"><return error="true" message="Order ${orderId} not found"/></if>
             <if condition="orderHeader.statusId == 'OrderCompleted'"><return error="true" message="Cannot cancel order ${orderId}, already Completed"/></if>
-            <if condition="orderHeader.statusId in ['OrderRejected', 'OrderCancelled']">
+            <if condition="['OrderRejected', 'OrderCancelled'].includes(orderHeader.statusId)">
                 <return message="Order ${orderId} already Cancelled"/></if>
 
             <!-- cancel item quantities not issued, update or remove ShipmentItemSource records, remove asset reservations if any -->
@@ -1611,7 +1611,7 @@ General Order Placement and eCommerce Usage
             <if condition="orderPart == null"><return error="true" message="Order Part ${orderId}:${orderPartSeqId} not found"/></if>
             <if condition="orderPart.statusId == 'OrderCompleted'">
                 <return error="true" message="Cannot cancel Order Part ${orderId}:${orderPartSeqId}, already Completed"/></if>
-            <if condition="orderPart.statusId in ['OrderRejected', 'OrderCancelled']">
+            <if condition="['OrderRejected', 'OrderCancelled'].includes(orderPart.statusId)">
                 <return message="Order Part ${orderId}:${orderPartSeqId} already Cancelled"/></if>
 
             <set field="hasIssuedQuantity" from="false"/>
@@ -1821,7 +1821,7 @@ General Order Placement and eCommerce Usage
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader" for-update="true"/>
             <if condition="orderHeader == null"><return error="true" message="Order ${orderId} not found"/></if>
             <if condition="orderHeader.statusId == 'OrderCompleted'"><return error="true" message="Cannot reject order ${orderId}, already Completed"/></if>
-            <if condition="orderHeader.statusId in ['OrderRejected', 'OrderCancelled']">
+            <if condition="['OrderRejected', 'OrderCancelled'].includes(orderHeader.statusId)">
                 <return message="Order ${orderId} already Cancelled"/></if>
 
             <!-- cancel item quantities not issued, update or remove ShipmentItemSource records, remove asset reservations if any -->
@@ -1866,7 +1866,7 @@ General Order Placement and eCommerce Usage
             <if condition="orderPart == null"><return error="true" message="Order Part ${orderId}:${orderPartSeqId} not found"/></if>
             <if condition="orderPart.statusId == 'OrderRejected'">
                 <return error="true" message="Cannot reject Order Part ${orderId}:${orderPartSeqId}, already Completed"/></if>
-            <if condition="orderPart.statusId in ['OrderRejected', 'OrderCancelled']">
+            <if condition="['OrderRejected', 'OrderCancelled'].includes(orderPart.statusId)">
                 <return message="Order Part ${orderId}:${orderPartSeqId} already Rejected or Cancelled"/></if>
 
             <set field="hasIssuedQuantity" from="false"/>
@@ -2356,7 +2356,7 @@ General Order Placement and eCommerce Usage
                             in-map="{orderId:orderId, orderPartSeqId:originalValue.orderPartSeqId}"/>
                 </if>
 
-                <if condition="orderHeader.productStoreId &amp;&amp; isPromo != 'Y' &amp;&amp; !(itemTypeEnumId in ['ItemShipping', 'ItemSalesTax', 'ItemVatTax'])">
+                <if condition="orderHeader.productStoreId &amp;&amp; isPromo != 'Y' &amp;&amp; !(['ItemShipping', 'ItemSalesTax', 'ItemVatTax'].includes(itemTypeEnumId))">
                     <service-call name="mantle.order.OrderServices.handle#OrderMajorChange"
                             in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId}"/>
                     <if condition="originalValue &amp;&amp; orderPartSeqId != originalValue.orderPartSeqId">

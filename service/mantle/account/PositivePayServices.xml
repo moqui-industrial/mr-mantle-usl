@@ -205,7 +205,7 @@ along with this software (see the LICENSE.md file). If not, see
 
                 for (Map payment in paymentList) {
                     // Get amount String (10 chars, last 2 are cents)
-                    String amountStr = payment.getBigDecimal("amount").movePointRight(2).longValue() as String
+                    String amountStr = payment.getBigDecimal("amount").movePointRight(2).longValue()?.toString()
 
                     boolean isVoid = payment.statusId == 'PmntVoid'
                     boolean isCancel = payment.statusId == 'PmntCancelled'
@@ -236,7 +236,7 @@ along with this software (see the LICENSE.md file). If not, see
                 }
 
                 // Get amount String (10 chars, last 2 are cents)
-                String debitAmountTotalWithCancelsStr = debitAmountTotalWithCancels.movePointRight(2).longValue() as String
+                String debitAmountTotalWithCancelsStr = debitAmountTotalWithCancels.movePointRight(2).longValue()?.toString()
 
                 // Trailer
                 StringBuilder fileTrailer = new StringBuilder(80)
@@ -292,7 +292,7 @@ along with this software (see the LICENSE.md file). If not, see
 
                 for (Map payment in paymentList) {
                     // Get amount String (10 chars, last 2 are cents)
-                    String amountStr = payment.getBigDecimal("amount").movePointRight(2).longValue() as String
+                    String amountStr = payment.getBigDecimal("amount").movePointRight(2).longValue()?.toString()
 
                     // NOTE: for City Bank treat void and cancel as "Void"
                     boolean isVoid = payment.statusId == 'PmntVoid'
@@ -376,7 +376,7 @@ along with this software (see the LICENSE.md file). If not, see
 
                 for (Map payment in paymentList) {
                     // Get amount String (11 chars, last 2 are cents)
-                    String amountStr = payment.getBigDecimal("amount").movePointRight(2).longValue() as String
+                    String amountStr = payment.getBigDecimal("amount").movePointRight(2).longValue()?.toString()
 
                     boolean isVoid = payment.statusId == 'PmntVoid'
                     boolean isCancel = payment.statusId == 'PmntCancelled'
@@ -444,7 +444,7 @@ along with this software (see the LICENSE.md file). If not, see
                 }
 
                 // Get amount String (11 chars, last 2 are cents)
-                String debitAmountTotalStr = debitAmountTotal.movePointRight(2).longValue() as String
+                String debitAmountTotalStr = debitAmountTotal.movePointRight(2).longValue()?.toString()
 
                 // Account Batch Trailer
                 StringBuilder batchTrailer = new StringBuilder(240)
@@ -521,7 +521,7 @@ along with this software (see the LICENSE.md file). If not, see
                 String accountNumber =  bankAccount.accountNumber
                 if (accountNumber.length() > 13) accountNumber = accountNumber.substring(accountNumber.length() - 13, accountNumber.length())
                 // Get amount String (12 chars, last 2 are cents)
-                String debitAmountTotalWithCancelsStr = debitAmountTotalWithCancels.movePointRight(2).longValue() as String
+                String debitAmountTotalWithCancelsStr = debitAmountTotalWithCancels.movePointRight(2).longValue()?.toString()
 
                 List<StringBuilder> lines = []
 
@@ -547,7 +547,7 @@ along with this software (see the LICENSE.md file). If not, see
 
                 for (Map payment in paymentList) {
                     // Get amount String (10 chars, last 2 are cents)
-                    String amountStr = payment.getBigDecimal("amount").movePointRight(2).longValue() as String
+                    String amountStr = payment.getBigDecimal("amount").movePointRight(2).longValue()?.toString()
 
                     // NOTE: for Wachovia treat void and cancel as "Void"
                     boolean isVoid = payment.statusId == 'PmntVoid'
@@ -631,7 +631,7 @@ along with this software (see the LICENSE.md file). If not, see
 
                 for (Map payment in paymentList) {
                     // Get amount String (10 chars, last 2 are cents)
-                    String amountStr = payment.getBigDecimal("amount").movePointRight(2).longValue() as String
+                    String amountStr = payment.getBigDecimal("amount").movePointRight(2).longValue()?.toString()
 
                     boolean isVoid = payment.statusId == 'PmntVoid'
                     boolean isCancel = payment.statusId == 'PmntCancelled'
@@ -672,7 +672,7 @@ along with this software (see the LICENSE.md file). If not, see
                 }
 
                 // Get amount String (10 chars, last 2 are cents)
-                String debitAmountTotalWithCancelsStr = debitAmountTotalWithCancels.movePointRight(2).longValue() as String
+                String debitAmountTotalWithCancelsStr = debitAmountTotalWithCancels.movePointRight(2).longValue()?.toString()
 
                 // Trailer
                 StringBuilder fileTrailer = new StringBuilder(80)

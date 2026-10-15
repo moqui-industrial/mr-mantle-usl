@@ -30,7 +30,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <service-call name="create#mantle.party.PartyRole" in-map="{partyId:partyId, roleTypeId:'Account'}"/>
             <service-call name="create#mantle.party.PartyRole" in-map="{partyId:partyId, roleTypeId:'Customer'}"/>
-            <if condition="roleTypeId &amp;&amp; !(roleTypeId in ['Account', 'Customer'])">
+            <if condition="roleTypeId &amp;&amp; !(['Account', 'Customer'].includes(roleTypeId))">
                 <service-call name="create#mantle.party.PartyRole" in-map="{partyId:partyId, roleTypeId:roleTypeId}"/></if>
 
             <if condition="parentAccountPartyId">
@@ -59,7 +59,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <service-call name="create#mantle.party.PartyRole" in-map="{partyId:partyId, roleTypeId:'Contact'}"/>
             <service-call name="create#mantle.party.PartyRole" in-map="{partyId:partyId, roleTypeId:'Customer'}"/>
-            <if condition="roleTypeId &amp;&amp; !(roleTypeId in ['Contact', 'Customer'])">
+            <if condition="roleTypeId &amp;&amp; !(['Contact', 'Customer'].includes(roleTypeId))">
                 <service-call name="create#mantle.party.PartyRole" in-map="{partyId:partyId, roleTypeId:roleTypeId}"/></if>
 
             <if condition="accountPartyId">
@@ -82,7 +82,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <service-call name="store#mantle.party.PartyRole" in-map="{partyId:partyId, roleTypeId:'Contact'}"/>
             <service-call name="store#mantle.party.PartyRole" in-map="{partyId:partyId, roleTypeId:'Customer'}"/>
-            <if condition="roleTypeId &amp;&amp; !(roleTypeId in ['Contact', 'Customer'])">
+            <if condition="roleTypeId &amp;&amp; !(['Contact', 'Customer'].includes(roleTypeId))">
                 <service-call name="store#mantle.party.PartyRole" in-map="{partyId:partyId, roleTypeId:roleTypeId}"/></if>
 
             <service-call name="create#mantle.party.PartyRelationship" in-map="{fromDate:ec.user.nowTimestamp,

@@ -188,7 +188,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <script>federalTaxAuthorityIdList.add(taxAuthorityId)</script>
                 </then><else-if condition="wageAndTaxInfo.taxAuthority.taxAuthorityTypeEnumId == 'TatState'">
                     <script>stateTaxAuthorityIdList.add(taxAuthorityId)</script>
-                </else-if><else-if condition="wageAndTaxInfo.taxAuthority.taxAuthorityTypeEnumId in ['TatCounty', 'TatCity']">
+                </else-if><else-if condition="['TatCounty', 'TatCity'].includes(wageAndTaxInfo.taxAuthority.taxAuthorityTypeEnumId)">
                     <script>localTaxAuthorityIdList.add(taxAuthorityId)</script>
                 </else-if></if>
             </iterate>

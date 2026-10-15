@@ -558,7 +558,7 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
             <iterate entry="timePeriod" list="timePeriodList">
                 <!-- make sure the TimePeriod isn't closed -->
-                <if condition="timePeriod.isClosed == 'Y' &amp;&amp; !(acctgTrans.acctgTransTypeEnumId in ['AttPeriodClosing', 'AttNetIncomeClosing'])">
+                <if condition="timePeriod.isClosed == 'Y' &amp;&amp; !(['AttPeriodClosing', 'AttNetIncomeClosing'].includes(acctgTrans.acctgTransTypeEnumId))">
                     <if condition="forcePost"><then>
                         <!-- check permission, danger messages and error journal if no permission -->
                         <if condition="!ec.user.hasPermission('GL_POST_CLOSED')">
@@ -650,7 +650,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <message error="true">Not un-posting transaction ${acctgTransId}, could not find time period for organization ${acctgTrans.organizationPartyId} at ${ec.l10n.format(acctgTrans.transactionDate, null)}.</message></if>
             <iterate list="timePeriodList" entry="timePeriod">
                 <!-- make sure the TimePeriod isn't closed -->
-                <if condition="timePeriod.isClosed == 'Y' &amp;&amp; !(acctgTrans.acctgTransTypeEnumId in ['AttPeriodClosing', 'AttNetIncomeClosing'])">
+                <if condition="timePeriod.isClosed == 'Y' &amp;&amp; !(['AttPeriodClosing', 'AttNetIncomeClosing'].includes(acctgTrans.acctgTransTypeEnumId))">
                     <message error="true">Not un-posting transaction ${acctgTransId}, time period closed ${ec.resource.expand('TimePeriodNameTemplate','',timePeriod)}.</message></if>
             </iterate>
 

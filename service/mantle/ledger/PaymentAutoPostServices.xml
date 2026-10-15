@@ -746,7 +746,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment" for-update="true"/>
             <if condition="payment == null"><return error="true" message="Could not find Payment with ID ${paymentId}"/></if>
-            <if condition="!(payment.statusId in ['PmntDelivered', 'PmntConfirmed'])">
+            <if condition="!(['PmntDelivered', 'PmntConfirmed'].includes(payment.statusId))">
                 <return error="true" message="Payment ${paymentId} cannot be posted in status ${payment.statusId}"/></if>
 
             <entity-find entity-name="mantle.account.payment.PaymentApplication" list="paymentApplicationList" for-update="true">

@@ -348,7 +348,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <!-- convert to minutes because Java Calendar class take an integer and we may have something like 2.5 hours -->
                     <service-call name="org.moqui.impl.BasicServices.convert#Uom" out-map="convertDurOut"
                             in-map="{uomId:(workEffort.timeUomId || 'TF_hr'), toUomId:'TF_min', amount:duration}"/>
-                    <set field="durationMinutes" from="(convertDurOut.convertedAmount || 60) as int"/>
+                    <set field="durationMinutes" from="((convertDurOut.convertedAmount || 60) == null ? null : Math.trunc(toDecimal((convertDurOut.convertedAmount || 60)).toNumber()))"/>
                     <script>
                         Calendar endCal = ec.user.getCalendarSafe()
                         endCal.setTimeInMillis(startDate.time)

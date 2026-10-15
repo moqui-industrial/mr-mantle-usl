@@ -705,7 +705,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="finAccountTransId" from="payment.finAccountTransId"/>
                 <return/>
             </if>
-            <if condition="payment.statusId in ['PmntProposed', 'PmntPromised', 'PmntCancelled', 'PmntVoid', 'PmntDeclined']">
+            <if condition="['PmntProposed', 'PmntPromised', 'PmntCancelled', 'PmntVoid', 'PmntDeclined'].includes(payment.statusId)">
                 <return message="Not creating Financial Account transaction for Payment ${paymentId} in status ${payment.status?.description}, must be Authorized or Delivered"/></if>
 
             <entity-find-one entity-name="mantle.account.financial.FinancialAccount" value-field="financialAccount"/>

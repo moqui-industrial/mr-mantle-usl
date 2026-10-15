@@ -139,7 +139,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="maxApplicableAmount" from="unappliedTotal"/>
                 <if condition="maxApplicableAmount > invTot.unpaidTotal"><set field="maxApplicableAmount" from="invTot.unpaidTotal"/></if>
                 <script>unpaidInvoiceInfoList.add(invTot + [invoice:unpaidInvoice, maxApplicableAmount:maxApplicableAmount,
-                        allowApply:(maxApplicableAmount &amp;&amp; unpaidInvoice.statusId in ['InvoiceFinalized','InvoiceSent','InvoiceAcked','InvoiceApproved'])])</script>
+                        allowApply:(maxApplicableAmount &amp;&amp; ['InvoiceFinalized','InvoiceSent','InvoiceAcked','InvoiceApproved'].includes(unpaidInvoice.statusId))])</script>
             </iterate>
 
             <!-- get payments with reverse from/to parties that might be applied to this payment -->
@@ -158,7 +158,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="maxApplicableAmount" from="unappliedTotal"/>
                 <if condition="maxApplicableAmount > pmtTotal.unappliedTotal"><set field="maxApplicableAmount" from="pmtTotal.unappliedTotal"/></if>
                 <script>unappliedPaymentInfoList.add(pmtTotal + [payment:unappliedPayment, maxApplicableAmount:maxApplicableAmount,
-                    allowApply:(maxApplicableAmount &amp;&amp; unappliedPayment.statusId in ['PmntDelivered','PmntConfirmed'])])</script>
+                    allowApply:(maxApplicableAmount &amp;&amp; ['PmntDelivered','PmntConfirmed'].includes(unappliedPayment.statusId))])</script>
             </iterate>
 
             <entity-find entity-name="mantle.account.payment.Payment" list="refundPaymentList">
@@ -662,7 +662,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <entity-find-one entity-name="mantle.account.payment.Payment" value-field="refundForPayment" for-update="true">
                 <field-map field-name="paymentId" from="refundForPaymentId"/></entity-find-one>
-            <if condition="!(refundForPayment.statusId in ['PmntDelivered', 'PmntConfirmed'])">
+            <if condition="!(['PmntDelivered', 'PmntConfirmed'].includes(refundForPayment.statusId))">
                 <return message="Payment must be in Delivered or Confirmed status"/></if>
 
             <service-call name="mantle.account.PaymentServices.get#PaymentTotals" in-map="{paymentId:refundForPaymentId}" out-map="refundForTotalOut"/>
@@ -671,7 +671,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="!amount"><return message="Amount is zero, not creating refund payment"/></if>
 
             <!-- automatic field settings -->
-            <if condition="statusId in ['PmntDelivered', 'PmntConfirmed'] &amp;&amp; effectiveDate == null">
+            <if condition="['PmntDelivered', 'PmntConfirmed'].includes(statusId) &amp;&amp; effectiveDate == null">
                 <set field="effectiveDate" from="ec.user.nowTimestamp"/></if>
             <set field="fromPartyId" from="refundForPayment.toPartyId"/>
             <set field="toPartyId" from="refundForPayment.fromPartyId"/>
@@ -683,7 +683,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.account.PaymentServices.create#Payment" in-map="context" out-map="createOut"/>
             <set field="paymentId" from="createOut.paymentId"/>
 
-            <if condition="statusId in ['PmntDelivered', 'PmntConfirmed']">
+            <if condition="['PmntDelivered', 'PmntConfirmed'].includes(statusId)">
                 <!-- only auto apply up to unappliedTotal on refundForPayment -->
                 <set field="amountToApply" from="amount"/>
                 <if condition="amountToApply &gt; refundForTotalOut.unappliedTotal">
@@ -711,7 +711,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <entity-find-one entity-name="mantle.account.payment.Payment" value-field="refundForPayment" for-update="true">
                 <field-map field-name="paymentId" from="refundForPaymentId"/></entity-find-one>
-            <if condition="!(refundForPayment.statusId in ['PmntDelivered', 'PmntConfirmed'])">
+            <if condition="!(['PmntDelivered', 'PmntConfirmed'].includes(refundForPayment.statusId))">
                 <return message="Original (refund for) Payment ${refundForPaymentId} must be in Delivered or Confirmed status, has status ${refundForPayment.status?.description}"/></if>
 
             <if condition="refundForPayment.fromPartyId != payment.toPartyId">
@@ -848,10 +848,10 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="payment.toPartyId != invoice.fromPartyId">
                 <return type="danger" message="Cannot apply payment ${paymentId} to invoice ${invoiceId}, payment is to a different party (${payment.toPartyId}) than invoice is from (${invoice.fromPartyId})"/></if>
 
-            <if condition="!(payment.statusId in ['PmntDelivered', 'PmntConfirmed'])">
+            <if condition="!(['PmntDelivered', 'PmntConfirmed'].includes(payment.statusId))">
                 <return type="warning" message="Not applying payment ${paymentId} in status ${payment.statusId} to invoice ${invoiceId}, payment must be Delivered or Confirmed to be applied"/>
             </if>
-            <if condition="!(invoice.statusId in ['InvoiceFinalized', 'InvoiceSent', 'InvoiceAcked', 'InvoicePmtRecvd', 'InvoiceApproved', 'InvoicePmtSent'])">
+            <if condition="!(['InvoiceFinalized', 'InvoiceSent', 'InvoiceAcked', 'InvoicePmtRecvd', 'InvoiceApproved', 'InvoicePmtSent'].includes(invoice.statusId))">
                 <log level="warn" message="Not applying payment ${paymentId} to invoice ${invoiceId} in status ${invoice.statusId} stack: ${ec.artifactExecution.getStackNameString()}"/>
                 <return message="Not applying payment ${paymentId} to invoice ${invoiceId} in status ${invoice.status?.description}, invoice must be Finalized, Sent, Acknowledged, or Payment Received for Receivable OR Approved or Payment Sent for Payable"/>
             </if>
@@ -872,7 +872,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.account.InvoiceServices.get#InvoiceTotal" in-map="{invoiceId:invoiceId}" out-map="context"/>
             <entity-find-one entity-name="mantle.account.invoice.Invoice" value-field="invoice"/>
             <if condition="unpaidTotal == 0.0"><then>
-                <if condition="invoice.statusId in ['InvoiceFinalized', 'InvoiceSent', 'InvoiceAcked']"><then>
+                <if condition="['InvoiceFinalized', 'InvoiceSent', 'InvoiceAcked'].includes(invoice.statusId)"><then>
                     <service-call name="update#mantle.account.invoice.Invoice" in-map="{invoiceId:invoiceId, statusId:'InvoicePmtRecvd'}"/>
                 </then><else-if condition="invoice.statusId == 'InvoiceApproved'">
                     <service-call name="update#mantle.account.invoice.Invoice" in-map="{invoiceId:invoiceId, statusId:'InvoicePmtSent'}"/>
@@ -886,7 +886,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters><parameter name="paymentId" required="true"/></in-parameters>
         <actions>
             <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment"/>
-            <if condition="payment.forInvoiceId &amp;&amp; payment.statusId in ['PmntDelivered', 'PmntConfirmed'] &amp;&amp;
+            <if condition="payment.forInvoiceId &amp;&amp; ['PmntDelivered', 'PmntConfirmed'].includes(payment.statusId) &amp;&amp;
                     (payment.unappliedTotal == null || payment.unappliedTotal > 0.0)">
                 <service-call name="mantle.account.PaymentServices.apply#InvoicePayment" out-map="context"
                         in-map="{paymentId:paymentId, invoiceId:payment.forInvoiceId}"/>
@@ -901,7 +901,7 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find entity-name="mantle.account.payment.Payment" list="paymentList">
                 <econdition field-name="forInvoiceId" from="invoiceId"/></entity-find>
             <iterate list="paymentList" entry="payment">
-                <if condition="payment.statusId in ['PmntDelivered', 'PmntConfirmed'] &amp;&amp; (payment.unappliedTotal == null || payment.unappliedTotal > 0.0)">
+                <if condition="['PmntDelivered', 'PmntConfirmed'].includes(payment.statusId) &amp;&amp; (payment.unappliedTotal == null || payment.unappliedTotal > 0.0)">
                     <!-- check for matching from/to parties, generate warning message and don't try to apply -->
                     <if condition="payment.fromPartyId != invoice.toPartyId">
                         <message type="warning">Cannot apply payment ${paymentId} to invoice ${invoiceId}, payment is from a different party (${payment.fromPartyId}) than invoice is to (${invoice.toPartyId})</message>
@@ -948,7 +948,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="amountToApply" from="unappliedTotal > remainingAmount ? remainingAmount : unappliedTotal"/>
 
                     <!-- capture Payment if promised or authorized -->
-                    <if condition="payment.statusId in ['PmntPromised', 'PmntAuthorized']">
+                    <if condition="['PmntPromised', 'PmntAuthorized'].includes(payment.statusId)">
                         <!-- TODO: currently captures full payment amount, could capture only amountToApply but leaves Payment
                             considered fully captured when it is not yet; may consider splitting the Payment to create another
                             promised payment for order with remaining balance if this becomes an issue -->
@@ -956,7 +956,7 @@ along with this software (see the LICENSE.md file). If not, see
                                 in-map="{paymentId:payment.paymentId, amount:payment.amount}"/>
                     </if>
 
-                    <if condition="payment.statusId in ['PmntDelivered', 'PmntConfirmed']">
+                    <if condition="['PmntDelivered', 'PmntConfirmed'].includes(payment.statusId)">
                         <service-call name="mantle.account.PaymentServices.apply#InvoicePayment" out-map="applyOut"
                                 in-map="{paymentId:payment.paymentId, invoiceId:invoiceId, amount:amountToApply}"/>
                         <script>paymentApplicationIdByPaymentId.put(payment.paymentId, applyOut.paymentApplicationId)</script>
@@ -1008,10 +1008,10 @@ along with this software (see the LICENSE.md file). If not, see
 
             <check-errors/>
 
-            <if condition="!(payment.statusId in ['PmntDelivered', 'PmntConfirmed'])">
+            <if condition="!(['PmntDelivered', 'PmntConfirmed'].includes(payment.statusId))">
                 <return message="Not applying payment ${paymentId} in status ${payment.statusId} to payment ${toPaymentId}, from payment must be in Delivered or Confirmed status"/>
             </if>
-            <if condition="!(toPayment.statusId in ['PmntDelivered', 'PmntConfirmed'])">
+            <if condition="!(['PmntDelivered', 'PmntConfirmed'].includes(toPayment.statusId))">
                 <return message="Not applying payment ${toPaymentId} in status ${toPayment.statusId} from payment ${paymentId}, to payment must be in Delivered or Confirmed status"/>
             </if>
 
@@ -1067,11 +1067,11 @@ along with this software (see the LICENSE.md file). If not, see
 
             <check-errors/>
 
-            <if condition="!(invoice.statusId in ['InvoiceFinalized', 'InvoiceSent', 'InvoiceAcked', 'InvoicePmtRecvd', 'InvoiceApproved', 'InvoicePmtSent', 'InvoiceWriteOff'])">
+            <if condition="!(['InvoiceFinalized', 'InvoiceSent', 'InvoiceAcked', 'InvoicePmtRecvd', 'InvoiceApproved', 'InvoicePmtSent', 'InvoiceWriteOff'].includes(invoice.statusId))">
                 <log level="warn" message="Not applying invoice ${invoiceId} in status ${invoice.statusId} to invoice ${toInvoiceId} stack: ${ec.artifactExecution.getStackNameString()}"/>
                 <return message="Not applying invoice ${invoiceId} in status ${invoice.statusId} to invoice ${toInvoiceId}, from invoice must be Finalized, Sent, Acknowledged, or Payment Received for Receivable OR Approved or Payment Sent for Payable"/>
             </if>
-            <if condition="!(toInvoice.statusId in ['InvoiceFinalized', 'InvoiceSent', 'InvoiceAcked', 'InvoicePmtRecvd', 'InvoiceApproved', 'InvoicePmtSent', 'InvoiceWriteOff'])">
+            <if condition="!(['InvoiceFinalized', 'InvoiceSent', 'InvoiceAcked', 'InvoicePmtRecvd', 'InvoiceApproved', 'InvoicePmtSent', 'InvoiceWriteOff'].includes(toInvoice.statusId))">
                 <log level="warn" message="Not applying invoice ${invoiceId} to invoice ${toInvoiceId} in status ${toInvoice.statusId} stack: ${ec.artifactExecution.getStackNameString()}"/>
                 <return message="Not applying invoice ${invoiceId} to invoice ${toInvoiceId} in status ${toInvoice.statusId}, to invoice must be Finalized, Sent, Acknowledged, or Payment Received for Receivable OR Approved or Payment Sent for Payable"/>
             </if>
@@ -1093,7 +1093,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.account.InvoiceServices.get#InvoiceTotal" in-map="{invoiceId:invoiceId}" out-map="afterOut"/>
             <entity-find-one entity-name="mantle.account.invoice.Invoice" value-field="invoice"/>
             <if condition="afterOut.unpaidTotal == 0.0"><then>
-                <if condition="invoice.statusId in ['InvoiceFinalized', 'InvoiceSent', 'InvoiceAcked']"><then>
+                <if condition="['InvoiceFinalized', 'InvoiceSent', 'InvoiceAcked'].includes(invoice.statusId)"><then>
                     <service-call name="update#mantle.account.invoice.Invoice" in-map="{invoiceId:invoiceId, statusId:'InvoicePmtRecvd'}"/>
                 </then><else-if condition="invoice.statusId == 'InvoiceApproved'">
                     <service-call name="update#mantle.account.invoice.Invoice" in-map="{invoiceId:invoiceId, statusId:'InvoicePmtSent'}"/>
@@ -1107,7 +1107,7 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.account.invoice.Invoice" value-field="toInvoice">
                 <field-map field-name="invoiceId" from="toInvoiceId"/></entity-find-one>
             <if condition="toAfterOut.unpaidTotal == 0.0"><then>
-                <if condition="toInvoice.statusId in ['InvoiceFinalized', 'InvoiceSent', 'InvoiceAcked']"><then>
+                <if condition="['InvoiceFinalized', 'InvoiceSent', 'InvoiceAcked'].includes(toInvoice.statusId)"><then>
                     <service-call name="update#mantle.account.invoice.Invoice" in-map="{invoiceId:toInvoiceId, statusId:'InvoicePmtRecvd'}"/>
                 </then><else-if condition="toInvoice.statusId == 'InvoiceApproved'">
                     <service-call name="update#mantle.account.invoice.Invoice" in-map="{invoiceId:toInvoiceId, statusId:'InvoicePmtSent'}"/>
@@ -1123,7 +1123,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters><parameter name="paymentId" required="true"/></in-parameters>
         <actions>
             <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment"/>
-            <if condition="!(payment.statusId in ['PmntProposed', 'PmntPromised', 'PmntAuthorized', 'PmntDelivered'])">
+            <if condition="!(['PmntProposed', 'PmntPromised', 'PmntAuthorized', 'PmntDelivered'].includes(payment.statusId))">
                 <return error="true" message="Payment ${paymentId} must be in Proposed or Promised status to be cancelled, or Authorized or Delivered status to be voided"/></if>
 
             <!-- get related invoices -->
@@ -1135,7 +1135,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="paymentApplication.invoiceId"><script>invoiceIdSet.add(paymentApplication.invoiceId)</script></if></iterate>
 
             <!-- most of the work is done through SECA rules, so here we just have to set statuses -->
-            <set field="targetStatusId" from="payment.statusId in ['PmntProposed', 'PmntPromised'] ? 'PmntCancelled' : 'PmntVoid'"/>
+            <set field="targetStatusId" from="['PmntProposed', 'PmntPromised'].includes(payment.statusId) ? 'PmntCancelled' : 'PmntVoid'"/>
             <service-call name="update#mantle.account.payment.Payment" in-map="{paymentId:paymentId, statusId:targetStatusId}"/>
             <iterate list="invoiceIdSet" entry="invoiceId">
                 <service-call name="update#mantle.account.invoice.Invoice" in-map="{invoiceId:invoiceId, statusId:'InvoiceCancelled'}"/></iterate>
@@ -1149,7 +1149,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment" for-update="true"/>
             <!-- NOTE: including PmntPromised, PmntAuthorized is funny here, but this is used when going from Delivered back to Promised/Authorized -->
-            <if condition="!(payment.statusId in ['PmntCancelled', 'PmntVoid', 'PmntPromised', 'PmntAuthorized'])">
+            <if condition="!(['PmntCancelled', 'PmntVoid', 'PmntPromised', 'PmntAuthorized'].includes(payment.statusId))">
                 <service-call name="update#mantle.account.payment.Payment" in-map="{paymentId:paymentId, statusId:'PmntVoid'}"/></if>
 
             <entity-find entity-name="mantle.account.payment.PaymentApplication" list="paymentApplicationList">
@@ -1303,8 +1303,8 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find entity-name="mantle.account.payment.Payment" list="paymentList">
                 <econdition field-name="orderId"/></entity-find>
             <iterate list="paymentList" entry="payment">
-                <if condition="payment.statusId in ['PmntCancelled', 'PmntVoid']"><continue/></if>
-                <if condition="payment.statusId in ['PmntAuthorized', 'PmntDelivered', 'PmntConfirmed']">
+                <if condition="['PmntCancelled', 'PmntVoid'].includes(payment.statusId)"><continue/></if>
+                <if condition="['PmntAuthorized', 'PmntDelivered', 'PmntConfirmed'].includes(payment.statusId)">
                     <set field="totalAuthorized" from="totalAuthorized + (payment.amount || 0.0)"/>
                     <continue/>
                 </if>
@@ -1319,7 +1319,7 @@ along with this software (see the LICENSE.md file). If not, see
 
                 <entity-find-one entity-name="mantle.account.payment.Payment" value-field="updatedPayment">
                     <field-map field-name="paymentId" from="payment.paymentId"/></entity-find-one>
-                <if condition="!authOut.paymentGatewayResponse &amp;&amp; !(updatedPayment.statusId in ['PmntAuthorized', 'PmntDelivered', 'PmntConfirmed'])">
+                <if condition="!authOut.paymentGatewayResponse &amp;&amp; !(['PmntAuthorized', 'PmntDelivered', 'PmntConfirmed'].includes(updatedPayment.statusId))">
                     <set field="authFailed" from="true"/>
                     <log level="warn" message="Authorize Payment [${payment.paymentId}] failed with no PaymentGatewayResponse and status after is ${updatedPayment.statusId}"/>
                     <service-call name="mantle.account.PaymentServices.get#PaymentDescription"
@@ -1409,7 +1409,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <log message="Not authorizing Payment ${paymentId}, already delivered (captured)"/>
                 <return/>
             </if>
-            <if condition="payment.statusId in ['PmntCancelled', 'PmntVoid']">
+            <if condition="['PmntCancelled', 'PmntVoid'].includes(payment.statusId)">
                 <return message="Not authorizing cancelled or void Payment ${paymentId} [${payment.statusId}]"/></if>
 
             <if condition="payment.amount == null || payment.amount == 0.0">
@@ -1794,7 +1794,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-one entity-name="mantle.account.payment.Payment" value-field="refundPayment" for-update="true">
                     <field-map field-name="paymentId" from="refundPaymentId"/></entity-find-one>
 
-                <if condition="!(refundPayment.statusId in ['PmntPromised', 'PmntAuthorized'])">
+                <if condition="!(['PmntPromised', 'PmntAuthorized'].includes(refundPayment.statusId))">
                     <return error="true" message="Cannot process refund payment ${paymentId} with status ${refundPayment.status?.description}, must be Promised or Authorized"/></if>
                 <if condition="refundPayment.fromPartyId != payment.toPartyId">
                     <return error="true" message="From Party ${refundPayment.fromPartyId} on refund payment ${refundPaymentId} does not match To Party ${payment.toPartyId} on original payment ${paymentId}"/></if>
@@ -1804,7 +1804,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- if the Payment.statusId is already PmntDelivered don't try again -->
             <!-- NOTE: also handle other statuses, ie anything other than PmntAuthorized? might be too inflexible... -->
-            <if condition="!(payment.statusId in ['PmntDelivered', 'PmntConfirmed'])">
+            <if condition="!(['PmntDelivered', 'PmntConfirmed'].includes(payment.statusId))">
                 <if condition="payment.statusId == 'PmntAuthorized'">
                     <then><return error="true" message="Cannot refund payment ${paymentId}, because it is not delivered (captured). The payment is authorized, so try a release (void) instead of a refund."/></then>
                     <else><return error="true" message="Cannot refund payment ${paymentId}, must be delivered (captured) or confirmed paid"/></else>

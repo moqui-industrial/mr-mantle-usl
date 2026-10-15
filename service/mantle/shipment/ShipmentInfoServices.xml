@@ -93,8 +93,8 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="isIncoming" from="shipmentTypeEnum?.enumId == 'ShpTpIncoming' || shipmentTypeEnum?.parentEnumId == 'ShpTpIncoming'"/>
             <set field="isOutgoing" from="shipmentTypeEnum?.enumId == 'ShpTpOutgoing' || shipmentTypeEnum?.parentEnumId == 'ShpTpOutgoing'"/>
             <set field="isTransfer" from="shipmentTypeEnum?.enumId == 'ShpTpTransfer' || shipmentTypeEnum?.parentEnumId == 'ShpTpTransfer'"/>
-            <set field="allowUpdate" from="shipment.statusId in ['ShipInput', 'ShipScheduled', 'ShipPicked'] ||
-                    (isIncoming &amp;&amp; shipment.statusId in ['ShipShipped', 'ShipPacked'])"/>
+            <set field="allowUpdate" from="['ShipInput', 'ShipScheduled', 'ShipPicked'].includes(shipment.statusId) ||
+                    (isIncoming &amp;&amp; ['ShipShipped', 'ShipPacked'].includes(shipment.statusId))"/>
 
             <entity-find entity-name="moqui.entity.EntityAuditLog" list="statusHistoryList">
                 <econdition field-name="changedEntityName" value="mantle.shipment.Shipment"/>
@@ -202,7 +202,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-one entity-name="mantle.party.contact.ContactMech" value-field="destContactMech">
                     <field-map field-name="contactMechId" from="lastRouteSegment.destPostalContactMechId"/></entity-find-one>
             </if>
-            <set field="destContactMechValid" from="destContactMech != null &amp;&amp; destContactMech.trustLevelEnumId in ['CmtlValid', 'CmtlVerified']"/>
+            <set field="destContactMechValid" from="destContactMech != null &amp;&amp; ['CmtlValid', 'CmtlVerified'].includes(destContactMech.trustLevelEnumId)"/>
 
             <if condition="firstRouteSegment.carrierPartyId &amp;&amp; firstRouteSegment.carrierPartyId != '_NA_'">
                 <entity-find-one entity-name="mantle.party.PartyDetail" value-field="curCarrierDetail" cache="true">

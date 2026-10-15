@@ -260,7 +260,7 @@ along with this software (see the LICENSE.md file). If not, see
                         ec.message.addMessage(ec.resource.expand('Amount ${payment.amount?.toPlainString()} must be specified an have no more than 2 decimal digits on payment ${payment.paymentId}',''), "danger")
                         continue
                     }
-                    String amountStr = payment.getBigDecimal("amount").movePointRight(2).longValueExact() as String
+                    String amountStr = payment.getBigDecimal("amount").movePointRight(2).longValueExact()?.toString()
                     if (amountStr.length() > 10) {
                         ec.message.addMessage(ec.resource.expand('Amount ${payment.amount.toPlainString()} is too big for NACHA transactions on payment ${payment.paymentId}',''), "danger")
                         continue
@@ -342,7 +342,7 @@ along with this software (see the LICENSE.md file). If not, see
                         boolean isNetDebit = netCredit < 0.0
                         BigDecimal netAmount = isNetDebit ? netCredit.negate() : netCredit
 
-                        String amountStr = netAmount.movePointRight(2).longValueExact() as String
+                        String amountStr = netAmount.movePointRight(2).longValueExact()?.toString()
                         if (isNetDebit) creditAmountTotal += netAmount else debitAmountTotal += netAmount
 
                         // get Individual/Company Name
@@ -386,8 +386,8 @@ along with this software (see the LICENSE.md file). If not, see
                 if (routingNumberSumStr.length() > 10)
                     routingNumberSumStr = routingNumberSumStr.substring(routingNumberSumStr.length() - 10, routingNumberSumStr.length())
 
-                String debitAmountTotalStr = debitAmountTotal.movePointRight(2).longValueExact() as String
-                String creditAmountTotalStr = creditAmountTotal.movePointRight(2).longValueExact() as String
+                String debitAmountTotalStr = debitAmountTotal.movePointRight(2).longValueExact()?.toString()
+                String creditAmountTotalStr = creditAmountTotal.movePointRight(2).longValueExact()?.toString()
 
                 // Batch Control (8)
                 StringBuilder batchControl = new StringBuilder()

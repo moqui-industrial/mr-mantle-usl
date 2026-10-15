@@ -996,7 +996,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- handle TimeEntry for clock in and clock out -->
             <if condition="breakMinutes"><set field="breakHours" from="(breakHours || 0) + (breakMinutes / 60)"/></if>
-            <if condition="scanPurposeEnumId in ['PbspClockIn', 'PbspClockOut']">
+            <if condition="['PbspClockIn', 'PbspClockOut'].includes(scanPurposeEnumId)">
                 <set field="clientPartyId" from="partyBadge.organizationPartyId"/>
                 <entity-find entity-name="mantle.work.time.TimeEntry" list="openTimeEntryList">
                     <econdition field-name="partyId"/>

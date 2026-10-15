@@ -132,7 +132,7 @@ along with this software (see the LICENSE.md file). If not, see
                             </if>
                         </iterate>
 
-                        <set field="unitAmountLessDiscounts" from="((itemTotal + discountTotal) as BigDecimal).divide((combinedQuantity == null ? null : toDecimal(combinedQuantity)), 3, BigDecimal.ROUND_HALF_UP)"/>
+                        <set field="unitAmountLessDiscounts" from="((itemTotal + discountTotal) == null ? null : toDecimal((itemTotal + discountTotal))).divide((combinedQuantity == null ? null : toDecimal(combinedQuantity)), 3, BigDecimal.ROUND_HALF_UP)"/>
                         <script>items.add({itemId:orderItem.orderItemSeqId, itemTypeEnumId:orderItem.itemTypeEnumId,
                                 quantity:orderItem.quantity, unitAmount:orderItem.unitAmount, unitAmountLessDiscounts:unitAmountLessDiscounts,
                                 itemTotal:itemTotal, discountTotal:discountTotal,

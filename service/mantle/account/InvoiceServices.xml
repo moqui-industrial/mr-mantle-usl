@@ -183,7 +183,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="maxApplicableAmount" from="unpaidTotal"/>
                 <if condition="maxApplicableAmount > pmtTotal.unappliedTotal"><set field="maxApplicableAmount" from="pmtTotal.unappliedTotal"/></if>
                 <script>unappliedPaymentInfoList.add(pmtTotal + [payment:unappliedPayment, maxApplicableAmount:maxApplicableAmount,
-                        allowApply:(maxApplicableAmount &amp;&amp; unappliedPayment.statusId in ['PmntDelivered','PmntConfirmed'])])</script>
+                        allowApply:(maxApplicableAmount &amp;&amp; ['PmntDelivered','PmntConfirmed'].includes(unappliedPayment.statusId))])</script>
             </iterate>
             <!-- get invoices with reverse from/to parties that this payment might be applied to -->
             <entity-find entity-name="mantle.account.invoice.Invoice" list="unpaidInvoiceList" limit="50">
@@ -201,7 +201,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="maxApplicableAmount" from="unpaidTotal"/>
                 <if condition="maxApplicableAmount > invTot.unpaidTotal"><set field="maxApplicableAmount" from="invTot.unpaidTotal"/></if>
                 <script>unpaidInvoiceInfoList.add(invTot + [invoice:unpaidInvoice, maxApplicableAmount:maxApplicableAmount,
-                    allowApply:(maxApplicableAmount &amp;&amp; unpaidInvoice.statusId in ['InvoiceFinalized','InvoiceSent','InvoiceAcked','InvoiceApproved'])])</script>
+                    allowApply:(maxApplicableAmount &amp;&amp; ['InvoiceFinalized','InvoiceSent','InvoiceAcked','InvoiceApproved'].includes(unpaidInvoice.statusId))])</script>
             </iterate>
 
             <!-- get status history -->
@@ -681,7 +681,7 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <actions>
             <entity-find-one entity-name="mantle.account.invoice.Invoice" value-field="invoice" for-update="true"/>
-            <if condition="!(invoice.statusId in ['InvoiceInProcess', 'InvoiceIncoming', 'InvoiceReceived'])">
+            <if condition="!(['InvoiceInProcess', 'InvoiceIncoming', 'InvoiceReceived'].includes(invoice.statusId))">
                 <return error="true" message="Invoice ${invoiceId} is not in a status that allows change"/></if>
 
             <service-call name="update#mantle.account.invoice.Invoice" in-map="context" out-map="context"/>
@@ -804,7 +804,7 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="invoiceItemSeqId"/></out-parameters>
         <actions>
             <entity-find-one entity-name="mantle.account.invoice.Invoice" value-field="invoice"/>
-            <if condition="!(invoice.statusId in ['InvoiceInProcess', 'InvoiceIncoming', 'InvoiceReceived'])">
+            <if condition="!(['InvoiceInProcess', 'InvoiceIncoming', 'InvoiceReceived'].includes(invoice.statusId))">
                 <return error="true" message="Invoice ${invoiceId} is not in a status that allows change (In Process for receivables, Incoming or Received for payables)"/></if>
 
             <service-call name="create#mantle.account.invoice.InvoiceItem" in-map="context" out-map="context"/>
@@ -827,7 +827,7 @@ along with this software (see the LICENSE.md file). If not, see
                 constraints (rather than just returning an error) -->
             <if condition="invoiceItem.isAdjustment == 'Y'"><then>
                 <service-call name="mantle.account.InvoiceServices.update#InvoiceItemAdjustment" in-map="context" out-map="context"/>
-            </then><else-if condition="invoice.statusId in ['InvoiceInProcess', 'InvoiceIncoming', 'InvoiceReceived']">
+            </then><else-if condition="['InvoiceInProcess', 'InvoiceIncoming', 'InvoiceReceived'].includes(invoice.statusId)">
                 <service-call name="update#mantle.account.invoice.InvoiceItem" in-map="context" out-map="context"/>
             </else-if><else>
                 <service-call name="mantle.account.InvoiceServices.update#InvoiceItemClosed" in-map="context" out-map="context"/>
@@ -882,7 +882,7 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <actions>
             <entity-find-one entity-name="mantle.account.invoice.Invoice" value-field="invoice"/>
-            <if condition="!(invoice.statusId in ['InvoiceInProcess', 'InvoiceIncoming', 'InvoiceReceived'])">
+            <if condition="!(['InvoiceInProcess', 'InvoiceIncoming', 'InvoiceReceived'].includes(invoice.statusId))">
                 <return error="true" message="Invoice ${invoiceId} is not in a status that allows change"/></if>
 
             <!-- make sure not associated with ShipmentItem -->
@@ -942,7 +942,7 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="invoiceItemSeqId"/></out-parameters>
         <actions>
             <entity-find-one entity-name="mantle.account.invoice.Invoice" value-field="invoice"/>
-            <if condition="!(invoice.statusId in ['InvoiceFinalized', 'InvoiceSent', 'InvoiceAcked', 'InvoiceApproved'])">
+            <if condition="!(['InvoiceFinalized', 'InvoiceSent', 'InvoiceAcked', 'InvoiceApproved'].includes(invoice.statusId))">
                 <return error="true" message="Invoices may only be adjusted in the Finalized, Sent, or Acknowledged statuses for receivables, and the Approved status for payables; invoice ${invoiceId} is in status ${invoice.status?.description}"/></if>
 
             <if condition="itemDate == null"><set field="itemDate" from="invoice.invoiceDate"/></if>
@@ -1152,7 +1152,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <set field="partPayments" from="orderPart.payments"/>
                         <iterate list="partPayments" entry="partPayment">
                             <!-- only set forInvoiceId if not set, payment not Cancelled/etc, and parties match -->
-                            <if condition="partPayment.forInvoiceId || partPayment.statusId in ['PmntCancelled', 'PmntVoid', 'PmntDeclined'] ||
+                            <if condition="partPayment.forInvoiceId || ['PmntCancelled', 'PmntVoid', 'PmntDeclined'].includes(partPayment.statusId) ||
                                     partPayment.fromPartyId != toPartyId || partPayment.toPartyId != orderPart.vendorPartyId"><continue/></if>
                             <set field="partPayment.forInvoiceId" from="invoiceId"/>
                             <entity-update value-field="partPayment"/>
@@ -1962,7 +1962,7 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.account.invoice.Invoice" value-field="invoice" for-update="true"/>
 
             <!-- check status -->
-            <if condition="!(invoice.statusId in ['InvoiceInProcess', 'InvoiceIncoming', 'InvoiceReceived'])">
+            <if condition="!(['InvoiceInProcess', 'InvoiceIncoming', 'InvoiceReceived'].includes(invoice.statusId))">
                 <return type="danger" message="Cannot reverse invoice ${invoiceId} in status ${invoice.status?.description}, must be In Process, Incoming, or Received"/></if>
 
             <!-- check applications - should never happen given status but just in case -->
@@ -2073,7 +2073,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="update#mantle.account.invoice.Invoice" in-map="{invoiceId:invoiceId, statusId:'InvoiceCancelled'}"/>
             <iterate list="paymentIdSet" entry="paymentId">
                 <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment"/>
-                <set field="targetStatusId" from="payment.statusId in ['PmntProposed', 'PmntPromised'] ? 'PmntCancelled' : 'PmntVoid'"/>
+                <set field="targetStatusId" from="['PmntProposed', 'PmntPromised'].includes(payment.statusId) ? 'PmntCancelled' : 'PmntVoid'"/>
                 <service-call name="update#mantle.account.payment.Payment" in-map="{paymentId:paymentId, statusId:targetStatusId}"/>
             </iterate>
         </actions>

@@ -259,7 +259,7 @@ along with this software (see the LICENSE.md file). If not, see
             <script>
                 for (orderItem in orderItemList) {
                     if (!productItemTypes.contains(orderItem.itemTypeEnumId)) continue
-                    if (!(orderItem.product?.productTypeEnumId in ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'])) continue
+                    if (!(['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'].includes(orderItem.product?.productTypeEnumId))) continue
                     def orderItemQuantity = (orderItem.quantity != null ? orderItem.quantity : 1.0) * (orderItem.selectedAmount || 1.0)
                     addToBigDecimalInMap(orderItem.orderItemSeqId, orderItemQuantity, quantityNotShippedByItem)
                     addToBigDecimalInMap(orderItem.orderPartSeqId, orderItemQuantity, quantityNotShippedByPart)
@@ -389,7 +389,7 @@ along with this software (see the LICENSE.md file). If not, see
                             .parameter("defaultToPrimaryPurpose", true).call()?.emailAddress
                 }
 
-                boolean hasShippableItems = orderItemList.find({ it.product?.productTypeEnumId in ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'] }) != null
+                boolean hasShippableItems = orderItemList.find({ ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'].includes(it.product?.productTypeEnumId) }) != null
                 boolean singleLot = false
                 boolean newerInventory = false
                 if (hasShippableItems && orderPart.customerPartyId) {
@@ -407,7 +407,7 @@ along with this software (see the LICENSE.md file). If not, see
                 def partPaymentInfoList = []
                 BigDecimal paymentsTotal = 0
                 for (EntityValue partPayment in partPaymentList) {
-                    if (!(((String) partPayment.statusId) in ['PmntCancelled', 'PmntVoid', 'PmntDeclined'])) {
+                    if (!(['PmntCancelled', 'PmntVoid', 'PmntDeclined'].includes(((String) partPayment.statusId)))) {
                         // NOTE: supports OrderPartParty override for roleTypeId=CustomerBillTo via billToPartyId
                         if (partPayment.fromPartyId == billToPartyId)
                             paymentsTotal += (partPayment.amount || 0.0)
@@ -597,7 +597,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <set field="product" from="orderItem.product"/>
             <set field="isProductItemType" from="orderItem.itemTypeEnumId in productItemTypes"/>
-            <set field="isShippable" from="isProductItemType &amp;&amp; product != null ? product.productTypeEnumId in ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'] : false"/>
+            <set field="isShippable" from="isProductItemType &amp;&amp; product != null ? ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'].includes(product.productTypeEnumId) : false"/>
             <set field="partEditable" from="editableStatusIds.contains(orderPart.statusId)"/>
 
             <!-- item quantity and unitAmount EntityAuditLog records -->
@@ -844,13 +844,13 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="orderId"/></entity-find>
             <set field="paymentMethodIdSet" from="new HashSet()"/>
             <iterate list="paymentList" entry="payment">
-                <if condition="payment.statusId in ['PmntAuthorized', 'PmntDelivered', 'PmntConfirmed']"><then>
+                <if condition="['PmntAuthorized', 'PmntDelivered', 'PmntConfirmed'].includes(payment.statusId)"><then>
                     <set field="totalPromised" from="totalPromised + (payment.amount || 0.0)"/>
                     <set field="totalAuthorized" from="totalAuthorized + (payment.amount || 0.0)"/>
                 </then><else-if condition="payment.statusId == 'PmntPromised'">
                     <set field="totalPromised" from="totalPromised + (payment.amount || 0.0)"/>
                 </else-if></if>
-                <if condition="payment.paymentMethodId &amp;&amp; !(payment.statusId in ['PmntCancelled', 'PmntVoid', 'PmntDeclined'])">
+                <if condition="payment.paymentMethodId &amp;&amp; !(['PmntCancelled', 'PmntVoid', 'PmntDeclined'].includes(payment.statusId))">
                     <script>paymentMethodIdSet.add(payment.paymentMethodId)</script></if>
                 <if condition="payment.amountUomId != orderHeader.currencyUomId">
                     <script>approveWarnings.add(ec.resource.expand('OrderApproveCurrencyDifferent', null))</script></if>
@@ -1081,7 +1081,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </script></if>
 
                 <!-- is this a large Web order? -->
-                <if condition="orderHeader.salesChannelEnumId in ['ScWeb', 'ScWebExternal']">
+                <if condition="['ScWeb', 'ScWebExternal'].includes(orderHeader.salesChannelEnumId)">
                     <set field="settingLargeWebOrderAmount" from="storeSettingList.find({('PsstOrdApproveLargeWebOrder' === it.settingTypeEnumId)})?.settingValue || '0.0'"/>
                     <set field="largeWebOrderAmountBd" from="settingLargeWebOrderAmount.isBigDecimal() ? (settingLargeWebOrderAmount == null ? null : toDecimal(settingLargeWebOrderAmount)) : 0.0"/>
                     <if condition="largeWebOrderAmountBd &amp;&amp; orderHeader.grandTotal &gt; largeWebOrderAmountBd"><script>approveWarnings.add(ec.resource.expand(
@@ -1358,7 +1358,7 @@ along with this software (see the LICENSE.md file). If not, see
                         </if>
                     </if>
 
-                    <set field="bccAddresses" from="orderHeader.salesChannelEnumId in ['ScWeb', 'ScWebExternal'] ? storeEmail.webOrderBcc : null"/>
+                    <set field="bccAddresses" from="['ScWeb', 'ScWebExternal'].includes(orderHeader.salesChannelEnumId) ? storeEmail.webOrderBcc : null"/>
 
                     <!-- simple bodyParameters, let the screen do data prep -->
                     <set field="bodyParameters" from="{orderId:orderId, storeDomain:productStore.storeDomain,

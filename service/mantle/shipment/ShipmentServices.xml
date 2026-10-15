@@ -533,13 +533,13 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
             <entity-find-one entity-name="mantle.order.OrderPart" value-field="orderPart"/>
-            <if condition="!(orderPart.statusId in ['OrderApproved', 'OrderSent'] || orderHeader.statusId in ['OrderApproved', 'OrderSent'])">
+            <if condition="!(['OrderApproved', 'OrderSent'].includes(orderPart.statusId) || ['OrderApproved', 'OrderSent'].includes(orderHeader.statusId))">
                 <return type="danger" message="Cannot create Shipment for Order Part in status ${orderPart.statusId}"/></if>
 
             <!-- does the OrderPart have shippable items? -->
             <entity-find-related value-field="orderPart" relationship-name="mantle.order.OrderItem" list="orderItemList"
                     order-by-list="['orderItemSeqId']"/>
-            <if condition="!orderItemList.find({ it.product?.productTypeEnumId in ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'] })">
+            <if condition="!orderItemList.find({ ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'].includes(it.product?.productTypeEnumId) })">
                 <return type="warning" message="Order ${orderId} part ${orderPartSeqId} has no shippable product items (type asset or asset use)"/></if>
 
             <!-- and not already on a Shipment? -->
@@ -556,7 +556,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- see if Product is a physical item -->
                 <entity-find-one entity-name="mantle.product.Product" value-field="product" cache="true">
                     <field-map field-name="productId" from="orderItem.productId"/></entity-find-one>
-                <if condition="!(product.productTypeEnumId in ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'])"><continue/></if>
+                <if condition="!(['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'].includes(product.productTypeEnumId))"><continue/></if>
 
                 <!-- determine quantityNotShipped -->
                 <set field="quantityNotShipped" from="(orderItem.quantity != null ? orderItem.quantity : 1.0) * (orderItem.selectedAmount || 1.0)"/>
@@ -679,11 +679,11 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <actions>
             <entity-find-one entity-name="mantle.shipment.Shipment" value-field="shipment"/>
-            <if condition="!(shipment.statusId in ['ShipInput', 'ShipScheduled', 'ShipPicked'])">
+            <if condition="!(['ShipInput', 'ShipScheduled', 'ShipPicked'].includes(shipment.statusId))">
                 <return error="true" message="Cannot add Order Part to Shipment in status ${shipment.statusId}"/></if>
 
             <entity-find-one entity-name="mantle.order.OrderPart" value-field="orderPart"/>
-            <if condition="!(orderPart.statusId in ['OrderApproved', 'OrderSent'])">
+            <if condition="!(['OrderApproved', 'OrderSent'].includes(orderPart.statusId))">
                 <return error="true" message="Cannot add Order Part in status ${orderPart.statusId} to Shipment"/></if>
 
             <entity-find entity-name="moqui.basic.EnumGroupMember" list="productItemTypeEgms" cache="true">
@@ -700,7 +700,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- see if Product is a physical item -->
                 <entity-find-one entity-name="mantle.product.Product" value-field="product" cache="true">
                     <field-map field-name="productId" from="orderItem.productId"/></entity-find-one>
-                <if condition="!(product.productTypeEnumId in ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'])"><continue/></if>
+                <if condition="!(['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'].includes(product.productTypeEnumId))"><continue/></if>
 
                 <!-- determine quantityNotShipped -->
                 <set field="quantityNotShipped" from="(orderItem.quantity != null ? orderItem.quantity : 1.0) * (orderItem.selectedAmount || 1.0)"/>
@@ -1144,7 +1144,7 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions>
             <entity-find-one entity-name="mantle.product.Product" value-field="product" cache="true"/>
-            <if condition="!(product.productTypeEnumId in ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'])">
+            <if condition="!(['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'].includes(product.productTypeEnumId))">
                 <return message="Not packing Product ${productId}, type ${product.type?.description || product.productTypeEnumId} is not a physical product type"/></if>
 
             <entity-find entity-name="mantle.shipment.ShipmentItemSource" list="shipmentItemSourceList" cache="false">
@@ -1184,11 +1184,11 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="shipmentId" from="shipmentItemSource.shipmentId"/>
             <set field="shipment" from="shipmentItemSource.shipment"/>
             <!-- don't allow packing in various statuses -->
-            <if condition="shipment.statusId in ['ShipPacked', 'ShipShipped', 'ShipDelivered', 'ShipRejected', 'ShipCancelled']">
+            <if condition="['ShipPacked', 'ShipShipped', 'ShipDelivered', 'ShipRejected', 'ShipCancelled'].includes(shipment.statusId)">
                 <return error="true" message="Cannot pack Shipment ${shipmentId} in status ${shipment.status?.description || shipment.statusId}"/>
             </if>
             <!-- set Shipment to Picked if in Input or Scheduled status -->
-            <if condition="shipment.statusId in ['ShipInput', 'ShipScheduled']">
+            <if condition="['ShipInput', 'ShipScheduled'].includes(shipment.statusId)">
                 <service-call name="update#mantle.shipment.Shipment" in-map="{shipmentId:shipmentId, statusId:'ShipPicked'}"/>
             </if>
 
@@ -1363,11 +1363,11 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.shipment.Shipment" value-field="shipment" for-update="true"/>
 
             <!-- don't allow packing in various statuses -->
-            <if condition="shipment.statusId in ['ShipPacked', 'ShipShipped', 'ShipDelivered', 'ShipRejected', 'ShipCancelled']">
+            <if condition="['ShipPacked', 'ShipShipped', 'ShipDelivered', 'ShipRejected', 'ShipCancelled'].includes(shipment.statusId)">
                 <return error="true" message="Cannot pack Shipment ${shipmentId} in status ${shipment.status?.description || shipment.statusId}"/>
             </if>
             <!-- set Shipment to Picked if in Input or Scheduled status -->
-            <if condition="shipment.statusId in ['ShipInput', 'ShipScheduled']">
+            <if condition="['ShipInput', 'ShipScheduled'].includes(shipment.statusId)">
                 <service-call name="update#mantle.shipment.Shipment" in-map="{shipmentId:shipmentId, statusId:'ShipPicked'}"/>
             </if>
 
@@ -1952,7 +1952,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- set shipment Packed in separate TX (force-new) so that any later errors don't undo this -->
             <entity-find-one entity-name="mantle.shipment.Shipment" value-field="shipment"/>
             <if condition="shipment == null"><return error="true" message="Shipment ${shipmentId} not found"/></if>
-            <if condition="shipment.statusId in ['ShipInput', 'ShipScheduled', 'ShipPicked']">
+            <if condition="['ShipInput', 'ShipScheduled', 'ShipPicked'].includes(shipment.statusId)">
                 <service-call name="mantle.shipment.ShipmentServices.pack#Shipment" in-map="{shipmentId:shipmentId}" transaction="force-new"/></if>
 
             <!-- if CC payment(s) make sure captured (Delivered) before getting labels, etc -->
@@ -1978,10 +1978,10 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="paymentTotal" from="0.0"/>
                     <iterate list="shipmentPaymentList" entry="shipmentPayment">
                         <if condition="shipmentPayment.paymentInstrumentEnumId == 'PiCreditCard'"><then>
-                            <if condition="shipmentPayment.statusId in ['PmntDelivered', 'PmntConfirmed']">
+                            <if condition="['PmntDelivered', 'PmntConfirmed'].includes(shipmentPayment.statusId)">
                                 <set field="paymentTotal" from="paymentTotal + shipmentPayment.amount"/></if>
                         </then><else>
-                            <if condition="!(shipmentPayment.statusId in ['PmntCancelled', 'PmntVoid', 'PmntDeclined'])">
+                            <if condition="!(['PmntCancelled', 'PmntVoid', 'PmntDeclined'].includes(shipmentPayment.statusId))">
                                 <set field="paymentTotal" from="paymentTotal + shipmentPayment.amount"/></if>
                         </else></if>
                     </iterate>
@@ -2152,7 +2152,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <!-- see if all packages are delivered, if so update Shipment status to ShipDelivered (if statusId in ShipPacked, ShipShipped) -->
             <entity-find-one entity-name="mantle.shipment.Shipment" value-field="shipment"/>
-            <if condition="shipment.statusId in ['ShipPacked', 'ShipShipped']">
+            <if condition="['ShipPacked', 'ShipShipped'].includes(shipment.statusId)">
                 <entity-find entity-name="mantle.shipment.ShipmentPackageRouteSeg" list="checkSprsList">
                     <econdition field-name="shipmentId"/></entity-find>
                 <set field="foundNotDelivered" from="false"/>

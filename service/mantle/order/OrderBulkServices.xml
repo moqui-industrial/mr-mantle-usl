@@ -184,7 +184,7 @@ along with this software (see the LICENSE.md file). If not, see
                     </if>
 
                     <!-- check status of existing order -->
-                    <if condition="existingOrder.statusId in ['OrderCompleted', 'OrderRejected', 'OrderCancelled']">
+                    <if condition="['OrderCompleted', 'OrderRejected', 'OrderCancelled'].includes(existingOrder.statusId)">
                         <entity-find-one entity-name="moqui.basic.StatusItem" value-field="statusItem">
                             <field-map field-name="statusId" from="existingOrder.statusId"/></entity-find-one>
                         <return error="true" message="Found order [${orderId}] in status ${statusItem.description}, cannot be updated"/>

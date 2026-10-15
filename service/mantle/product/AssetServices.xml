@@ -35,7 +35,7 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.product.asset.Asset" value-field="asset"/>
             <if condition="asset == null"><return error="true" message="Asset not found with ID ${assetId}"/></if>
 
-            <set field="isFixedAsset" from="!(asset.assetTypeEnumId in ['AstTpInventory', 'AstTpSupplies'])"/>
+            <set field="isFixedAsset" from="!(['AstTpInventory', 'AstTpSupplies'].includes(asset.assetTypeEnumId))"/>
 
             <set field="statusItem" from="asset['Asset#moqui.basic.StatusItem']"/>
             <entity-find entity-name="moqui.entity.EntityAuditLog" list="statusHistoryList">
@@ -69,7 +69,7 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="availableToPromiseTotal" type="BigDecimal"/></out-parameters>
         <actions>
             <entity-find-one entity-name="mantle.product.Product" value-field="product" cache="true"/>
-            <if condition="!(product?.productTypeEnumId in ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'])">
+            <if condition="!(['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'].includes(product?.productTypeEnumId))">
                 <log level="warn" message="AssetServices.get#AvailableInventory called for Product ${productId} with type ${product?.productTypeEnumId}, only applicable for PtAsset, PtDigitalAsset, PtAssetUse, PtPickAssembly"/></if>
 
             <set field="facilityIdSet" from="new HashSet()"/>
@@ -702,7 +702,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- see if Product is a physical item -->
             <entity-find-one entity-name="mantle.product.Product" value-field="product" cache="true"/>
-            <if condition="!(product.productTypeEnumId in ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'])"><return/></if>
+            <if condition="!(['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'].includes(product.productTypeEnumId))"><return/></if>
 
             <!-- see if itemTypeEnumId is a product type -->
             <entity-find entity-name="moqui.basic.EnumGroupMember" list="productItemTypeEgms" cache="true">
