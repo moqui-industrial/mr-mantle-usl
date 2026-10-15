@@ -451,12 +451,18 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="!asset.expectedEndOfLife"><message error="true">Asset [${assetId}] has no Expected End of Life, not calculating depreciation</message></if>
             <check-errors/>
 
-            <!-- A date reaches a script as epoch millis text (UTC midnight for a Date field), so the years and days of the
-                year are taken in UTC; plusMonths clamps the day as Calendar.add does -->
+            <!-- A Date field reaches a script as epoch millis text at UTC midnight (or as yyyy-mm-dd), so its years and days of
+                the year are taken in UTC. A Timestamp (acquiredDate, transactionDate) is taken in the user's time zone as
+                Calendar did in the Groovy service (ec.user.nowCalendar), so the useful life years of an asset acquired at
+                2020-01-01 UTC is 11 in a zone behind UTC and 10 elsewhere, as in Java; plusMonths clamps the day as Calendar.add does -->
             <script><![CDATA[
-                function dateOf(value) {
+                function dateOf(value, isTimestamp) {
                     const text = String(value)
-                    if (/^-?\d+$/.test(text)) { const at = new Date(Number(text)); return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate())) }
+                    if (/^-?\d+$/.test(text)) {
+                        const at = new Date(Number(text))
+                        if (isTimestamp) return new Date(Date.UTC(at.getFullYear(), at.getMonth(), at.getDate()))
+                        return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate()))
+                    }
                     const [y, m, d] = text.slice(0, 10).split('-').map(Number)
                     return new Date(Date.UTC(y, m - 1, d))
                 }
@@ -467,12 +473,12 @@ along with this software (see the LICENSE.md file). If not, see
                 }
                 function dayOfYear(dt) { return Math.round((dt.getTime() - Date.UTC(dt.getUTCFullYear(), 0, 1)) / 86400000) + 1 }
 
-                const acquiredDt = dateOf(asset.acquiredDate)
+                const acquiredDt = dateOf(asset.acquiredDate, true)
                 const endOfLifeDt = dateOf(asset.expectedEndOfLife)
                 // use integer number of years, partial year depreciation is not common and should be needed (may cause issues)
                 usefulLifeYears = endOfLifeDt.getUTCFullYear() - acquiredDt.getUTCFullYear()
 
-                const txDt = dateOf(transactionDate)
+                const txDt = dateOf(transactionDate, true)
                 yearsRemaining = endOfLifeDt.getUTCFullYear() - txDt.getUTCFullYear()
                 // if we are before the day in the year of end of life, add 1 year (we haven't gone to the next year for this asset)
                 let txBeforeDayOfYear = false

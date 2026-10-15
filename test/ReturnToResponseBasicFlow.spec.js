@@ -1,129 +1,71 @@
-/*
- * This software is in the public domain under CC0 1.0 Universal plus a 
- * Grant of Patent License.
- * 
- * To the extent possible under law, the author(s) have dedicated all
- * copyright and related and neighboring rights to this software to the
- * public domain worldwide. This software is distributed without any
- * warranty.
- * 
- * You should have received a copy of the CC0 Public Domain Dedication
- * along with this software (see the LICENSE.md file). If not, see
- * <http://creativecommons.org/publicdomain/zero/1.0/>.
- */
+// Port of ReturnToResponseBasicFlow.groovy: return of a sales order with replace, refund and credit responses,
+// partial receipt, replacement order shipment, and a purchase paid with the customer credit financial account.
+const effectiveTime = Date.now()
+let returnId = null, returnShipmentId
+const originalOrderId = "55500"
+let replaceShipResult
 
-import org.moqui.Moqui
-import org.moqui.context.ExecutionContext
-import org.moqui.entity.EntityList
-import org.moqui.entity.EntityValue
-import org.slf4j.Logger
-import org.slf4j.LoggerFactory
-import spock.lang.Shared
-import spock.lang.Specification
-
-import java.sql.Timestamp
-
-/* To run these make sure moqui, and mantle are in place and run:
-    "gradle cleanAll load runtime/mantle/mantle-usl:test"
-   Or to quick run with saved DB copy use "gradle loadSave" once then each time "gradle reloadSave runtime/mantle/mantle-usl:test"
- */
-
-class ReturnToResponseBasicFlow extends Specification {
-    @Shared protected final static Logger logger = LoggerFactory.getLogger(ReturnToResponseBasicFlow.class)
-    @Shared ExecutionContext ec
-    @Shared String returnId = null, originalOrderId = "55500", returnShipmentId
-    @Shared Map replaceShipResult
-    @Shared long effectiveTime = System.currentTimeMillis()
-    @Shared long totalFieldsChecked = 0
-    // no longer needed: @Shared boolean kieEnabled = false
-
-    def setupSpec() {
-        // init the framework, get the ec
-        ec = Moqui.getExecutionContext()
+spec({
+    dependsOn: ["OrderToCashTime"],
+    tempSequences: { start: 55700, banks: {
+        "mantle.account.invoice.Invoice": 10,
+        "mantle.account.financial.FinancialAccount": 10,
+        "mantle.account.financial.FinancialAccountAuth": 10,
+        "mantle.account.financial.FinancialAccountTrans": 10,
+        "mantle.account.method.PaymentGatewayResponse": 10,
+        "mantle.account.payment.Payment": 10,
+        "mantle.account.payment.PaymentApplication": 10,
+        "mantle.ledger.transaction.AcctgTrans": 10,
+        "mantle.product.asset.Asset": 10,
+        "mantle.product.asset.AssetDetail": 10,
+        "mantle.product.issuance.AssetReservation": 10,
+        "mantle.product.issuance.AssetIssuance": 10,
+        "mantle.product.receipt.AssetReceipt": 10,
+        "mantle.order.OrderHeader": 10,
+        "mantle.order.return.ReturnHeader": 10,
+        "mantle.order.return.ReturnItemBilling": 10,
+        "mantle.shipment.Shipment": 10,
+        "mantle.shipment.ShipmentItemSource": 10 } },
+    setupSpec() {
         // set an effective date so data check works, etc
-        ec.user.setEffectiveTime(new Timestamp(effectiveTime))
-        // no longer needed: kieEnabled = ec.factory.getToolFactory("KIE") != null
+        ec.user.setEffectiveTime(effectiveTime)
+    },
+    setup() { ec.artifactExecution.disableAuthz() },
+    cleanup() { ec.artifactExecution.enableAuthz() },
+})
 
-        ec.entity.tempSetSequencedIdPrimary("mantle.account.invoice.Invoice", 55700, 10)
-        ec.entity.tempSetSequencedIdPrimary("mantle.account.financial.FinancialAccount", 55700, 10)
-        ec.entity.tempSetSequencedIdPrimary("mantle.account.financial.FinancialAccountAuth", 55700, 10)
-        ec.entity.tempSetSequencedIdPrimary("mantle.account.financial.FinancialAccountTrans", 55700, 10)
-        ec.entity.tempSetSequencedIdPrimary("mantle.account.method.PaymentGatewayResponse", 55700, 10)
-        ec.entity.tempSetSequencedIdPrimary("mantle.account.payment.Payment", 55700, 10)
-        ec.entity.tempSetSequencedIdPrimary("mantle.account.payment.PaymentApplication", 55700, 10)
-        ec.entity.tempSetSequencedIdPrimary("mantle.ledger.transaction.AcctgTrans", 55700, 10)
-        ec.entity.tempSetSequencedIdPrimary("mantle.product.asset.Asset", 55700, 10)
-        ec.entity.tempSetSequencedIdPrimary("mantle.product.asset.AssetDetail", 55700, 10)
-        ec.entity.tempSetSequencedIdPrimary("mantle.product.issuance.AssetReservation", 55700, 10)
-        ec.entity.tempSetSequencedIdPrimary("mantle.product.issuance.AssetIssuance", 55700, 10)
-        ec.entity.tempSetSequencedIdPrimary("mantle.product.receipt.AssetReceipt", 55700, 10)
-        ec.entity.tempSetSequencedIdPrimary("mantle.order.OrderHeader", 55700, 10)
-        ec.entity.tempSetSequencedIdPrimary("mantle.order.return.ReturnHeader", 55700, 10)
-        ec.entity.tempSetSequencedIdPrimary("mantle.order.return.ReturnItemBilling", 55700, 10)
-        ec.entity.tempSetSequencedIdPrimary("mantle.shipment.Shipment", 55700, 10)
-        ec.entity.tempSetSequencedIdPrimary("mantle.shipment.ShipmentItemSource", 55700, 10)
-    }
+function check(xml) {
+    const dataCheckErrors = checkData(xml)
+    for (const e of dataCheckErrors) log.info(e)
+    if (ec.message.hasError()) log.warn(ec.message.getErrorsString())
+    return dataCheckErrors
+}
 
-    def cleanupSpec() {
-        ec.entity.tempResetSequencedIdPrimary("mantle.account.invoice.Invoice")
-        ec.entity.tempResetSequencedIdPrimary("mantle.account.financial.FinancialAccount")
-        ec.entity.tempResetSequencedIdPrimary("mantle.account.financial.FinancialAccountAuth")
-        ec.entity.tempResetSequencedIdPrimary("mantle.account.financial.FinancialAccountTrans")
-        ec.entity.tempResetSequencedIdPrimary("mantle.account.method.PaymentGatewayResponse")
-        ec.entity.tempResetSequencedIdPrimary("mantle.account.payment.Payment")
-        ec.entity.tempResetSequencedIdPrimary("mantle.account.payment.PaymentApplication")
-        ec.entity.tempResetSequencedIdPrimary("mantle.ledger.transaction.AcctgTrans")
-        ec.entity.tempResetSequencedIdPrimary("mantle.product.asset.Asset")
-        ec.entity.tempResetSequencedIdPrimary("mantle.product.asset.AssetDetail")
-        ec.entity.tempResetSequencedIdPrimary("mantle.product.issuance.AssetReservation")
-        ec.entity.tempResetSequencedIdPrimary("mantle.product.issuance.AssetIssuance")
-        ec.entity.tempResetSequencedIdPrimary("mantle.product.receipt.AssetReceipt")
-        ec.entity.tempResetSequencedIdPrimary("mantle.order.OrderHeader")
-        ec.entity.tempResetSequencedIdPrimary("mantle.order.return.ReturnHeader")
-        ec.entity.tempResetSequencedIdPrimary("mantle.order.return.ReturnItemBilling")
-        ec.entity.tempResetSequencedIdPrimary("mantle.shipment.Shipment")
-        ec.entity.tempResetSequencedIdPrimary("mantle.shipment.ShipmentItemSource")
-        ec.destroy()
-        ec.factory.waitWorkerPoolEmpty(50) // up to 5 seconds
-
-        logger.info("Return to Response Basic Flow complete, ${totalFieldsChecked} record fields checked")
-    }
-
-    def setup() {
-        ec.artifactExecution.disableAuthz()
-    }
-
-    def cleanup() {
-        ec.artifactExecution.enableAuthz()
-    }
-
-    def "create Return From Order"() {
-        when:
-        ec.user.loginUser("joe@public.com", "moqui")
+feature("create Return From Order", {
+    when() {
+        login("joe@public.com")
 
         // create return
-        Map createMap = ec.service.sync().name("mantle.order.ReturnServices.create#ReturnFromOrder")
-                .parameters([orderId:originalOrderId, orderPartSeqId:'01']).call()
+        const createMap = call("mantle.order.ReturnServices.create#ReturnFromOrder", { orderId: originalOrderId, orderPartSeqId: '01' })
         returnId = createMap.returnId
 
         // add items
-        ec.service.sync().name("mantle.order.ReturnServices.add#OrderItemToReturn")
-                .parameters([returnId:returnId, orderId:originalOrderId, orderItemSeqId:'01', returnQuantity:1,
-                             returnReasonEnumId:'RrsnMisShip', returnResponseEnumId:'RrspReplace']).call()
-        ec.service.sync().name("mantle.order.ReturnServices.add#OrderItemToReturn")
-                .parameters([returnId:returnId, orderId:originalOrderId, orderItemSeqId:'02', returnQuantity:2,
-                             returnReasonEnumId:'RrsnDefective', returnResponseEnumId:'RrspRefund']).call()
-        ec.service.sync().name("mantle.order.ReturnServices.add#OrderItemToReturn")
-                .parameters([returnId:returnId, orderId:originalOrderId, orderItemSeqId:'03', returnQuantity:3,
-                             returnReasonEnumId:'RrsnDidNotWant', returnResponseEnumId:'RrspCredit']).call()
+        call("mantle.order.ReturnServices.add#OrderItemToReturn",
+                { returnId: returnId, orderId: originalOrderId, orderItemSeqId: '01', returnQuantity: 1,
+                    returnReasonEnumId: 'RrsnMisShip', returnResponseEnumId: 'RrspReplace' })
+        call("mantle.order.ReturnServices.add#OrderItemToReturn",
+                { returnId: returnId, orderId: originalOrderId, orderItemSeqId: '02', returnQuantity: 2,
+                    returnReasonEnumId: 'RrsnDefective', returnResponseEnumId: 'RrspRefund' })
+        call("mantle.order.ReturnServices.add#OrderItemToReturn",
+                { returnId: returnId, orderId: originalOrderId, orderItemSeqId: '03', returnQuantity: 3,
+                    returnReasonEnumId: 'RrsnDidNotWant', returnResponseEnumId: 'RrspCredit' })
 
         // submit return request
-        ec.service.sync().name("mantle.order.ReturnServices.request#Return").parameters([returnId:returnId]).call()
+        call("mantle.order.ReturnServices.request#Return", { returnId: returnId })
 
-        ec.user.logoutUser()
+        logout()
 
-        List<String> dataCheckErrors = []
-        long fieldsChecked = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
+        const dataCheckErrors = check(`<entity-facade-xml>
             <returns returnId="55700" facilityId="ZIRET_WH" entryDate="${effectiveTime}"
                     shipmentMethodEnumId="ShMthGround" vendorPartyId="ORG_ZIZI_RETAIL" telecomContactMechId="CustJqpTeln"
                     postalContactMechId="CustJqpAddr" carrierPartyId="_NA_" currencyUomId="USD" statusId="ReturnRequested"
@@ -138,62 +80,52 @@ class ReturnToResponseBasicFlow extends Specification {
                     returnQuantity="3" productId="DEMO_2_1" description="Demo Product Two-One" itemTypeEnumId="ItemProduct"
                     statusId="ReturnRequested" returnResponseEnumId="RrspCredit"/>
             </returns>
-        </entity-facade-xml>""").check(dataCheckErrors)
-        totalFieldsChecked += fieldsChecked
-        logger.info("Checked ${fieldsChecked} fields")
-        if (dataCheckErrors) for (String dataCheckError in dataCheckErrors) logger.info(dataCheckError)
-        if (ec.message.hasError()) logger.warn(ec.message.getErrorsString())
+        </entity-facade-xml>`)
+        return { dataCheckErrors }
+    },
+    then({ dataCheckErrors }) {
+        dataCheckErrors.length == 0
+    },
+})
 
-        then:
-
-        dataCheckErrors.size() == 0
-    }
-
-    def "approve Return"() {
-        when:
-        ec.user.loginUser("john.doe", "moqui")
+feature("approve Return", {
+    when() {
+        login("john.doe")
 
         // triggers SECA rule to create an Sales Return (incoming) Shipment
-        ec.service.sync().name("mantle.order.ReturnServices.approve#Return").parameters([returnId:returnId]).call()
+        call("mantle.order.ReturnServices.approve#Return", { returnId: returnId })
 
-        List<String> dataCheckErrors = []
-        long fieldsChecked = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
+        const dataCheckErrors = check(`<entity-facade-xml>
             <returns returnId="55700" statusId="ReturnApproved"/>
-        </entity-facade-xml>""").check(dataCheckErrors)
-        totalFieldsChecked += fieldsChecked
-        logger.info("Checked ${fieldsChecked} fields")
-        if (dataCheckErrors) for (String dataCheckError in dataCheckErrors) logger.info(dataCheckError)
-        if (ec.message.hasError()) logger.warn(ec.message.getErrorsString())
+        </entity-facade-xml>`)
+        return { dataCheckErrors }
+    },
+    then({ dataCheckErrors }) {
+        dataCheckErrors.length == 0
+    },
+})
 
-        then:
-        dataCheckErrors.size() == 0
-    }
-
-    def "receive Return Shipment"() {
-        when:
+feature("receive Return Shipment", {
+    when() {
 
         // find Shipment created on return approve
-        EntityList sisEl = ec.entity.find("mantle.shipment.ShipmentItemSource").condition("returnId", returnId).list()
+        const sisEl = ec.entity.find("mantle.shipment.ShipmentItemSource").condition("returnId", returnId).list()
         returnShipmentId = sisEl.get(0).shipmentId
 
         // receive Return Shipment
         // triggers SECA rules to receive ReturnItems
 
-        // old approach, receive all: ec.service.sync().name("mantle.shipment.ShipmentServices.receive#EntireShipment").parameters([shipmentId:returnShipmentId, statusId:'AstOnHold']).call()
-
         // receive individually to do partial return receipt for DEMO_2_1 (2 of 3) to test prorating of responses
-        ec.service.sync().name("mantle.shipment.ShipmentServices.receive#ShipmentProduct")
-                .parameters([shipmentId:returnShipmentId, productId:'DEMO_1_1', statusId:'AstOnHold', quantityAccepted:1.0]).call()
-        ec.service.sync().name("mantle.shipment.ShipmentServices.receive#ShipmentProduct")
-                .parameters([shipmentId:returnShipmentId, productId:'DEMO_2_1', statusId:'AstOnHold', quantityAccepted:2.0]).call()
-        ec.service.sync().name("mantle.shipment.ShipmentServices.receive#ShipmentProduct")
-                .parameters([shipmentId:returnShipmentId, productId:'DEMO_3_1', statusId:'AstOnHold', quantityAccepted:2.0]).call()
+        call("mantle.shipment.ShipmentServices.receive#ShipmentProduct",
+                { shipmentId: returnShipmentId, productId: 'DEMO_1_1', statusId: 'AstOnHold', quantityAccepted: 1.0 })
+        call("mantle.shipment.ShipmentServices.receive#ShipmentProduct",
+                { shipmentId: returnShipmentId, productId: 'DEMO_2_1', statusId: 'AstOnHold', quantityAccepted: 2.0 })
+        call("mantle.shipment.ShipmentServices.receive#ShipmentProduct",
+                { shipmentId: returnShipmentId, productId: 'DEMO_3_1', statusId: 'AstOnHold', quantityAccepted: 2.0 })
 
-        ec.service.sync().name("mantle.shipment.ShipmentServices.deliver#Shipment")
-                .parameters([shipmentId:returnShipmentId]).call()
+        call("mantle.shipment.ShipmentServices.deliver#Shipment", { shipmentId: returnShipmentId })
 
-        List<String> dataCheckErrors = []
-        long fieldsChecked = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
+        const dataCheckErrors = check(`<entity-facade-xml>
             <shipments shipmentId="55700" fromPartyId="CustJqp" toPartyId="ORG_ZIZI_RETAIL"
                     shipmentTypeEnumId="ShpTpSalesReturn" statusId="ShipDelivered">
                 <items quantity="1" productId="DEMO_1_1">
@@ -212,20 +144,17 @@ class ReturnToResponseBasicFlow extends Specification {
                     destinationFacilityId="ZIRET_WH" originPostalContactMechId="CustJqpAddr"
                     carrierPartyId="_NA_" originTelecomContactMechId="CustJqpTeln"/>
             </shipments>
-        </entity-facade-xml>""").check(dataCheckErrors)
-        totalFieldsChecked += fieldsChecked
-        logger.info("Checked ${fieldsChecked} fields")
-        if (dataCheckErrors) for (String dataCheckError in dataCheckErrors) logger.info(dataCheckError)
-        if (ec.message.hasError()) logger.warn(ec.message.getErrorsString())
+        </entity-facade-xml>`)
+        return { dataCheckErrors }
+    },
+    then({ dataCheckErrors }) {
+        dataCheckErrors.length == 0
+    },
+})
 
-        then:
-        dataCheckErrors.size() == 0
-    }
-
-    def "validate Return Completed"() {
-        when:
-        List<String> dataCheckErrors = []
-        long fieldsChecked = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
+feature("validate Return Completed", {
+    when() {
+        const dataCheckErrors = check(`<entity-facade-xml>
             <returns returnId="55700" statusId="ReturnCompleted">
                 <items returnItemSeqId="01" responseDate="${effectiveTime}" replacementOrderId="55700"
                         statusId="ReturnCompleted" receivedQuantity="1">
@@ -255,20 +184,17 @@ class ReturnToResponseBasicFlow extends Specification {
                         quantityOnHandDiff="2"/>
                 </items>
             </returns>
-        </entity-facade-xml>""").check(dataCheckErrors)
-        totalFieldsChecked += fieldsChecked
-        logger.info("Checked ${fieldsChecked} fields")
-        if (dataCheckErrors) for (String dataCheckError in dataCheckErrors) logger.info(dataCheckError)
-        if (ec.message.hasError()) logger.warn(ec.message.getErrorsString())
+        </entity-facade-xml>`)
+        return { dataCheckErrors }
+    },
+    then({ dataCheckErrors }) {
+        dataCheckErrors.length == 0
+    },
+})
 
-        then:
-        dataCheckErrors.size() == 0
-    }
-
-    def "validate Replacement Order and Asset Reservation"() {
-        when:
-        List<String> dataCheckErrors = []
-        long fieldsChecked = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
+feature("validate Replacement Order and Asset Reservation", {
+    when() {
+        const dataCheckErrors = check(`<entity-facade-xml>
             <orders orderId="55700" entryDate="${effectiveTime}" grandTotal="0" currencyUomId="USD"
                     statusId="OrderApproved" placedDate="${effectiveTime}">
                 <parts shipmentMethodEnumId="ShMthGround" telecomContactMechId="CustJqpTeln" postalContactMechId="CustJqpAddr" partTotal="0" customerPartyId="CustJqp" lastUpdatedStamp="1450573654119" facilityId="ZIRET_WH" vendorPartyId="ORG_ZIZI_RETAIL" carrierPartyId="_NA_" statusId="OrderApproved" orderPartSeqId="01"/>
@@ -282,20 +208,17 @@ class ReturnToResponseBasicFlow extends Specification {
                     </reservations>
                 </items>
             </orders>
-        </entity-facade-xml>""").check(dataCheckErrors)
-        totalFieldsChecked += fieldsChecked
-        logger.info("Checked ${fieldsChecked} fields")
-        if (dataCheckErrors) for (String dataCheckError in dataCheckErrors) logger.info(dataCheckError)
-        if (ec.message.hasError()) logger.warn(ec.message.getErrorsString())
+        </entity-facade-xml>`)
+        return { dataCheckErrors }
+    },
+    then({ dataCheckErrors }) {
+        dataCheckErrors.length == 0
+    },
+})
 
-        then:
-        dataCheckErrors.size() == 0
-    }
-
-    def "validate Return Credit Memo Invoice"() {
-        when:
-        List<String> dataCheckErrors = []
-        long fieldsChecked = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
+feature("validate Return Credit Memo Invoice", {
+    when() {
+        const dataCheckErrors = check(`<entity-facade-xml>
             <invoices invoiceId="55700" fromPartyId="CustJqp" toPartyId="ORG_ZIZI_RETAIL" unpaidTotal="14" acctgTransResultEnumId="AtrSuccess" invoiceDate="${effectiveTime}" 
                     currencyUomId="USD" statusId="InvoiceApproved" invoiceTypeEnumId="InvoiceReturn" invoiceTotal="37.07" appliedPaymentsTotal="23.07">
                 <paymentApplications paymentApplicationId="55700" paymentId="55700" amountApplied="23.07" appliedDate="${effectiveTime}" acctgTransResultEnumId="AtrSuccess"/>
@@ -306,39 +229,31 @@ class ReturnToResponseBasicFlow extends Specification {
                 <items invoiceItemSeqId="05" amount="-4.02" quantity="0.666667" description="Discount why? Because we love you." itemTypeEnumId="ItemDiscount"/>
                 <items invoiceItemSeqId="06" amount="2.26" quantity="0.666667" description="Test Tax 7%" itemTypeEnumId="ItemSalesTax"/>
             </invoices>
-        </entity-facade-xml>""").check(dataCheckErrors)
-        // NOTE: for Promised payment no effectiveDate so don't validate
-        totalFieldsChecked += fieldsChecked
-        logger.info("Checked ${fieldsChecked} fields")
-        if (dataCheckErrors) for (String dataCheckError in dataCheckErrors) logger.info(dataCheckError)
-        if (ec.message.hasError()) logger.warn(ec.message.getErrorsString())
+        </entity-facade-xml>`)
+        return { dataCheckErrors }
+    },
+    then({ dataCheckErrors }) {
+        dataCheckErrors.length == 0
+    },
+})
 
-        then:
-        dataCheckErrors.size() == 0
-    }
-
-    def "validate Refund Payment"() {
-        when:
-        List<String> dataCheckErrors = []
-        long fieldsChecked = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
+feature("validate Refund Payment", {
+    when() {
+        const dataCheckErrors = check(`<entity-facade-xml>
             <payments paymentId="55701" fromPartyId="ORG_ZIZI_RETAIL" toPartyId="CustJqp" amountUomId="USD"
                 paymentTypeEnumId="PtRefund" toPaymentMethodId="CustJqpCc" amount="14.0" reconcileStatusId="PmtrNot"
                 statusId="PmntPromised" paymentInstrumentEnumId="PiCreditCard"/>
-        </entity-facade-xml>""").check(dataCheckErrors)
-        // NOTE: for Promised payment no effectiveDate so don't validate
-        totalFieldsChecked += fieldsChecked
-        logger.info("Checked ${fieldsChecked} fields")
-        if (dataCheckErrors) for (String dataCheckError in dataCheckErrors) logger.info(dataCheckError)
-        if (ec.message.hasError()) logger.warn(ec.message.getErrorsString())
+        </entity-facade-xml>`)
+        return { dataCheckErrors }
+    },
+    then({ dataCheckErrors }) {
+        dataCheckErrors.length == 0
+    },
+})
 
-        then:
-        dataCheckErrors.size() == 0
-    }
-
-    def "validate Customer Credit Financial Account Trans"() {
-        when:
-        List<String> dataCheckErrors = []
-        long fieldsChecked = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
+feature("validate Customer Credit Financial Account Trans", {
+    when() {
+        const dataCheckErrors = check(`<entity-facade-xml>
             <mantle.account.financial.FinancialAccount finAccountId="55700" finAccountTypeId="CustomerCredit" isRefundable="Y"
                     actualBalance="23.07" availableBalance="23.07" ownerPartyId="CustJqp" currencyUomId="USD" statusId="FaActive"
                     finAccountName="Joe Public Customer Credit" organizationPartyId="ORG_ZIZI_RETAIL">
@@ -355,26 +270,23 @@ class ReturnToResponseBasicFlow extends Specification {
                 <mantle.ledger.transaction.AcctgTransEntry acctgTransEntrySeqId="02" amount="23.07" glAccountId="251100000"
                         reconcileStatusId="AterNot" isSummary="N" glAccountTypeEnumId="GatCustomerCredits" debitCreditFlag="C"/>
             </mantle.ledger.transaction.AcctgTrans>
-        </entity-facade-xml>""").check(dataCheckErrors)
-        totalFieldsChecked += fieldsChecked
-        logger.info("Checked ${fieldsChecked} fields")
-        if (dataCheckErrors) for (String dataCheckError in dataCheckErrors) logger.info(dataCheckError)
-        if (ec.message.hasError()) logger.warn(ec.message.getErrorsString())
+        </entity-facade-xml>`)
+        return { dataCheckErrors }
+    },
+    then({ dataCheckErrors }) {
+        dataCheckErrors.length == 0
+    },
+})
 
-        then:
-        dataCheckErrors.size() == 0
-    }
-
-    def "ship Replacement Order"() {
-        when:
+feature("ship Replacement Order", {
+    when() {
 
         // the first ReturnItem is the replace item
-        EntityValue returnItem = ec.entity.find("mantle.order.return.ReturnItem").condition([returnId:returnId, returnItemSeqId:'01']).one()
-        replaceShipResult = ec.service.sync().name("mantle.shipment.ShipmentServices.ship#OrderPart")
-                .parameters([orderId:returnItem.replacementOrderId, orderPartSeqId:'01']).call()
+        const returnItem = ec.entity.find("mantle.order.return.ReturnItem").condition({ returnId: returnId, returnItemSeqId: '01' }).one()
+        replaceShipResult = call("mantle.shipment.ShipmentServices.ship#OrderPart",
+                { orderId: returnItem.replacementOrderId, orderPartSeqId: '01' })
 
-        List<String> dataCheckErrors = []
-        long fieldsChecked = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
+        const dataCheckErrors = check(`<entity-facade-xml>
             <shipments shipmentId="55701" fromPartyId="ORG_ZIZI_RETAIL" toPartyId="CustJqp"
                     shipmentTypeEnumId="ShpTpSales" statusId="ShipShipped">
                 <items quantity="1" productId="DEMO_1_1">
@@ -390,36 +302,30 @@ class ReturnToResponseBasicFlow extends Specification {
                         actualStartDate="${effectiveTime}" destTelecomContactMechId="CustJqpTeln"
                         originFacilityId="ZIRET_WH" destPostalContactMechId="CustJqpAddr"/>
             </shipments>
-        </entity-facade-xml>""").check(dataCheckErrors)
-        totalFieldsChecked += fieldsChecked
-        logger.info("Checked ${fieldsChecked} fields")
-        if (dataCheckErrors) for (String dataCheckError in dataCheckErrors) logger.info(dataCheckError)
-        if (ec.message.hasError()) logger.warn(ec.message.getErrorsString())
+        </entity-facade-xml>`)
+        return { dataCheckErrors }
+    },
+    then({ dataCheckErrors }) {
+        dataCheckErrors.length == 0
+    },
+})
 
-        then:
-        dataCheckErrors.size() == 0
-    }
-
-    def "validate Replacement Order Complete"() {
-        when:
-        List<String> dataCheckErrors = []
-        long fieldsChecked = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
+feature("validate Replacement Order Complete", {
+    when() {
+        const dataCheckErrors = check(`<entity-facade-xml>
             <!-- OrderHeader status to Completed -->
             <orders orderId="55700" statusId="OrderCompleted"><parts orderPartSeqId="01" statusId="OrderCompleted"/></orders>
-        </entity-facade-xml>""").check(dataCheckErrors)
-        totalFieldsChecked += fieldsChecked
-        logger.info("Checked ${fieldsChecked} fields")
-        if (dataCheckErrors) for (String dataCheckError in dataCheckErrors) logger.info(dataCheckError)
-        if (ec.message.hasError()) logger.warn(ec.message.getErrorsString())
+        </entity-facade-xml>`)
+        return { dataCheckErrors }
+    },
+    then({ dataCheckErrors }) {
+        dataCheckErrors.length == 0
+    },
+})
 
-        then:
-        dataCheckErrors.size() == 0
-    }
-
-    def "validate Asset Issuance and Accounting Transactions"() {
-        when:
-        List<String> dataCheckErrors = []
-        long fieldsChecked = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
+feature("validate Asset Issuance and Accounting Transactions", {
+    when() {
+        const dataCheckErrors = check(`<entity-facade-xml>
             <mantle.product.issuance.AssetIssuance assetIssuanceId="55700" assetId="55400" shipmentId="55701"
                     orderId="55700" orderItemSeqId="01" issuedDate="${effectiveTime}" quantity="1" productId="DEMO_1_1"
                     assetReservationId="55700" acctgTransResultEnumId="AtrSuccess">
@@ -436,53 +342,49 @@ class ReturnToResponseBasicFlow extends Specification {
                 <mantle.product.asset.AssetDetail assetDetailId="55704" assetId="55400" productId="DEMO_1_1"
                         assetReservationId="55700" shipmentId="55701" effectiveDate="${effectiveTime}" quantityOnHandDiff="-1"/>
             </mantle.product.issuance.AssetIssuance>
-        </entity-facade-xml>""").check(dataCheckErrors)
-        totalFieldsChecked += fieldsChecked
-        logger.info("Checked ${fieldsChecked} fields")
-        if (dataCheckErrors) for (String dataCheckError in dataCheckErrors) logger.info(dataCheckError)
-        if (ec.message.hasError()) logger.warn(ec.message.getErrorsString())
+        </entity-facade-xml>`)
+        return { dataCheckErrors }
+    },
+    then({ dataCheckErrors }) {
+        dataCheckErrors.length == 0
+    },
+})
 
-        then:
-        dataCheckErrors.size() == 0
-    }
-
-    def "purchase with return credit"() {
-        when:
-        String productStoreId = "POPC_DEFAULT"
+feature("purchase with return credit", {
+    when() {
+        const productStoreId = "POPC_DEFAULT"
 
         // ========== place order as customer
 
-        ec.user.logoutUser()
-        ec.user.loginUser("joe@public.com", "moqui")
-        String customerPartyId = ec.user.userAccount.partyId
+        logout()
+        login("joe@public.com")
+        const customerPartyId = ec.user.userAccount.partyId
         // get customer credit account
-        EntityList custFaList = ec.entity.find("mantle.account.financial.FinancialAccount")
-                .condition([ownerPartyId:customerPartyId, finAccountTypeId:'CustomerCredit']).list()
-        String finAccountId = custFaList[0].finAccountId
+        const custFaList = ec.entity.find("mantle.account.financial.FinancialAccount")
+                .condition({ ownerPartyId: customerPartyId, finAccountTypeId: 'CustomerCredit' }).list()
+        const finAccountId = custFaList[0].finAccountId
 
-        Map addOut1 = ec.service.sync().name("mantle.order.OrderServices.add#OrderProductQuantity")
-                .parameters([productId:'DEMO_3_1', quantity:1, customerPartyId:customerPartyId, productStoreId:productStoreId]).call()
-        String orderId = addOut1.orderId
-        String orderPartSeqId = addOut1.orderPartSeqId
-        ec.service.sync().name("mantle.order.OrderServices.set#OrderBillingShippingInfo")
-                .parameters([orderId:orderId, shippingPostalContactMechId:'CustJqpAddr',
-                             shippingTelecomContactMechId:'CustJqpTeln', carrierPartyId:'_NA_',
-                             shipmentMethodEnumId:'ShMthGround', finAccountId:finAccountId]).call()
-        ec.service.sync().name("mantle.order.OrderServices.place#Order").parameters([orderId:orderId]).call()
+        const addOut1 = call("mantle.order.OrderServices.add#OrderProductQuantity",
+                { productId: 'DEMO_3_1', quantity: 1, customerPartyId: customerPartyId, productStoreId: productStoreId })
+        const orderId = addOut1.orderId
+        const orderPartSeqId = addOut1.orderPartSeqId
+        call("mantle.order.OrderServices.set#OrderBillingShippingInfo",
+                { orderId: orderId, shippingPostalContactMechId: 'CustJqpAddr',
+                    shippingTelecomContactMechId: 'CustJqpTeln', carrierPartyId: '_NA_',
+                    shipmentMethodEnumId: 'ShMthGround', finAccountId: finAccountId })
+        call("mantle.order.OrderServices.place#Order", { orderId: orderId })
 
-        ec.user.logoutUser()
+        logout()
 
         // ========== ship/etc order as admin
 
-        ec.user.loginUser("john.doe", "moqui")
-        ec.service.sync().name("mantle.order.OrderServices.approve#Order").parameters([orderId:orderId]).call()
-        ec.service.sync().name("mantle.shipment.ShipmentServices.ship#OrderPart")
-                .parameters([orderId:orderId, orderPartSeqId:orderPartSeqId]).call()
+        login("john.doe")
+        call("mantle.order.OrderServices.approve#Order", { orderId: orderId })
+        call("mantle.shipment.ShipmentServices.ship#OrderPart", { orderId: orderId, orderPartSeqId: orderPartSeqId })
 
         // ========== check data
 
-        List<String> dataCheckErrors = []
-        long fieldsChecked = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
+        const dataCheckErrors = check(`<entity-facade-xml>
             <financialAccounts finAccountId="55700" negativeBalanceLimit="0" availableBalance="15.30"
                     actualBalance="15.30" ownerPartyId="CustJqp" organizationPartyId="ORG_ZIZI_RETAIL">
                 <!-- NOTE: expireDate is set to now when payment is captured, so not in the future as when created -->
@@ -522,13 +424,10 @@ class ReturnToResponseBasicFlow extends Specification {
                             paymentApplicationId="55701" invoiceId="55702"/>
                 </mantle.account.payment.Payment>
             </financialAccounts>
-        </entity-facade-xml>""").check(dataCheckErrors)
-        totalFieldsChecked += fieldsChecked
-        logger.info("Checked ${fieldsChecked} fields")
-        if (dataCheckErrors) for (String dataCheckError in dataCheckErrors) logger.info(dataCheckError)
-        if (ec.message.hasError()) logger.warn(ec.message.getErrorsString())
-
-        then:
-        dataCheckErrors.size() == 0
-    }
-}
+        </entity-facade-xml>`)
+        return { dataCheckErrors }
+    },
+    then({ dataCheckErrors }) {
+        dataCheckErrors.length == 0
+    },
+})

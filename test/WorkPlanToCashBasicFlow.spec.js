@@ -1,100 +1,69 @@
-/*
- * This software is in the public domain under CC0 1.0 Universal plus a 
- * Grant of Patent License.
- * 
- * To the extent possible under law, the author(s) have dedicated all
- * copyright and related and neighboring rights to this software to the
- * public domain worldwide. This software is distributed without any
- * warranty.
- * 
- * You should have received a copy of the CC0 Public Domain Dedication
- * along with this software (see the LICENSE.md file). If not, see
- * <http://creativecommons.org/publicdomain/zero/1.0/>.
- */
+// Port of WorkPlanToCashBasicFlow.groovy: a vendor (internal org) with a worker, a client, a project with milestones and
+// tasks, time entries, a request with a task, the worker/vendor expense and time invoice with payment, and the client
+// time and expense invoice with payment.
+// effectiveThruDate: now rounded down to the minute (Groovy formatted and parsed it with 'yyyy-MM-dd HH:mm')
+const effectiveThruDate = Math.floor(Date.now() / 60000) * 60000
+const effectiveTime = effectiveThruDate
+const startYear = "2016"
+// Legitimate differences from the Groovy expectations:
+// - the Groovy checked passwordHashType="SHA-256"; this host hashes new passwords with argon2
+const passwordHashType = "argon2"
+// - the Groovy checked 1477976400000 for the date-only fromDate '2016-11-01', which is midnight in the US Central zone
+//   (UTC-5 in Nov 1); this host parses a date-only value as midnight UTC, 1477958400000
+const assignFromDate = "1477958400000"
+let vendorResult, workerResult, clientRateResult, vendorRateResult, clientResult, expInvResult, clientInvResult
 
-import spock.lang.*
-
-import org.moqui.context.ExecutionContext
-import org.moqui.Moqui
-
-import org.slf4j.LoggerFactory
-import org.slf4j.Logger
-
-import java.sql.Timestamp
-
-/* To run these make sure moqui, and mantle are in place and run: "gradle cleanAll load runtime/mantle/mantle-usl:test" */
-class WorkPlanToCashBasicFlow extends Specification {
-    @Shared protected final static Logger logger = LoggerFactory.getLogger(WorkPlanToCashBasicFlow.class)
-    @Shared ExecutionContext ec
-    @Shared Map vendorResult, workerResult, clientRateResult, vendorRateResult, clientResult, expInvResult, clientInvResult
-    @Shared long effectiveTime
-    @Shared Timestamp effectiveThruDate
-    @Shared String startYear = "2016"
-
-    def setupSpec() {
-        // init the framework, get the ec
-        ec = Moqui.getExecutionContext()
-        ec.user.loginUser("john.doe", "moqui")
-        effectiveThruDate = ec.l10n.parseTimestamp(ec.l10n.format(ec.user.nowTimestamp, 'yyyy-MM-dd HH:mm'), 'yyyy-MM-dd HH:mm')
+spec({
+    dependsOn: ["ReturnToResponseBasicFlow"],
+    tempSequences: { start: 55900, banks: {
+        "mantle.account.invoice.Invoice": 10,
+        "mantle.account.invoice.InvoiceItemAssoc": 10,
+        "mantle.ledger.transaction.AcctgTrans": 10,
+        "mantle.party.Party": 10,
+        "mantle.request.Request": 10,
+        "mantle.work.time.TimeEntry": 10,
+        "moqui.entity.EntityAuditLog": 100,
+        "moqui.security.UserAccount": 10 } },
+    setupSpec() {
+        login("john.doe")
         // set an effective date so data check works, etc
         ec.user.setEffectiveTime(effectiveThruDate)
-        effectiveTime = effectiveThruDate.time
+    },
+    setup() { ec.artifactExecution.disableAuthz() },
+    cleanup() { ec.artifactExecution.enableAuthz() },
+})
 
-        // wait for jobs from previous tests to finish, avoid messing up EntityAuditLog sequenced IDs
-        // NOTE: wait longer (up to 30s) because after order flow can take some time
-        ec.factory.waitWorkerPoolEmpty(300)
+function check(name, xml) {
+    const dataCheckErrors = checkData(xml)
+    log.info("TEST " + name + " data check results: ")
+    for (const e of dataCheckErrors) log.info(e)
+    return dataCheckErrors
+}
 
-        ec.entity.tempSetSequencedIdPrimary("mantle.account.invoice.Invoice", 55900, 10)
-        ec.entity.tempSetSequencedIdPrimary("mantle.account.invoice.InvoiceItemAssoc", 55900, 10)
-        ec.entity.tempSetSequencedIdPrimary("mantle.ledger.transaction.AcctgTrans", 55900, 10)
-        ec.entity.tempSetSequencedIdPrimary("mantle.party.Party", 55900, 10)
-        ec.entity.tempSetSequencedIdPrimary("mantle.request.Request", 55900, 10)
-        ec.entity.tempSetSequencedIdPrimary("mantle.work.time.TimeEntry", 55900, 10)
-        ec.entity.tempSetSequencedIdPrimary("moqui.entity.EntityAuditLog", 55900, 100)
-        ec.entity.tempSetSequencedIdPrimary("moqui.security.UserAccount", 55900, 10)
-    }
-
-    def cleanupSpec() {
-        ec.entity.tempResetSequencedIdPrimary("mantle.account.invoice.Invoice")
-        ec.entity.tempResetSequencedIdPrimary("mantle.account.invoice.InvoiceItemAssoc")
-        ec.entity.tempResetSequencedIdPrimary("mantle.ledger.transaction.AcctgTrans")
-        ec.entity.tempResetSequencedIdPrimary("mantle.party.Party")
-        ec.entity.tempResetSequencedIdPrimary("mantle.request.Request")
-        ec.entity.tempResetSequencedIdPrimary("mantle.work.time.TimeEntry")
-        ec.entity.tempResetSequencedIdPrimary("moqui.entity.EntityAuditLog")
-        ec.entity.tempResetSequencedIdPrimary("moqui.security.UserAccount")
-
-        ec.destroy()
-    }
-
-    def setup() { ec.artifactExecution.disableAuthz() }
-    def cleanup() { ec.artifactExecution.enableAuthz() }
-
-    def "create Vendor"() {
-        when:
-        vendorResult = ec.service.sync().name("mantle.party.PartyServices.create#Organization")
-                .parameters([roleTypeId:'Vendor', organizationName:'Test Vendor']).call()
-        Map vendorCiResult = ec.service.sync().name("mantle.party.ContactServices.store#PartyContactInfo")
-                .parameters([partyId:vendorResult.partyId, postalContactMechPurposeId:'PostalPayment',
-                    telecomContactMechPurposeId:'PhonePayment', emailContactMechPurposeId:'EmailPayment', countryGeoId:'USA',
-                    address1:'51 W. Center St.', unitNumber:'1234', city:'Orem', stateProvinceGeoId:'USA_UT',
-                    postalCode:'84057', postalCodeExt:'4605', countryCode:'1', areaCode:'801', contactNumber:'123-4567',
-                    emailAddress:'vendor.ar@test.com']).call()
+feature("create Vendor", {
+    when() {
+        vendorResult = call("mantle.party.PartyServices.create#Organization", { roleTypeId: 'Vendor', organizationName: 'Test Vendor' })
+        const vendorCiResult = call("mantle.party.ContactServices.store#PartyContactInfo",
+                { partyId: vendorResult.partyId, postalContactMechPurposeId: 'PostalPayment',
+                    telecomContactMechPurposeId: 'PhonePayment', emailContactMechPurposeId: 'EmailPayment', countryGeoId: 'USA',
+                    address1: '51 W. Center St.', unitNumber: '1234', city: 'Orem', stateProvinceGeoId: 'USA_UT',
+                    postalCode: '84057', postalCodeExt: '4605', countryCode: '1', areaCode: '801', contactNumber: '123-4567',
+                    emailAddress: 'vendor.ar@test.com' })
         // internal org and accounting config default settings
-        ec.service.sync().name("create#mantle.party.PartyRole").parameters([partyId:vendorResult.partyId, roleTypeId:'OrgInternal']).call()
-        ec.service.sync().name("mantle.ledger.LedgerServices.init#PartyAccountingConfiguration")
-                .parameters([sourcePartyId:'DefaultSettings', organizationPartyId:vendorResult.partyId, startYear:startYear]).call()
+        call("create#mantle.party.PartyRole", { partyId: vendorResult.partyId, roleTypeId: 'OrgInternal' })
+        call("mantle.ledger.LedgerServices.init#PartyAccountingConfiguration",
+                { sourcePartyId: 'DefaultSettings', organizationPartyId: vendorResult.partyId, startYear: startYear })
         // vendor payment/ar rep
-        Map vendorRepResult = ec.service.sync().name("mantle.party.PartyServices.create#Account")
-                .parameters([firstName:'Vendor', lastName:'TestRep', emailAddress:'vendor.rep@test.com',
-                    username:'vendor.rep', newPassword:'moqui1!!', newPasswordVerify:'moqui1!!', loginAfterCreate:false]).call()
-        Map repRelResult = ec.service.sync().name("create#mantle.party.PartyRelationship")
-                .parameters([relationshipTypeEnumId:'PrtRepresentative', fromPartyId:vendorRepResult.partyId,
-                    fromRoleTypeId:'Manager', toPartyId:vendorResult.partyId, toRoleTypeId:'Vendor',
-                    fromDate:ec.user.nowTimestamp]).call()
+        const vendorRepResult = call("mantle.party.PartyServices.create#Account",
+                { firstName: 'Vendor', lastName: 'TestRep', emailAddress: 'vendor.rep@test.com',
+                    username: 'vendor.rep', newPassword: 'moqui1!!', newPasswordVerify: 'moqui1!!', loginAfterCreate: false })
+        const repRelResult = call("create#mantle.party.PartyRelationship",
+                { relationshipTypeEnumId: 'PrtRepresentative', fromPartyId: vendorRepResult.partyId,
+                    fromRoleTypeId: 'Manager', toPartyId: vendorResult.partyId, toRoleTypeId: 'Vendor',
+                    fromDate: ec.user.nowTimestamp })
 
         // NOTE: this has sequenced IDs so is sensitive to run order!
-        List<String> dataCheckErrors = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
+        const dataCheckErrors = check("create Vendor", `<entity-facade-xml>
             <mantle.party.Party partyId="${vendorResult.partyId}" partyTypeEnumId="PtyOrganization"/>
             <mantle.party.Organization partyId="${vendorResult.partyId}" organizationName="Test Vendor"/>
             <mantle.party.PartyRole partyId="${vendorResult.partyId}" roleTypeId="OrgInternal"/>
@@ -143,7 +112,7 @@ class WorkPlanToCashBasicFlow extends Specification {
             <mantle.party.Party partyId="${vendorRepResult.partyId}" partyTypeEnumId="PtyPerson" disabled="N"/>
             <mantle.party.Person partyId="${vendorRepResult.partyId}" firstName="Vendor" lastName="TestRep"/>
             <moqui.security.UserAccount userId="${vendorRepResult.userId}" username="vendor.rep" userFullName="Vendor TestRep"
-                passwordHashType="SHA-256" passwordSetDate="${effectiveTime}" disabled="N" requirePasswordChange="N"
+                passwordHashType="${passwordHashType}" passwordSetDate="${effectiveTime}" disabled="N" requirePasswordChange="N"
                 emailAddress="vendor.rep@test.com" partyId="${vendorRepResult.partyId}"/>
             <!-- the salt is generated randomly so can't easily validate the actual password or salt: currentPassword="32ce60c14d9e72c1fb17938ede30fe9de04390409cce7310743c2716a2c7bf89" passwordSalt="{.rqlPt8x" -->
             <mantle.party.contact.ContactMech contactMechId="${vendorRepResult.emailContactMechId}"
@@ -160,44 +129,45 @@ class WorkPlanToCashBasicFlow extends Specification {
             <moqui.entity.EntityAuditLog auditHistorySeqId="55902" changedEntityName="moqui.security.UserAccount"
                 changedFieldName="username" pkPrimaryValue="${vendorRepResult.userId}" newValueText="vendor.rep" changedDate="${effectiveTime}"
                 changedByUserId="EX_JOHN_DOE"/>
-        </entity-facade-xml>""").check()
-        logger.info("TEST create Vendor data check results: " + dataCheckErrors)
+        </entity-facade-xml>`)
+        return { dataCheckErrors }
+    },
+    then({ dataCheckErrors }) {
+        dataCheckErrors.length == 0
+    },
+})
 
-        then:
-        dataCheckErrors.size() == 0
-    }
-
-    def "create Worker and Rates"() {
-        when:
+feature("create Worker and Rates", {
+    when() {
         // worker
-        workerResult = ec.service.sync().name("mantle.party.PartyServices.create#Account")
-                .parameters([firstName:'Test', lastName:'Worker', emailAddress:'worker@test.com',
-                    username:'worker', newPassword:'moqui1!!', newPasswordVerify:'moqui1!!', loginAfterCreate:false]).call()
-        Map workerRelResult = ec.service.sync().name("create#mantle.party.PartyRelationship")
-                .parameters([relationshipTypeEnumId:'PrtAgent', fromPartyId:workerResult.partyId,
-                    fromRoleTypeId:'Worker', toPartyId:vendorResult.partyId, toRoleTypeId:'Vendor',
-                    fromDate:ec.user.nowTimestamp]).call()
+        workerResult = call("mantle.party.PartyServices.create#Account",
+                { firstName: 'Test', lastName: 'Worker', emailAddress: 'worker@test.com',
+                    username: 'worker', newPassword: 'moqui1!!', newPasswordVerify: 'moqui1!!', loginAfterCreate: false })
+        const workerRelResult = call("create#mantle.party.PartyRelationship",
+                { relationshipTypeEnumId: 'PrtAgent', fromPartyId: workerResult.partyId,
+                    fromRoleTypeId: 'Worker', toPartyId: vendorResult.partyId, toRoleTypeId: 'Vendor',
+                    fromDate: ec.user.nowTimestamp })
         // Rate Amounts
-        clientRateResult = ec.service.sync().name("create#mantle.humanres.rate.RateAmount")
-                .parameters([rateTypeEnumId:'RatpStandard', ratePurposeEnumId:'RaprClient', timePeriodUomId:'TF_hr',
-                    emplPositionClassId:'Programmer', fromDate:'1265184000000', rateAmount:'60.00',
-                    rateCurrencyUomId:'USD', partyId:workerResult.partyId]).call()
-        vendorRateResult = ec.service.sync().name("create#mantle.humanres.rate.RateAmount")
-                .parameters([rateTypeEnumId:'RatpStandard', ratePurposeEnumId:'RaprVendor', timePeriodUomId:'TF_hr',
-                    emplPositionClassId:'Programmer', fromDate:'1265184000000', rateAmount:'40.00',
-                    rateCurrencyUomId:'USD', partyId:workerResult.partyId]).call()
+        clientRateResult = call("create#mantle.humanres.rate.RateAmount",
+                { rateTypeEnumId: 'RatpStandard', ratePurposeEnumId: 'RaprClient', timePeriodUomId: 'TF_hr',
+                    emplPositionClassId: 'Programmer', fromDate: '1265184000000', rateAmount: '60.00',
+                    rateCurrencyUomId: 'USD', partyId: workerResult.partyId })
+        vendorRateResult = call("create#mantle.humanres.rate.RateAmount",
+                { rateTypeEnumId: 'RatpStandard', ratePurposeEnumId: 'RaprVendor', timePeriodUomId: 'TF_hr',
+                    emplPositionClassId: 'Programmer', fromDate: '1265184000000', rateAmount: '40.00',
+                    rateCurrencyUomId: 'USD', partyId: workerResult.partyId })
         // no charge rate, still pay vendor (using default 0 amount rate for client no explicit create for that)
-        ec.service.sync().name("create#mantle.humanres.rate.RateAmount")
-                .parameters([rateTypeEnumId:'RatpNoCharge', ratePurposeEnumId:'RaprVendor', timePeriodUomId:'TF_hr',
-                             emplPositionClassId:'Programmer', fromDate:'1265184000000', rateAmount:'40.00',
-                             rateCurrencyUomId:'USD']).call()
+        call("create#mantle.humanres.rate.RateAmount",
+                { rateTypeEnumId: 'RatpNoCharge', ratePurposeEnumId: 'RaprVendor', timePeriodUomId: 'TF_hr',
+                    emplPositionClassId: 'Programmer', fromDate: '1265184000000', rateAmount: '40.00',
+                    rateCurrencyUomId: 'USD' })
 
         // NOTE: this has sequenced IDs so is sensitive to run order!
-        List<String> dataCheckErrors = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
+        const dataCheckErrors = check("create Worker and Rates", `<entity-facade-xml>
             <mantle.party.Party partyId="${workerResult.partyId}" partyTypeEnumId="PtyPerson" disabled="N"/>
             <mantle.party.Person partyId="${workerResult.partyId}" firstName="Test" lastName="Worker"/>
             <moqui.security.UserAccount userId="${workerResult.userId}" username="worker" userFullName="Test Worker"
-                passwordHashType="SHA-256" passwordSetDate="${effectiveTime}" disabled="N" requirePasswordChange="N"
+                passwordHashType="${passwordHashType}" passwordSetDate="${effectiveTime}" disabled="N" requirePasswordChange="N"
                 emailAddress="worker@test.com" partyId="${workerResult.partyId}"/>
             <!-- the salt is generated randomly so can't easily validate the actual password or salt: currentPassword="32ce60c14d9e72c1fb17938ede30fe9de04390409cce7310743c2716a2c7bf89" passwordSalt="{.rqlPt8x" -->
             <mantle.party.contact.ContactMech contactMechId="${workerResult.emailContactMechId}"
@@ -221,34 +191,34 @@ class WorkPlanToCashBasicFlow extends Specification {
             <moqui.entity.EntityAuditLog auditHistorySeqId="55904" changedEntityName="moqui.security.UserAccount"
                 changedFieldName="username" pkPrimaryValue="${workerResult.userId}" newValueText="worker" changedDate="${effectiveTime}"
                 changedByUserId="EX_JOHN_DOE"/>
-        </entity-facade-xml>""").check()
-        logger.info("TEST create Worker and Rates data check results: " + dataCheckErrors)
+        </entity-facade-xml>`)
+        return { dataCheckErrors }
+    },
+    then({ dataCheckErrors }) {
+        dataCheckErrors.length == 0
+    },
+})
 
-        then:
-        dataCheckErrors.size() == 0
-    }
+feature("create Client", {
+    when() {
+        clientResult = call("mantle.party.PartyServices.create#Organization", { roleTypeId: 'Customer', organizationName: 'Test Client' })
+        const clientCiResult = call("mantle.party.ContactServices.store#PartyContactInfo",
+                { partyId: clientResult.partyId, postalContactMechPurposeId: 'PostalBilling',
+                    telecomContactMechPurposeId: 'PhoneBilling', emailContactMechPurposeId: 'EmailBilling', countryGeoId: 'USA',
+                    address1: '1350 E. Flamingo Rd.', unitNumber: '1234', city: 'Las Vegas', stateProvinceGeoId: 'USA_NV',
+                    postalCode: '89119', postalCodeExt: '5263', countryCode: '1', areaCode: '702', contactNumber: '123-4567',
+                    emailAddress: 'client.ap@test.com' })
 
-    def "create Client"() {
-        when:
-        clientResult = ec.service.sync().name("mantle.party.PartyServices.create#Organization")
-                .parameters([roleTypeId:'Customer', organizationName:'Test Client']).call()
-        Map clientCiResult = ec.service.sync().name("mantle.party.ContactServices.store#PartyContactInfo")
-                .parameters([partyId:clientResult.partyId, postalContactMechPurposeId:'PostalBilling',
-                    telecomContactMechPurposeId:'PhoneBilling', emailContactMechPurposeId:'EmailBilling', countryGeoId:'USA',
-                    address1:'1350 E. Flamingo Rd.', unitNumber:'1234', city:'Las Vegas', stateProvinceGeoId:'USA_NV',
-                    postalCode:'89119', postalCodeExt:'5263', countryCode:'1', areaCode:'702', contactNumber:'123-4567',
-                    emailAddress:'client.ap@test.com']).call()
-
-        Map clientRepResult = ec.service.sync().name("mantle.party.PartyServices.create#Account")
-                .parameters([firstName:'Client', lastName:'TestRep', emailAddress:'client.rep@test.com',
-                    username:'client.rep', newPassword:'moqui1!!', newPasswordVerify:'moqui1!!', loginAfterCreate:false]).call()
-        Map repRelResult = ec.service.sync().name("create#mantle.party.PartyRelationship")
-                .parameters([relationshipTypeEnumId:'PrtRepresentative', fromPartyId:clientRepResult.partyId,
-                    fromRoleTypeId:'ClientBilling', toPartyId:clientResult.partyId, toRoleTypeId:'Customer',
-                    fromDate:ec.user.nowTimestamp]).call()
+        const clientRepResult = call("mantle.party.PartyServices.create#Account",
+                { firstName: 'Client', lastName: 'TestRep', emailAddress: 'client.rep@test.com',
+                    username: 'client.rep', newPassword: 'moqui1!!', newPasswordVerify: 'moqui1!!', loginAfterCreate: false })
+        const repRelResult = call("create#mantle.party.PartyRelationship",
+                { relationshipTypeEnumId: 'PrtRepresentative', fromPartyId: clientRepResult.partyId,
+                    fromRoleTypeId: 'ClientBilling', toPartyId: clientResult.partyId, toRoleTypeId: 'Customer',
+                    fromDate: ec.user.nowTimestamp })
 
         // NOTE: this has sequenced IDs so is sensitive to run order!
-        List<String> dataCheckErrors = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
+        const dataCheckErrors = check("create Client", `<entity-facade-xml>
             <mantle.party.Party partyId="${clientResult.partyId}" partyTypeEnumId="PtyOrganization"/>
             <mantle.party.Organization partyId="${clientResult.partyId}" organizationName="Test Client"/>
             <mantle.party.PartyRole partyId="${clientResult.partyId}" roleTypeId="Customer"/>
@@ -272,7 +242,7 @@ class WorkPlanToCashBasicFlow extends Specification {
             <mantle.party.Party partyId="${clientRepResult.partyId}" partyTypeEnumId="PtyPerson" disabled="N"/>
             <mantle.party.Person partyId="${clientRepResult.partyId}" firstName="Client" lastName="TestRep"/>
             <moqui.security.UserAccount userId="${clientRepResult.userId}" username="client.rep" userFullName="Client TestRep"
-                passwordHashType="SHA-256" passwordSetDate="${effectiveTime}" disabled="N" requirePasswordChange="N"
+                passwordHashType="${passwordHashType}" passwordSetDate="${effectiveTime}" disabled="N" requirePasswordChange="N"
                 emailAddress="client.rep@test.com" partyId="${clientRepResult.partyId}"/>
             <!-- the salt is generated randomly so can't easily validate the actual password or salt: currentPassword="32ce60c14d9e72c1fb17938ede30fe9de04390409cce7310743c2716a2c7bf89" passwordSalt="{.rqlPt8x" -->
             <mantle.party.contact.ContactMech contactMechId="${clientRepResult.emailContactMechId}"
@@ -290,34 +260,33 @@ class WorkPlanToCashBasicFlow extends Specification {
                 changedFieldName="username" pkPrimaryValue="55902" newValueText="client.rep" changedDate="${effectiveTime}"
                 changedByUserId="EX_JOHN_DOE"/>
 
-        </entity-facade-xml>""").check()
-        logger.info("TEST create Client data check results: " + dataCheckErrors)
+        </entity-facade-xml>`)
+        return { dataCheckErrors }
+    },
+    then({ dataCheckErrors }) {
+        dataCheckErrors.length == 0
+    },
+})
 
-        then:
-        dataCheckErrors.size() == 0
-    }
-
-    def "create TEST Project"() {
-        when:
-        ec.service.sync().name("mantle.work.ProjectServices.create#Project")
-                .parameters([workEffortId:'TEST', workEffortName:'Test Proj', clientPartyId:clientResult.partyId,
-                    vendorPartyId:vendorResult.partyId, totalClientCostAllowed:"2000", costUomId:"USD"])
-                .call()
-        ec.service.sync().name("mantle.work.ProjectServices.update#Project")
-                .parameters([workEffortId:'TEST', workEffortName:'Test Project', statusId:'WeInProgress'])
-                .call()
+feature("create TEST Project", {
+    when() {
+        call("mantle.work.ProjectServices.create#Project",
+                { workEffortId: 'TEST', workEffortName: 'Test Proj', clientPartyId: clientResult.partyId,
+                    vendorPartyId: vendorResult.partyId, totalClientCostAllowed: "2000", costUomId: "USD" })
+        call("mantle.work.ProjectServices.update#Project",
+                { workEffortId: 'TEST', workEffortName: 'Test Project', statusId: 'WeInProgress' })
         // assign Joe Developer to TEST project as Programmer (necessary for determining RateAmount, etc)
-        ec.service.sync().name("create#mantle.work.effort.WorkEffortParty")
-                .parameters([workEffortId:'TEST', partyId:workerResult.partyId, roleTypeId:'Assignee', emplPositionClassId:'Programmer',
-                    fromDate:startYear + '-11-01', statusId:'WeptAssigned']).call()
+        call("create#mantle.work.effort.WorkEffortParty",
+                { workEffortId: 'TEST', partyId: workerResult.partyId, roleTypeId: 'Assignee', emplPositionClassId: 'Programmer',
+                    fromDate: startYear + '-11-01', statusId: 'WeptAssigned' })
 
-        List<String> dataCheckErrors = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
+        const dataCheckErrors = check("Project", `<entity-facade-xml>
             <mantle.work.effort.WorkEffort workEffortId="TEST" workEffortTypeEnumId="WetProject" statusId="WeInProgress" workEffortName="Test Project"/>
             <mantle.work.effort.WorkEffortParty workEffortId="TEST" partyId="EX_JOHN_DOE" roleTypeId="Manager" fromDate="${effectiveTime}" statusId="WeptAssigned"/>
             <mantle.work.effort.WorkEffortParty workEffortId="TEST" partyId="${clientResult.partyId}" roleTypeId="Customer" fromDate="${effectiveTime}"/>
             <mantle.work.effort.WorkEffortParty workEffortId="TEST" partyId="${vendorResult.partyId}" roleTypeId="Vendor" fromDate="${effectiveTime}"/>
             <mantle.work.effort.WorkEffortParty workEffortId="TEST" partyId="${workerResult.partyId}" roleTypeId="Assignee"
-                fromDate="1477976400000" statusId="WeptAssigned" emplPositionClassId="Programmer"/>
+                fromDate="${assignFromDate}" statusId="WeptAssigned" emplPositionClassId="Programmer"/>
 
             <moqui.entity.EntityAuditLog auditHistorySeqId="55908" changedEntityName="mantle.work.effort.WorkEffort"
                 changedFieldName="statusId" pkPrimaryValue="TEST" newValueText="WeInPlanning" changedDate="${effectiveTime}"
@@ -331,28 +300,27 @@ class WorkPlanToCashBasicFlow extends Specification {
                 changedDate="${effectiveTime}" changedByUserId="EX_JOHN_DOE"/>
             <moqui.entity.EntityAuditLog auditHistorySeqId="55911" changedEntityName="mantle.work.effort.WorkEffortParty"
                 changedFieldName="statusId" pkPrimaryValue="TEST" pkSecondaryValue="${workerResult.partyId}"
-                pkRestCombinedValue="roleTypeId:'Assignee',fromDate:'1477976400000'" newValueText="WeptAssigned"
+                pkRestCombinedValue="roleTypeId:'Assignee',fromDate:'${assignFromDate}'" newValueText="WeptAssigned"
                 changedDate="${effectiveTime}" changedByUserId="EX_JOHN_DOE"/>
 
-            </entity-facade-xml>""").check()
-        logger.info("TEST Project data check results: " + dataCheckErrors)
+            </entity-facade-xml>`)
+        return { dataCheckErrors }
+    },
+    then({ dataCheckErrors }) {
+        dataCheckErrors.length == 0
+    },
+})
 
-        then:
-        dataCheckErrors.size() == 0
-    }
+feature("create TEST Milestones", {
+    when() {
+        call("mantle.work.ProjectServices.create#Milestone",
+                { rootWorkEffortId: 'TEST', workEffortId: 'TEST-MS-01', workEffortName: 'Test Milestone 1',
+                    estimatedStartDate: startYear + '-11-01', estimatedCompletionDate: startYear + '-11-30', statusId: 'WeInProgress' })
+        call("mantle.work.ProjectServices.create#Milestone",
+                { rootWorkEffortId: 'TEST', workEffortId: 'TEST-MS-02', workEffortName: 'Test Milestone 2',
+                    estimatedStartDate: startYear + '-12-01', estimatedCompletionDate: startYear + '-12-31', statusId: 'WeApproved' })
 
-    def "create TEST Milestones"() {
-        when:
-        ec.service.sync().name("mantle.work.ProjectServices.create#Milestone")
-                .parameters([rootWorkEffortId:'TEST', workEffortId:'TEST-MS-01', workEffortName:'Test Milestone 1',
-                    estimatedStartDate:startYear + '-11-01', estimatedCompletionDate:startYear + '-11-30', statusId:'WeInProgress'])
-                .call()
-        ec.service.sync().name("mantle.work.ProjectServices.create#Milestone")
-                .parameters([rootWorkEffortId:'TEST', workEffortId:'TEST-MS-02', workEffortName:'Test Milestone 2',
-                    estimatedStartDate:startYear + '-12-01', estimatedCompletionDate:startYear + '-12-31', statusId:'WeApproved'])
-                .call()
-
-        List<String> dataCheckErrors = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
+        const dataCheckErrors = check("Milestones", `<entity-facade-xml>
             <mantle.work.effort.WorkEffort workEffortId="TEST-MS-01" rootWorkEffortId="TEST" workEffortTypeEnumId="WetMilestone"
                 statusId="WeInProgress" workEffortName="Test Milestone 1" estimatedStartDate="${startYear}-11-01 00:00:00.0" estimatedCompletionDate="${startYear}-11-30 00:00:00.0"/>
             <mantle.work.effort.WorkEffort workEffortId="TEST-MS-02" rootWorkEffortId="TEST" workEffortTypeEnumId="WetMilestone"
@@ -364,34 +332,32 @@ class WorkPlanToCashBasicFlow extends Specification {
             <moqui.entity.EntityAuditLog auditHistorySeqId="55913" changedEntityName="mantle.work.effort.WorkEffort"
                 changedFieldName="statusId" pkPrimaryValue="TEST-MS-02" newValueText="WeApproved"
                 changedDate="${effectiveTime}" changedByUserId="EX_JOHN_DOE"/>
-            </entity-facade-xml>""").check()
-        logger.info("TEST Milestones data check results: " + dataCheckErrors)
+            </entity-facade-xml>`)
+        return { dataCheckErrors }
+    },
+    then({ dataCheckErrors }) {
+        dataCheckErrors.length == 0
+    },
+})
 
-        then:
-        dataCheckErrors.size() == 0
-    }
-
-    def "create TEST Project Tasks"() {
-        when:
-        ec.service.sync().name("mantle.work.TaskServices.create#Task")
-                .parameters([rootWorkEffortId:'TEST', parentWorkEffortId:null, workEffortId:'TEST-001', milestoneWorkEffortId:'TEST-MS-01',
-                    workEffortName:'Test Task 1', estimatedCompletionDate:startYear + '-11-15', statusId:'WeApproved',
-                    assignToPartyId:workerResult.partyId, priority:3, purposeEnumId:'WepTask', estimatedWorkTime:10,
-                    description:'Will be really great when it\'s done'])
-                .call()
-        ec.service.sync().name("mantle.work.TaskServices.create#Task")
-                .parameters([rootWorkEffortId:'TEST', parentWorkEffortId:'TEST-001', workEffortId:'TEST-001A', milestoneWorkEffortId:'TEST-MS-01',
-                    workEffortName:'Test Task 1A', estimatedCompletionDate:startYear + '-11-15', statusId:'WeInPlanning',
-                    assignToPartyId:workerResult.partyId, priority:4, purposeEnumId:'WepNewFeature', estimatedWorkTime:2,
-                    description:'One piece of the puzzle'])
-                .call()
-        ec.service.sync().name("mantle.work.TaskServices.create#Task")
-                .parameters([rootWorkEffortId:'TEST', parentWorkEffortId:'TEST-001', workEffortId:'TEST-001B', milestoneWorkEffortId:'TEST-MS-01',
-                    workEffortName:'Test Task 1B', estimatedCompletionDate:startYear + '-11-15', statusId:'WeApproved',
-                    assignToPartyId:workerResult.partyId, priority:4, purposeEnumId:'WepFix', estimatedWorkTime:2,
-                    description:'Broken piece of the puzzle'])
-                .call()
-        List<String> dataCheckErrors = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
+feature("create TEST Project Tasks", {
+    when() {
+        call("mantle.work.TaskServices.create#Task",
+                { rootWorkEffortId: 'TEST', parentWorkEffortId: null, workEffortId: 'TEST-001', milestoneWorkEffortId: 'TEST-MS-01',
+                    workEffortName: 'Test Task 1', estimatedCompletionDate: startYear + '-11-15', statusId: 'WeApproved',
+                    assignToPartyId: workerResult.partyId, priority: 3, purposeEnumId: 'WepTask', estimatedWorkTime: 10,
+                    description: 'Will be really great when it\'s done' })
+        call("mantle.work.TaskServices.create#Task",
+                { rootWorkEffortId: 'TEST', parentWorkEffortId: 'TEST-001', workEffortId: 'TEST-001A', milestoneWorkEffortId: 'TEST-MS-01',
+                    workEffortName: 'Test Task 1A', estimatedCompletionDate: startYear + '-11-15', statusId: 'WeInPlanning',
+                    assignToPartyId: workerResult.partyId, priority: 4, purposeEnumId: 'WepNewFeature', estimatedWorkTime: 2,
+                    description: 'One piece of the puzzle' })
+        call("mantle.work.TaskServices.create#Task",
+                { rootWorkEffortId: 'TEST', parentWorkEffortId: 'TEST-001', workEffortId: 'TEST-001B', milestoneWorkEffortId: 'TEST-MS-01',
+                    workEffortName: 'Test Task 1B', estimatedCompletionDate: startYear + '-11-15', statusId: 'WeApproved',
+                    assignToPartyId: workerResult.partyId, priority: 4, purposeEnumId: 'WepFix', estimatedWorkTime: 2,
+                    description: 'Broken piece of the puzzle' })
+        const dataCheckErrors = check("Milestones", `<entity-facade-xml>
             <mantle.work.effort.WorkEffort workEffortId="TEST-001" rootWorkEffortId="TEST" workEffortTypeEnumId="WetTask"
                 purposeEnumId="WepTask" resolutionEnumId="WerUnresolved" statusId="WeApproved" priority="3"
                 workEffortName="Test Task 1" description="Will be really great when it's done"
@@ -444,58 +410,59 @@ class WorkPlanToCashBasicFlow extends Specification {
                 pkRestCombinedValue="roleTypeId:'Assignee',fromDate:'${effectiveTime}'" newValueText="WeptAssigned"
                 changedDate="${effectiveTime}" changedByUserId="EX_JOHN_DOE"/>
 
-            </entity-facade-xml>""").check()
-        logger.info("TEST Milestones data check results: " + dataCheckErrors)
+            </entity-facade-xml>`)
+        return { dataCheckErrors }
+    },
+    then({ dataCheckErrors }) {
+        dataCheckErrors.length == 0
+    },
+})
 
-        then:
-        dataCheckErrors.size() == 0
-    }
-
-    def "record TimeEntries and complete Tasks"() {
-        when:
+feature("record TimeEntries and complete Tasks", {
+    when() {
         // get tasks In Progress
-        ec.service.sync().name("mantle.work.TaskServices.update#Task").parameters([workEffortId:'TEST-001', statusId:'WeInProgress']).call()
-        ec.service.sync().name("mantle.work.TaskServices.update#Task").parameters([workEffortId:'TEST-001A', statusId:'WeInProgress']).call()
-        ec.service.sync().name("mantle.work.TaskServices.update#Task").parameters([workEffortId:'TEST-001B', statusId:'WeInProgress']).call()
+        call("mantle.work.TaskServices.update#Task", { workEffortId: 'TEST-001', statusId: 'WeInProgress' })
+        call("mantle.work.TaskServices.update#Task", { workEffortId: 'TEST-001A', statusId: 'WeInProgress' })
+        call("mantle.work.TaskServices.update#Task", { workEffortId: 'TEST-001B', statusId: 'WeInProgress' })
 
-        String comments = "Did stuff. These comments are longer in order to test comment truncation on invoicing as invoice item descriptions are limited to 255 characters so this has to be longer so tests will fail and people won't get paid and the world will end if comments that are too long are not handled adequately."
+        const comments = "Did stuff. These comments are longer in order to test comment truncation on invoicing as invoice item descriptions are limited to 255 characters so this has to be longer so tests will fail and people won't get paid and the world will end if comments that are too long are not handled adequately."
         // plain hours, nothing else
-        ec.service.sync().name("mantle.work.TaskServices.add#TaskTime")
-                .parameters([workEffortId:'TEST-001', partyId:workerResult.partyId, rateTypeEnumId:'RatpStandard', remainingWorkTime:3,
-                             hours:6, fromDate:null, thruDate:null, breakHours:null, comments:comments]).call()
+        call("mantle.work.TaskServices.add#TaskTime",
+                { workEffortId: 'TEST-001', partyId: workerResult.partyId, rateTypeEnumId: 'RatpStandard', remainingWorkTime: 3,
+                    hours: 6, fromDate: null, thruDate: null, breakHours: null, comments: comments })
         // hours and break, no from/thru dates (determined automatically, thru based on now and from based on hours+break)
-        ec.service.sync().name("mantle.work.TaskServices.add#TaskTime")
-                .parameters([workEffortId:'TEST-001A', partyId:workerResult.partyId, rateTypeEnumId:'RatpStandard', remainingWorkTime:1,
-                             hours:1.5, fromDate:null, thruDate:null, breakHours:0.5, comments:"Hours and break test, no from/thru dates"]).call()
+        call("mantle.work.TaskServices.add#TaskTime",
+                { workEffortId: 'TEST-001A', partyId: workerResult.partyId, rateTypeEnumId: 'RatpStandard', remainingWorkTime: 1,
+                    hours: 1.5, fromDate: null, thruDate: null, breakHours: 0.5, comments: "Hours and break test, no from/thru dates" })
         // break and from/thru dates, hours determined automatically
-        ec.service.sync().name("mantle.work.TaskServices.add#TaskTime")
-                .parameters([workEffortId:'TEST-001B', partyId:workerResult.partyId, rateTypeEnumId:'RatpStandard', remainingWorkTime:0.5,
-                             hours:null, fromDate:"${startYear}-11-03 12:00:00", thruDate:"${startYear}-11-03 15:00:00", breakHours:1,
-                             comments:"Break and from/thru dates test, hours calculated"]).call()
+        call("mantle.work.TaskServices.add#TaskTime",
+                { workEffortId: 'TEST-001B', partyId: workerResult.partyId, rateTypeEnumId: 'RatpStandard', remainingWorkTime: 0.5,
+                    hours: null, fromDate: `${startYear}-11-03 12:00:00`, thruDate: `${startYear}-11-03 15:00:00`, breakHours: 1,
+                    comments: "Break and from/thru dates test, hours calculated" })
         // no charge time entry, test invoicing time with no amount and make sure hour quantity makes it through
-        ec.service.sync().name("mantle.work.TaskServices.add#TaskTime")
-                .parameters([workEffortId:'TEST-001B', partyId:workerResult.partyId, rateTypeEnumId:'RatpNoCharge', remainingWorkTime:0.5,
-                             hours:4, fromDate:null, thruDate:null, breakHours:1,
-                             comments:"No charge for this one because we like you"]).call()
+        call("mantle.work.TaskServices.add#TaskTime",
+                { workEffortId: 'TEST-001B', partyId: workerResult.partyId, rateTypeEnumId: 'RatpNoCharge', remainingWorkTime: 0.5,
+                    hours: 4, fromDate: null, thruDate: null, breakHours: 1,
+                    comments: "No charge for this one because we like you" })
 
         // complete tasks
-        ec.service.sync().name("mantle.work.TaskServices.update#Task").parameters([workEffortId:'TEST-001', statusId:'WeComplete', resolutionEnumId:'WerCompleted']).call()
-        ec.service.sync().name("mantle.work.TaskServices.update#Task").parameters([workEffortId:'TEST-001A', statusId:'WeComplete', resolutionEnumId:'WerCompleted']).call()
-        ec.service.sync().name("mantle.work.TaskServices.update#Task").parameters([workEffortId:'TEST-001B', statusId:'WeComplete', resolutionEnumId:'WerCompleted']).call()
+        call("mantle.work.TaskServices.update#Task", { workEffortId: 'TEST-001', statusId: 'WeComplete', resolutionEnumId: 'WerCompleted' })
+        call("mantle.work.TaskServices.update#Task", { workEffortId: 'TEST-001A', statusId: 'WeComplete', resolutionEnumId: 'WerCompleted' })
+        call("mantle.work.TaskServices.update#Task", { workEffortId: 'TEST-001B', statusId: 'WeComplete', resolutionEnumId: 'WerCompleted' })
 
         // NOTE: this has sequenced IDs so is sensitive to run order!
-        List<String> dataCheckErrors = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
+        const dataCheckErrors = check("record TimeEntries and complete Tasks", `<entity-facade-xml>
             <mantle.work.effort.WorkEffort workEffortId="TEST-001" resolutionEnumId="WerCompleted" statusId="WeComplete"
                 estimatedWorkTime="10" remainingWorkTime="3" actualWorkTime="6"/>
             <mantle.work.time.TimeEntry timeEntryId="55900" partyId="${workerResult.partyId}" rateTypeEnumId="RatpStandard"
                 rateAmountId="${clientRateResult.rateAmountId}" vendorRateAmountId="${vendorRateResult.rateAmountId}"
-                fromDate="${effectiveThruDate.time-(6*60*60*1000)}" thruDate="${effectiveThruDate.time}" hours="6" workEffortId="TEST-001"/>
+                fromDate="${effectiveThruDate-(6*60*60*1000)}" thruDate="${effectiveThruDate}" hours="6" workEffortId="TEST-001"/>
 
             <mantle.work.effort.WorkEffort workEffortId="TEST-001A" resolutionEnumId="WerCompleted" statusId="WeComplete"
                 estimatedWorkTime="2" remainingWorkTime="1" actualWorkTime="1.5"/>
             <mantle.work.time.TimeEntry timeEntryId="55901" partyId="${workerResult.partyId}" rateTypeEnumId="RatpStandard"
                 rateAmountId="${clientRateResult.rateAmountId}" vendorRateAmountId="${vendorRateResult.rateAmountId}"
-                fromDate="${effectiveThruDate.time-(2*60*60*1000)}" thruDate="${effectiveThruDate.time}" hours="1.5"
+                fromDate="${effectiveThruDate-(2*60*60*1000)}" thruDate="${effectiveThruDate}" hours="1.5"
                 breakHours="0.5" workEffortId="TEST-001A"/>
 
             <mantle.work.effort.WorkEffort workEffortId="TEST-001B" resolutionEnumId="WerCompleted" statusId="WeComplete"
@@ -539,37 +506,34 @@ class WorkPlanToCashBasicFlow extends Specification {
                 changedFieldName="statusId" pkPrimaryValue="TEST-001B" oldValueText="WeInProgress"
                 newValueText="WeComplete" changedDate="${effectiveTime}" changedByUserId="EX_JOHN_DOE"/>
 
-        </entity-facade-xml>""").check()
-        logger.info("record TimeEntries and complete Tasks data check results: " + dataCheckErrors)
+        </entity-facade-xml>`)
+        return { dataCheckErrors }
+    },
+    then({ dataCheckErrors }) {
+        dataCheckErrors.length == 0
+    },
+})
 
-        then:
-        dataCheckErrors.size() == 0
-    }
+feature("create Request and Task for Request", {
+    when() {
+        const createReqResult = call("mantle.request.RequestServices.create#Request",
+                { clientPartyId: clientResult.partyId, assignToPartyId: workerResult.partyId, requestName: 'Test Request 1',
+                    description: 'Description of Test Request 1', priority: 7, requestTypeEnumId: 'RqtSupport',
+                    statusId: 'ReqSubmitted', responseRequiredDate: startYear + '-11-15 15:00:00' })
+        call("mantle.request.RequestServices.update#Request", { requestId: createReqResult.requestId, statusId: 'ReqReviewed' })
 
-    def "create Request and Task for Request"() {
-        when:
-        Map createReqResult = ec.service.sync().name("mantle.request.RequestServices.create#Request")
-                .parameters([clientPartyId:clientResult.partyId, assignToPartyId:workerResult.partyId, requestName:'Test Request 1',
-                    description:'Description of Test Request 1', priority:7, requestTypeEnumId:'RqtSupport',
-                    statusId:'ReqSubmitted', responseRequiredDate:startYear + '-11-15 15:00:00']).call()
-        ec.service.sync().name("mantle.request.RequestServices.update#Request")
-                .parameters([requestId:createReqResult.requestId, statusId:'ReqReviewed']).call()
-
-        Map createReqTskResult = ec.service.sync().name("mantle.work.TaskServices.create#Task")
-                .parameters([rootWorkEffortId:'TEST', workEffortName:'Test Request 1 Task',
-                    estimatedCompletionDate:startYear + '-11-15', statusId:'WeApproved', assignToPartyId:workerResult.partyId,
-                    priority:7, purposeEnumId:'WepTask', estimatedWorkTime:2, description:'']).call()
-        ec.service.sync().name("create#mantle.request.RequestWorkEffort")
-                .parameters([workEffortId:createReqTskResult.workEffortId, requestId:createReqResult.requestId]).call()
-        ec.service.sync().name("mantle.work.TaskServices.update#Task")
-                .parameters([workEffortId:createReqTskResult.workEffortId, statusId:'WeComplete',
-                    resolutionEnumId:'WerCompleted']).call()
+        const createReqTskResult = call("mantle.work.TaskServices.create#Task",
+                { rootWorkEffortId: 'TEST', workEffortName: 'Test Request 1 Task',
+                    estimatedCompletionDate: startYear + '-11-15', statusId: 'WeApproved', assignToPartyId: workerResult.partyId,
+                    priority: 7, purposeEnumId: 'WepTask', estimatedWorkTime: 2, description: '' })
+        call("create#mantle.request.RequestWorkEffort", { workEffortId: createReqTskResult.workEffortId, requestId: createReqResult.requestId })
+        call("mantle.work.TaskServices.update#Task",
+                { workEffortId: createReqTskResult.workEffortId, statusId: 'WeComplete', resolutionEnumId: 'WerCompleted' })
 
         // task completed, now complete request
-        ec.service.sync().name("mantle.request.RequestServices.update#Request")
-                .parameters([requestId:createReqResult.requestId, statusId:'ReqCompleted']).call()
+        call("mantle.request.RequestServices.update#Request", { requestId: createReqResult.requestId, statusId: 'ReqCompleted' })
 
-        List<String> dataCheckErrors = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
+        const dataCheckErrors = check("create Request and Task for Request", `<entity-facade-xml>
             <mantle.request.Request requestId="${createReqResult.requestId}" requestTypeEnumId="RqtSupport"
                 statusId="ReqCompleted" requestName="Test Request 1" description="Description of Test Request 1" priority="7"
                 requestResolutionEnumId="RrUnresolved" filedByPartyId="EX_JOHN_DOE"/>
@@ -609,40 +573,40 @@ class WorkPlanToCashBasicFlow extends Specification {
                 changedFieldName="statusId" pkPrimaryValue="55900" oldValueText="ReqReviewed"
                 newValueText="ReqCompleted" changedDate="${effectiveTime}" changedByUserId="EX_JOHN_DOE"/>
 
-        </entity-facade-xml>""").check()
-        logger.info("create Request and Task for Request data check results: " + dataCheckErrors)
+        </entity-facade-xml>`)
+        return { dataCheckErrors }
+    },
+    then({ dataCheckErrors }) {
+        dataCheckErrors.length == 0
+    },
+})
 
-        then:
-        dataCheckErrors.size() == 0
-    }
-
-    def "create Worker Time and Expense Invoice and record Payment"() {
-        when:
+feature("create Worker Time and Expense Invoice and record Payment", {
+    when() {
         // create expense invoices and add items
-        expInvResult = ec.service.sync().name("mantle.account.InvoiceServices.create#ProjectExpenseInvoice")
-                .parameters([workEffortId:'TEST', fromPartyId:workerResult.partyId, invoiceDate:startYear + '-11-08']).call()
-        ec.service.sync().name("create#mantle.account.invoice.InvoiceItem")
-                .parameters([invoiceId:expInvResult.invoiceId, itemTypeEnumId:'ItemExpTravAir',
-                    description:'United SFO-LAX', itemDate:startYear + '-11-02', quantity:1, amount:345.67]).call()
-        ec.service.sync().name("create#mantle.account.invoice.InvoiceItem")
-                .parameters([invoiceId:expInvResult.invoiceId, itemTypeEnumId:'ItemExpTravLodging',
-                    description:'Fleabag Inn 2 nights', itemDate:startYear + '-11-04', quantity:1, amount:123.45]).call()
+        expInvResult = call("mantle.account.InvoiceServices.create#ProjectExpenseInvoice",
+                { workEffortId: 'TEST', fromPartyId: workerResult.partyId, invoiceDate: startYear + '-11-08' })
+        call("create#mantle.account.invoice.InvoiceItem",
+                { invoiceId: expInvResult.invoiceId, itemTypeEnumId: 'ItemExpTravAir',
+                    description: 'United SFO-LAX', itemDate: startYear + '-11-02', quantity: 1, amount: 345.67 })
+        call("create#mantle.account.invoice.InvoiceItem",
+                { invoiceId: expInvResult.invoiceId, itemTypeEnumId: 'ItemExpTravLodging',
+                    description: 'Fleabag Inn 2 nights', itemDate: startYear + '-11-04', quantity: 1, amount: 123.45 })
         // add worker/vendor time to the expense invoice
-        ec.service.sync().name("mantle.account.InvoiceServices.create#ProjectInvoiceItems")
-                .parameters([invoiceId:expInvResult.invoiceId, workerPartyId:workerResult.partyId,
-                    ratePurposeEnumId:'RaprVendor', workEffortId:'TEST', thruDate:new Timestamp(effectiveTime + 1)]).call()
+        call("mantle.account.InvoiceServices.create#ProjectInvoiceItems",
+                { invoiceId: expInvResult.invoiceId, workerPartyId: workerResult.partyId,
+                    ratePurposeEnumId: 'RaprVendor', workEffortId: 'TEST', thruDate: new Date(effectiveTime + 1) })
         // "submit" the expense/time invoice
-        ec.service.sync().name("update#mantle.account.invoice.Invoice")
-                .parameters([invoiceId:expInvResult.invoiceId, statusId:'InvoiceReceived']).call()
+        call("update#mantle.account.invoice.Invoice", { invoiceId: expInvResult.invoiceId, statusId: 'InvoiceReceived' })
 
         // pay the invoice (345.67 + 123.45 + (13.5 * 40) = 1009.12)
-        Map expPmtResult = ec.service.sync().name("mantle.account.PaymentServices.create#InvoicePayment")
-                .parameters([invoiceId:expInvResult.invoiceId, statusId:'PmntDelivered', amount:'1009.12',
-                    paymentInstrumentEnumId:'PiCompanyCheck', effectiveDate:startYear + '-11-10 12:00:00',
-                    paymentRefNum:'1234', comments:'Delivered by Fedex']).call()
+        const expPmtResult = call("mantle.account.PaymentServices.create#InvoicePayment",
+                { invoiceId: expInvResult.invoiceId, statusId: 'PmntDelivered', amount: '1009.12',
+                    paymentInstrumentEnumId: 'PiCompanyCheck', effectiveDate: startYear + '-11-10 12:00:00',
+                    paymentRefNum: '1234', comments: 'Delivered by Fedex' })
 
         // NOTE: this has sequenced IDs so is sensitive to run order!
-        List<String> dataCheckErrors = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
+        const dataCheckErrors = check("create Worker Time and Expense Invoice and record Payment", `<entity-facade-xml>
             <mantle.account.invoice.Invoice invoiceId="${expInvResult.invoiceId}" invoiceTypeEnumId="InvoiceSales" fromPartyId="${workerResult.partyId}"
                 toPartyId="${vendorResult.partyId}" statusId="InvoicePmtSent" invoiceDate="${startYear + '-11-08'}" currencyUomId="USD"/>
             <mantle.account.invoice.InvoiceItem invoiceId="${expInvResult.invoiceId}" invoiceItemSeqId="01" itemTypeEnumId="ItemExpTravAir"
@@ -654,13 +618,13 @@ class WorkPlanToCashBasicFlow extends Specification {
                 quantity="2" amount="40"/>
             <mantle.work.time.TimeEntry timeEntryId="55902" vendorInvoiceId="${expInvResult.invoiceId}" vendorInvoiceItemSeqId="03"/>
             <mantle.account.invoice.InvoiceItem invoiceId="${expInvResult.invoiceId}" invoiceItemSeqId="04" itemTypeEnumId="ItemTimeEntry"
-                quantity="6" amount="40" itemDate="${effectiveThruDate.time}"/>
+                quantity="6" amount="40" itemDate="${effectiveThruDate}"/>
             <mantle.work.time.TimeEntry timeEntryId="55900" vendorInvoiceId="${expInvResult.invoiceId}" vendorInvoiceItemSeqId="04"/>
             <mantle.account.invoice.InvoiceItem invoiceId="${expInvResult.invoiceId}" invoiceItemSeqId="05" itemTypeEnumId="ItemTimeEntry"
-                quantity="4" amount="40" itemDate="${effectiveThruDate.time}"/>
+                quantity="4" amount="40" itemDate="${effectiveThruDate}"/>
             <mantle.work.time.TimeEntry timeEntryId="55903" vendorInvoiceId="${expInvResult.invoiceId}" vendorInvoiceItemSeqId="05"/>
             <mantle.account.invoice.InvoiceItem invoiceId="${expInvResult.invoiceId}" invoiceItemSeqId="06" itemTypeEnumId="ItemTimeEntry"
-                quantity="1.5" amount="40" itemDate="${effectiveThruDate.time}"/>
+                quantity="1.5" amount="40" itemDate="${effectiveThruDate}"/>
             <mantle.work.time.TimeEntry timeEntryId="55901" vendorInvoiceId="${expInvResult.invoiceId}" vendorInvoiceItemSeqId="06"/>
 
             <mantle.ledger.transaction.AcctgTrans acctgTransId="55900" acctgTransTypeEnumId="AttPurchaseInvoice"
@@ -729,24 +693,23 @@ class WorkPlanToCashBasicFlow extends Specification {
                 changedFieldName="isPosted" pkPrimaryValue="55901" oldValueText="N" newValueText="Y"
                 changedDate="${effectiveTime}" changedByUserId="EX_JOHN_DOE"/>
 
-        </entity-facade-xml>""").check()
-        logger.info("create Worker Time and Expense Invoice and record Payment data check results: ")
-        for (String dataCheckError in dataCheckErrors) logger.info(dataCheckError)
+        </entity-facade-xml>`)
+        return { dataCheckErrors }
+    },
+    then({ dataCheckErrors }) {
+        dataCheckErrors.length == 0
+    },
+})
 
-        then:
-        dataCheckErrors.size() == 0
-    }
-
-    def "create Client Time and Expense Invoice and Finalize"() {
-        when:
-        clientInvResult = ec.service.sync().name("mantle.account.InvoiceServices.create#ProjectInvoiceItems")
-                .parameters([ratePurposeEnumId:'RaprClient', workEffortId:'TEST', thruDate:new Timestamp(effectiveTime + 1), invoiceDate:startYear + '-11-08']).call()
+feature("create Client Time and Expense Invoice and Finalize", {
+    when() {
+        clientInvResult = call("mantle.account.InvoiceServices.create#ProjectInvoiceItems",
+                { ratePurposeEnumId: 'RaprClient', workEffortId: 'TEST', thruDate: new Date(effectiveTime + 1), invoiceDate: startYear + '-11-08' })
         // this will trigger the GL posting
-        ec.service.sync().name("update#mantle.account.invoice.Invoice")
-                .parameters([invoiceId:clientInvResult.invoiceId, statusId:'InvoiceFinalized']).call()
+        call("update#mantle.account.invoice.Invoice", { invoiceId: clientInvResult.invoiceId, statusId: 'InvoiceFinalized' })
 
         // NOTE: this has sequenced IDs so is sensitive to run order!
-        List<String> dataCheckErrors = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
+        const dataCheckErrors = check("create Client Time and Expense Invoice and Finalize", `<entity-facade-xml>
             <mantle.account.invoice.Invoice invoiceId="${clientInvResult.invoiceId}" invoiceTypeEnumId="InvoiceSales"
                 fromPartyId="${vendorResult.partyId}" toPartyId="${clientResult.partyId}" statusId="InvoiceFinalized" invoiceDate="${startYear + '-11-08'}"
                 currencyUomId="USD"/><!-- varies based on settings: description="Invoice for project Test Project [TEST]" -->
@@ -754,13 +717,13 @@ class WorkPlanToCashBasicFlow extends Specification {
                 itemTypeEnumId="ItemTimeEntry" quantity="2" amount="60"/>
             <mantle.work.time.TimeEntry timeEntryId="55902" invoiceId="${clientInvResult.invoiceId}" invoiceItemSeqId="01"/>
             <mantle.account.invoice.InvoiceItem invoiceId="${clientInvResult.invoiceId}" invoiceItemSeqId="02"
-                itemTypeEnumId="ItemTimeEntry" quantity="6" amount="60" itemDate="${effectiveThruDate.time}"/>
+                itemTypeEnumId="ItemTimeEntry" quantity="6" amount="60" itemDate="${effectiveThruDate}"/>
             <mantle.work.time.TimeEntry timeEntryId="55900" invoiceId="${clientInvResult.invoiceId}" invoiceItemSeqId="02"/>
             <mantle.account.invoice.InvoiceItem invoiceId="${clientInvResult.invoiceId}" invoiceItemSeqId="03"
-                itemTypeEnumId="ItemTimeEntry" quantity="4" amount="0" itemDate="${effectiveThruDate.time}"/>
+                itemTypeEnumId="ItemTimeEntry" quantity="4" amount="0" itemDate="${effectiveThruDate}"/>
             <mantle.work.time.TimeEntry timeEntryId="55903" invoiceId="${clientInvResult.invoiceId}" invoiceItemSeqId="03"/>
             <mantle.account.invoice.InvoiceItem invoiceId="${clientInvResult.invoiceId}" invoiceItemSeqId="04"
-                itemTypeEnumId="ItemTimeEntry" quantity="1.5" amount="60" itemDate="${effectiveThruDate.time}"/>
+                itemTypeEnumId="ItemTimeEntry" quantity="1.5" amount="60" itemDate="${effectiveThruDate}"/>
             <mantle.work.time.TimeEntry timeEntryId="55901" invoiceId="${clientInvResult.invoiceId}" invoiceItemSeqId="04"/>
 
             <mantle.account.invoice.InvoiceItem invoiceId="${clientInvResult.invoiceId}" invoiceItemSeqId="05"
@@ -805,22 +768,22 @@ class WorkPlanToCashBasicFlow extends Specification {
                 changedFieldName="isPosted" pkPrimaryValue="55902" oldValueText="N" newValueText="Y"
                 changedDate="${effectiveTime}" changedByUserId="EX_JOHN_DOE"/>
 
-        </entity-facade-xml>""").check()
-        logger.info("create Client Time and Expense Invoice and Finalize data check results: ")
-        for (String dataCheckError in dataCheckErrors) logger.info(dataCheckError)
+        </entity-facade-xml>`)
+        return { dataCheckErrors }
+    },
+    then({ dataCheckErrors }) {
+        dataCheckErrors.length == 0
+    },
+})
 
-        then:
-        dataCheckErrors.size() == 0
-    }
-
-    def "record Payment for Client Time and Expense Invoice"() {
-        when:
-        Map clientPmtResult = ec.service.sync().name("mantle.account.PaymentServices.create#InvoicePayment")
-                .parameters([invoiceId:clientInvResult.invoiceId, statusId:'PmntDelivered', amount:1039.12,
-                    paymentInstrumentEnumId:'PiCompanyCheck', effectiveDate:startYear + '-11-12 12:00:00', paymentRefNum:'54321']).call()
+feature("record Payment for Client Time and Expense Invoice", {
+    when() {
+        const clientPmtResult = call("mantle.account.PaymentServices.create#InvoicePayment",
+                { invoiceId: clientInvResult.invoiceId, statusId: 'PmntDelivered', amount: 1039.12,
+                    paymentInstrumentEnumId: 'PiCompanyCheck', effectiveDate: startYear + '-11-12 12:00:00', paymentRefNum: '54321' })
 
         // NOTE: this has sequenced IDs so is sensitive to run order!
-        List<String> dataCheckErrors = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
+        const dataCheckErrors = check("record Payment for Client Time and Expense Invoice", `<entity-facade-xml>
             <mantle.account.invoice.Invoice invoiceId="${clientInvResult.invoiceId}" statusId="InvoicePmtRecvd"/>
             <mantle.account.payment.Payment paymentId="${clientPmtResult.paymentId}" paymentTypeEnumId="PtInvoicePayment"
                 fromPartyId="${clientResult.partyId}" toPartyId="${vendorResult.partyId}" paymentInstrumentEnumId="PiCompanyCheck"
@@ -844,11 +807,10 @@ class WorkPlanToCashBasicFlow extends Specification {
                 changedFieldName="isPosted" pkPrimaryValue="55903" oldValueText="N" newValueText="Y"
                 changedDate="${effectiveTime}" changedByUserId="EX_JOHN_DOE"/>
 
-        </entity-facade-xml>""").check()
-        logger.info("record Payment for Client Time and Expense Invoice data check results: ")
-        for (String dataCheckError in dataCheckErrors) logger.info(dataCheckError)
-
-        then:
-        dataCheckErrors.size() == 0
-    }
-}
+        </entity-facade-xml>`)
+        return { dataCheckErrors }
+    },
+    then({ dataCheckErrors }) {
+        dataCheckErrors.length == 0
+    },
+})
