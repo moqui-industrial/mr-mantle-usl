@@ -1871,9 +1871,9 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="availableToPromiseTotal" operator="greater" from="0"/>
                     <order-by field-name="receivedDate"/><!- - get oldest first for filling quantityNotAvailable - ->
                 </entity-find>
-                <if condition="availAssetList.size() == 0"><break/></if>
+                <if condition="!availAssetList?.length"><break/></if>
                 <!- - move reservation(s) to this asset - ->
-                <service-call name="mantle.product.AssetServices.reserve#IncreasedAsset" in-map="[assetId:availAssetList[0].assetId]"/>
+                <service-call name="mantle.product.AssetServices.reserve#IncreasedAsset" in-map="{assetId:availAssetList[0].assetId}"/>
                 <!- - see if we have any more not available reservations - ->
                 <entity-find-count entity-name="mantle.product.issuance.AssetReservation" count-field="notAvailResCount">
                     <econdition field-name="productId"/><econdition field-name="quantityNotAvailable" operator="greater" from="0"/></entity-find-count>
