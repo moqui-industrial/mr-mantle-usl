@@ -25,7 +25,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="assetIdList" type="List"><parameter name="assetId"/></parameter>
             <parameter name="start" required="true"/>
             <parameter name="end" required="true"/>
-            <parameter name="titleGString" default-value="\${(workEffort.workEffortName ?: (workEffort.purposeEnumId ? workEffort.purpose.description : 'Event')) + ' [' + workEffort.workEffortId + ']'}"/>
+            <parameter name="titleGString" default-value="\${(workEffort.workEffortName || (workEffort.purposeEnumId ? workEffort.purpose.description : 'Event')) + ' [' + workEffort.workEffortId + ']'}"/>
             <parameter name="urlGString"/>
         </in-parameters>
         <out-parameters>
@@ -49,18 +49,18 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="startDate" from="ec.l10n.parseDate(start.toString(), 'yyyy-MM-dd')"/>
             <set field="endDate" from="ec.l10n.parseDate(end.toString(), 'yyyy-MM-dd')"/>
 
-            <set field="facilityIdSet" from="new HashSet()"/>
-            <if condition="facilityId"><script>facilityIdSet.add(facilityId)</script></if>
-            <if condition="facilityIdList"><script>facilityIdSet.addAll(facilityIdList)</script></if>
-            <set field="partyIdSet" from="new HashSet()"/>
-            <if condition="partyId"><script>partyIdSet.add(partyId)</script></if>
-            <if condition="partyIdList"><script>partyIdSet.addAll(partyIdList)</script></if>
-            <set field="assetIdSet" from="new HashSet()"/>
-            <if condition="assetId"><script>assetIdSet.add(assetId)</script></if>
-            <if condition="assetIdList"><script>assetIdSet.addAll(assetIdList)</script></if>
+            <set field="facilityIdSet" from="[]"/>
+            <if condition="facilityId"><script>facilityIdSet.push(facilityId)</script></if>
+            <if condition="facilityIdList?.length"><script>for (const id of facilityIdList) { if (!facilityIdSet.includes(id)) facilityIdSet.push(id) }</script></if>
+            <set field="partyIdSet" from="[]"/>
+            <if condition="partyId"><script>partyIdSet.push(partyId)</script></if>
+            <if condition="partyIdList?.length"><script>for (const id of partyIdList) { if (!partyIdSet.includes(id)) partyIdSet.push(id) }</script></if>
+            <set field="assetIdSet" from="[]"/>
+            <if condition="assetId"><script>assetIdSet.push(assetId)</script></if>
+            <if condition="assetIdList?.length"><script>for (const id of assetIdList) { if (!assetIdSet.includes(id)) assetIdSet.push(id) }</script></if>
 
             <set field="eventList" from="[]"/>
-            <if condition="!facilityIdSet &amp;&amp; !partyIdSet &amp;&amp; !assetIdSet"><return/></if>
+            <if condition="!facilityIdSet.length &amp;&amp; !partyIdSet.length &amp;&amp; !assetIdSet.length"><return/></if>
 
             <entity-find entity-name="mantle.work.effort.WorkEffortPartyAsset" list="workEffortList">
                 <econdition field-name="workEffortTypeEnumId" value="WetEvent"/>
@@ -119,33 +119,36 @@ along with this software (see the LICENSE.md file). If not, see
                 <service-call name="mantle.work.WorkEffortServices.get#WorkEffortStartEnd" out-map="startEndOut"
                         in-map="{workEffortId:workEffort.workEffortId, workEffort:workEffort}"/>
 
+                <if condition="urlGString"><then><set field="url" from="ec.resource.expand(urlGString, '')"/></then>
+                    <else><set field="url" value=""/></else></if>
                 <if condition="workEffort.recurStartCron != null">
+                    <!-- Enumerates the cron fire times between startDate and endDate. The Java code used cron-utils (Quartz); the port
+                         needs ec.service.nextCronExecution(quartzCronText, afterEpochMillis), the next fire time after an instant as
+                         epoch millis or null when there is none (see the report; not available in the runtime yet) -->
                     <script><![CDATA[
-                    parser = new com.cronutils.parser.CronParser(com.cronutils.model.definition.CronDefinitionBuilder.instanceDefinitionFor(com.cronutils.model.CronType.QUARTZ))
-                    quartzCron = parser.parse(workEffort.recurStartCron)
-                    startZdt = java.time.ZonedDateTime.ofInstant(startDate.toLocalDate().atStartOfDay(java.time.ZoneOffset.UTC).toInstant(), java.time.ZoneId.systemDefault());
-                    endZdt = java.time.ZonedDateTime.ofInstant(endDate.toLocalDate().atStartOfDay(java.time.ZoneOffset.UTC).toInstant(), java.time.ZoneId.systemDefault());
-                    startEndOutStartZdt = java.time.ZonedDateTime.ofInstant(startEndOut.startDate.toLocalDateTime().toLocalDate().atStartOfDay(java.time.ZoneOffset.UTC).toInstant(), java.time.ZoneId.systemDefault());
-                    startEndDiff = 0
-                    if(startEndOut.endDate != null) {
-                        startEndDiff = startEndOut.endDate.getTime() - startEndOut.startDate.getTime() 
+                    const millisOf = (value) => {
+                        const text = String(value)
+                        return /^-?\d+$/.test(text) ? Number(text) : Date.parse(text.length === 10 ? text + 'T00:00:00Z' : text)
                     }
-                
-                    executionTime = com.cronutils.model.time.ExecutionTime.forCron(quartzCron)
-                    nextExecution = startZdt;
-                    while(nextExecution.isBefore(endZdt)) {
-                        nextExecution = executionTime.nextExecution(nextExecution).get()
-                        if (!startEndOutStartZdt.isBefore(nextExecution)) {
-                            continue
-                        }
-                        endExecution = nextExecution.plus(startEndDiff, java.time.temporal.ChronoUnit.MILLIS);
-                        dateFormat = 'yyyy-MM-dd\'T\'HH:mm:ss'
-                        if (startEndOut.allDay) {
-                            dateFormat = 'yyyy-MM-dd'
-                        }    
-                        start = ec.l10n.format(Date.from(nextExecution.toInstant()), dateFormat)
-                        end = ec.l10n.format(Date.from(endExecution.toInstant()), dateFormat)
-                        eventList.add({id:workEffort.workEffortId, title:title, start:start, end:end, url:url, allDay:startEndOut.allDay})
+                    const dayStart = (ms) => { const at = new Date(ms); return Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate()) }
+                    const rangeStartMs = dayStart(millisOf(startDate))
+                    const rangeEndMs = dayStart(millisOf(endDate))
+                    const eventStartDayMs = dayStart(millisOf(startEndOut.startDate))
+                    let startEndDiff = 0
+                    if (startEndOut.endDate != null) {
+                        startEndDiff = millisOf(startEndOut.endDate) - millisOf(startEndOut.startDate)
+                    }
+                    const dateFormat = startEndOut.allDay ? 'yyyy-MM-dd' : "yyyy-MM-dd'T'HH:mm:ss"
+
+                    let nextExecutionMs = rangeStartMs
+                    while (nextExecutionMs < rangeEndMs) {
+                        nextExecutionMs = ec.service.nextCronExecution(workEffort.recurStartCron, nextExecutionMs)
+                        if (nextExecutionMs == null) break
+                        if (!(eventStartDayMs < nextExecutionMs)) continue
+                        const endExecutionMs = nextExecutionMs + startEndDiff
+                        eventList.push({id:workEffort.workEffortId, title:title,
+                            start:ec.l10n.format(String(nextExecutionMs), dateFormat), end:ec.l10n.format(String(endExecutionMs), dateFormat),
+                            url:url, allDay:startEndOut.allDay})
                     }
                     ]]></script>
                 <else>
@@ -156,9 +159,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <set field="start" from="ec.l10n.format(startEndOut.startDate, 'yyyy-MM-dd\'T\'HH:mm:ss')"/>
                         <set field="end" from="ec.l10n.format(startEndOut.endDate, 'yyyy-MM-dd\'T\'HH:mm:ss')"/>
                     </else></if>
-                    <if condition="urlGString"><then><set field="url" from="ec.resource.expand(urlGString, '')"/></then>
-                        <else><set field="url" value=""/></else></if>
-                    <script>eventList.add({id:workEffort.workEffortId, title:title, start:start, end:end, url:url, allDay:startEndOut.allDay})</script>
+                    <script>eventList.push({id:workEffort.workEffortId, title:title, start:start, end:end, url:url, allDay:startEndOut.allDay})</script>
                 </else>
                 </if>
             </iterate>
@@ -218,26 +219,34 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions>
             <script><![CDATA[
-                Calendar nextDayCal = ec.user.nowCalendar
-                nextDayCal.setTime(startDate)
-                nextDayCal.add(Calendar.DAY_OF_MONTH, 1)
+                // A Date reaches a script as epoch millis text (UTC midnight) or yyyy-MM-dd text; steps are UTC days on dates
+                const startText = String(startDate)
+                let nextDay
+                if (/^-?\d+$/.test(startText)) {
+                    const at = new Date(Number(startText))
+                    nextDay = new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate() + 1))
+                } else {
+                    const [y, m, d] = startText.slice(0, 10).split('-').map(Number)
+                    nextDay = new Date(Date.UTC(y, m - 1, d + 1))
+                }
                 calendarDays = 1
                 skipWeekends = 0
                 skipHolidays = 0
-                if (skipSaturday && nextDayCal.get(Calendar.DAY_OF_WEEK) == Calendar.SATURDAY) {
-                    nextDayCal.add(Calendar.DAY_OF_MONTH, 1)
+                // getUTCDay: 0 is Sunday and 6 is Saturday
+                if (skipSaturday && nextDay.getUTCDay() === 6) {
+                    nextDay = new Date(Date.UTC(nextDay.getUTCFullYear(), nextDay.getUTCMonth(), nextDay.getUTCDate() + 1))
                     calendarDays += 1
                     skipWeekends += 1
                 }
-                if (skipSunday && nextDayCal.get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY) {
-                    nextDayCal.add(Calendar.DAY_OF_MONTH, 1)
+                if (skipSunday && nextDay.getUTCDay() === 0) {
+                    nextDay = new Date(Date.UTC(nextDay.getUTCFullYear(), nextDay.getUTCMonth(), nextDay.getUTCDate() + 1))
                     calendarDays += 1
                     skipWeekends += 1
                 }
-                nextDayDate = new java.sql.Date(nextDayCal.getTimeInMillis())
+                nextDayDate = nextDay.toISOString().slice(0, 10)
             ]]></script>
             <!-- see if it falls on a holiday -->
-            <if condition="organizationPartyId || workEffortCategoryIds">
+            <if condition="organizationPartyId || workEffortCategoryIds?.length">
                 <entity-find-count entity-name="mantle.work.effort.WorkEffortAndCategoryAppl" count-field="holidayCount">
                     <econdition field-name="purposeEnumId" value="WepHoliday"/>
                     <econdition field-name="allDayStart" from="nextDayDate"/>
@@ -282,8 +291,8 @@ along with this software (see the LICENSE.md file). If not, see
             calendarDays = 0
             skipWeekends = 0
             skipHolidays = 0
-            for (int i = businessDays; i > 0; i--) {
-                Map nextOut = ec.service.sync().name("mantle.work.EventServices.get#NextBusinessDay")
+            for (let i = Number(businessDays); i > 0; i--) {
+                const nextOut = ec.service.sync().name("mantle.work.EventServices.get#NextBusinessDay")
                         .parameters(Object.assign({}, context, {startDate:futureDayDate})).call()
                 futureDayDate = nextOut.nextDayDate
                 calendarDays += nextOut.calendarDays

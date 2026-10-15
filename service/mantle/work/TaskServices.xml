@@ -21,7 +21,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="partyIdList" type="List"><parameter name="partyId"/></parameter>
             <parameter name="start" required="true"/>
             <parameter name="end" required="true"/>
-            <parameter name="titleGString" default-value="\${(workEffort.workEffortName ?: (workEffort.purposeEnumId ? workEffort.'WorkEffortPurpose#moqui.basic.Enumeration'.description : 'Event')) + ' [' + workEffort.workEffortId + ']'}"/>
+            <parameter name="titleGString" default-value="\${(workEffort.workEffortName || (workEffort.purposeEnumId ? workEffort['WorkEffortPurpose#moqui.basic.Enumeration'].description : 'Event')) + ' [' + workEffort.workEffortId + ']'}"/>
             <parameter name="urlGString"/>
         </in-parameters>
         <out-parameters>
@@ -43,12 +43,12 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="endTs" from="ec.l10n.parseTimestamp(end.toString() + ' 23:59:59.999', 'yyyy-MM-dd HH:mm:ss.SSS')"/>
             <!-- <log level="warn" message="=========== Task FullCalendarData start ${start} - ${startTs} end ${end} - ${endTs}"/> -->
 
-            <set field="partyIdSet" from="new HashSet()"/>
-            <if condition="partyId"><script>partyIdSet.add(partyId)</script></if>
-            <if condition="partyIdList"><script>partyIdSet.addAll(partyIdList)</script></if>
+            <set field="partyIdSet" from="[]"/>
+            <if condition="partyId"><script>partyIdSet.push(partyId)</script></if>
+            <if condition="partyIdList?.length"><script>for (const id of partyIdList) { if (!partyIdSet.includes(id)) partyIdSet.push(id) }</script></if>
 
             <set field="eventList" from="[]"/>
-            <if condition="!partyIdSet"><return/></if>
+            <if condition="!partyIdSet.length"><return/></if>
 
             <entity-find entity-name="mantle.work.effort.WorkEffortAndParty" list="workEffortList">
                 <econdition field-name="workEffortTypeEnumId" value="WetTask"/>
@@ -86,7 +86,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <else><set field="url" value=""/></else>
                 </if>
                 <set field="eventMap" from="{id:workEffort.workEffortId, title:title, start:start, end:end, url:url, allDay:true}"/>
-                <script>eventList.add(eventMap)</script>
+                <script>eventList.push(eventMap)</script>
             </iterate>
         </actions>
     </service>
@@ -208,9 +208,11 @@ along with this software (see the LICENSE.md file). If not, see
         <description>This service runs by EECA rule before creates and updates to set some defaults.</description>
         <in-parameters><parameter name="entityValue" type="Map"/></in-parameters>
         <actions>
-            <set field="entityValue.actualWorkTime" from="entityValue.actualWorkTime || 0 as BigDecimal"/>
-            <if condition="entityValue.remainingWorkTime == null &amp;&amp; entityValue.estimatedWorkTime &amp;&amp; entityValue.estimatedWorkTime &gt; entityValue.actualWorkTime">
-                <set field="entityValue.remainingWorkTime" from="entityValue.estimatedWorkTime - entityValue.actualWorkTime"/>
+            <!-- NOTE: the Groovy had actualWorkTime || 0 as BigDecimal, which defaults to 0 only by accident of precedence and
+                 Groovy truth; the intent is a zero default -->
+            <set field="entityValue.actualWorkTime" from="entityValue.actualWorkTime ?? toDecimal(0)"/>
+            <if condition="entityValue.remainingWorkTime == null &amp;&amp; entityValue.estimatedWorkTime != null &amp;&amp; !toDecimal(entityValue.estimatedWorkTime).isZero() &amp;&amp; toDecimal(entityValue.estimatedWorkTime).compare(entityValue.actualWorkTime) &gt; 0">
+                <set field="entityValue.remainingWorkTime" from="toDecimal(entityValue.estimatedWorkTime).subtract(entityValue.actualWorkTime)"/>
             </if>
         </actions>
     </service>
@@ -254,7 +256,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="delete#mantle.work.effort.WorkEffortCommEvent"
                     in-map="{workEffortId:workEffortId, communicationEventId:communicationEventId}"/>
             <service-call name="delete#mantle.party.communication.CommunicationEvent"
-                    in-map="communicationEventId:communicationEventId"/>
+                    in-map="{communicationEventId:communicationEventId}"/>
         </actions>
     </service>
 
@@ -273,15 +275,15 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <entity-find entity-name="mantle.work.time.TimeEntryAndRates" list="tearList">
                 <econdition field-name="workEffortId"/></entity-find>
-            <set field="actualWorkTime" from="0"/>
-            <set field="actualClientCost" from="0"/>
-            <set field="actualCost" from="0"/>
+            <set field="actualWorkTime" from="toDecimal(0)"/>
+            <set field="actualClientCost" from="toDecimal(0)"/>
+            <set field="actualCost" from="toDecimal(0)"/>
             <iterate list="tearList" entry="tear">
-                <set field="actualWorkTime" from="actualWorkTime + (tear.hours||0)"/>
-                <if condition="tear.clientRateAmount">
-                    <set field="actualClientCost" from="actualClientCost + (tear.hours * tear.clientRateAmount)"/></if>
-                <if condition="tear.vendorRateAmount">
-                    <set field="actualCost" from="actualCost + (tear.hours * tear.vendorRateAmount)"/></if>
+                <set field="actualWorkTime" from="actualWorkTime.add(tear.hours ?? 0)"/>
+                <if condition="tear.clientRateAmount != null">
+                    <set field="actualClientCost" from="actualClientCost.add(toDecimal(tear.hours ?? 0).multiply(tear.clientRateAmount))"/></if>
+                <if condition="tear.vendorRateAmount != null">
+                    <set field="actualCost" from="actualCost.add(toDecimal(tear.hours ?? 0).multiply(tear.vendorRateAmount))"/></if>
             </iterate>
             <!-- <log level="warn" message="======== time for ${workEffortId}: ${actualWorkTime}, ${actualCost}, ${actualClientCost}\n${tearList}"/> -->
             <service-call name="update#mantle.work.effort.WorkEffort"
