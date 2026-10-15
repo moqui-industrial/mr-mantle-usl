@@ -30,6 +30,8 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="timePeriodList" from="[]"/>
             <entity-find entity-name="mantle.party.time.TimePeriod" list="childPeriodList">
                 <econdition field-name="parentPeriodId"/><order-by field-name="thruDate"/></entity-find>
+            <!-- a find result is read-only, copy it to add the periods created below -->
+            <set field="childPeriodList" from="Array.from(childPeriodList)"/>
             <if condition="createMissing">
                 <if condition="(childPeriodList?.length > 0)"><then>
                     <!-- add next child periods as needed -->
