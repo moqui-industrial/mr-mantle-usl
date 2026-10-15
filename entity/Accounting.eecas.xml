@@ -35,8 +35,8 @@ along with this software (see the LICENSE.md file). If not, see
             on-create="true" on-update="true" run-on-error="false" get-entire-entity="true" run-before="true">
         <description>Update Payment totals (appliedTotal, unappliedTotal) on changes to Payment and PaymentApplication</description>
         <actions>
-            <set field="entityValue.amount" from="entityValue.amount || 0.0"/>
-            <set field="entityValue.appliedTotal" from="entityValue.appliedTotal || 0.0"/>
+            <set field="entityValue.amount" from="toDecimal(entityValue.amount ?? 0)"/>
+            <set field="entityValue.appliedTotal" from="toDecimal(entityValue.appliedTotal ?? 0)"/>
             <set field="entityValue.unappliedTotal" from="toDecimal(entityValue.amount).subtract(entityValue.appliedTotal)"/>
         </actions>
     </eeca>

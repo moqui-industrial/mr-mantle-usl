@@ -40,9 +40,9 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.basic.LocalizedMessage locale="default" original="OrderApproveShippingAddressTrust"
             localized="Part ${orderPart.orderPartSeqId} shipping address ${postalCm.address1}, ${postalCm.postalCode || '-'} has trust level of ${trustLevelEnum.description}"/>
     <moqui.basic.LocalizedMessage locale="default" original="OrderDetailPartPaymentIncomplete"
-            localized="Payments total (${ec.l10n.formatCurrency(orderPartInfo.paymentsTotal || 0.0, orderHeader?.currencyUomId)}) is less than order part total (${ec.l10n.formatCurrency(orderPartInfo.orderPart.partTotal || 0.0, orderHeader?.currencyUomId)})"/>
+            localized="Payments total (${ec.l10n.formatCurrency(orderPartInfo.paymentsTotal ?? 0, orderHeader?.currencyUomId)}) is less than order part total (${ec.l10n.formatCurrency(orderPartInfo.orderPart.partTotal ?? 0, orderHeader?.currencyUomId)})"/>
     <moqui.basic.LocalizedMessage locale="default" original="OrderPlacePartPaymentIncomplete"
-            localized="Part ${orderPart.orderPartSeqId} payments total (${ec.l10n.formatCurrency(paymentsTotal || 0.0, (String) orderHeader?.currencyUomId)}) is less than order part total (${ec.l10n.formatCurrency(orderPart.partTotal || 0.0, (String) orderHeader?.currencyUomId)})"/>
+            localized="Part ${orderPart.orderPartSeqId} payments total (${ec.l10n.formatCurrency(paymentsTotal ?? 0, orderHeader?.currencyUomId)}) is less than order part total (${ec.l10n.formatCurrency(orderPart.partTotal ?? 0, orderHeader?.currencyUomId)})"/>
     <moqui.basic.LocalizedMessage locale="default" original="OrderPlacePartNoVendor"
             localized="Part ${orderPart.orderPartSeqId} has no vendor"/>
     <moqui.basic.LocalizedMessage locale="default" original="OrderPlacePartNoCustomer"
