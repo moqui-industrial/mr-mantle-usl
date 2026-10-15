@@ -56,7 +56,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="partyId" from="returnHeader.vendorPartyId"/>
                 <econdition field-name="roleTypeId" value="OrgInternal"/></entity-find>
             <!-- if isVendorOrgInternal is a return from customer, otherwise is a return to supplier -->
-            <set field="isVendorOrgInternal" from="vendorOrgInternalList as boolean"/>
+            <set field="isVendorOrgInternal" from="vendorOrgInternalList.length &gt; 0"/>
 
             <set field="orgPartyId" from="isVendorOrgInternal ? returnHeader.vendorPartyId : returnHeader.customerPartyId"/>
             <set field="shippingPartyId" from="isVendorOrgInternal ? returnHeader.customerPartyId : returnHeader.vendorPartyId"/>
@@ -66,34 +66,44 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find entity-name="mantle.party.contact.PartyContactMechTelecomNumber" list="telecomNumberList">
                 <date-filter/><econdition field-name="partyId" from="shippingPartyId"/></entity-find>
 
-            <set field="salesOrderIdSet" from="new TreeSet()"/>
-            <set field="replacementOrderIdSet" from="new TreeSet()"/>
-            <set field="purchaseOrderIdSet" from="new TreeSet()"/>
-            <set field="refundPaymentIdSet" from="new TreeSet()"/>
+            <set field="salesOrderIdSet" from="[]"/>
+            <set field="replacementOrderIdSet" from="[]"/>
+            <set field="purchaseOrderIdSet" from="[]"/>
+            <set field="refundPaymentIdSet" from="[]"/>
             <entity-find entity-name="mantle.order.return.ReturnItem" list="returnItemList">
                 <econdition field-name="returnId"/></entity-find>
-            <iterate list="returnItemList" entry="returnItem"><script>
-                if (isVendorOrgInternal) {
-                    if (returnItem.orderId) salesOrderIdSet.add(returnItem.orderId)
-                    if (returnItem.replacementOrderId) replacementOrderIdSet.add(returnItem.replacementOrderId)
-                } else {
-                    if (returnItem.orderId) purchaseOrderIdSet.add(returnItem.orderId)
+            <script>
+                const addId = (idList, id) => { if (id &amp;&amp; !idList.includes(id)) idList.push(id) }
+                for (const returnItem of returnItemList) {
+                    if (isVendorOrgInternal) {
+                        addId(salesOrderIdSet, returnItem.orderId)
+                        addId(replacementOrderIdSet, returnItem.replacementOrderId)
+                    } else {
+                        addId(purchaseOrderIdSet, returnItem.orderId)
+                    }
+                    addId(refundPaymentIdSet, returnItem.refundPaymentId)
                 }
-                if (returnItem.refundPaymentId) refundPaymentIdSet.add(returnItem.refundPaymentId)
-            </script></iterate>
+                salesOrderIdSet.sort()
+                replacementOrderIdSet.sort()
+                purchaseOrderIdSet.sort()
+                refundPaymentIdSet.sort()
+            </script>
 
-            <set field="receivingShipmentIdSet" from="new TreeSet()"/>
-            <set field="shippingShipmentIdSet" from="new TreeSet()"/>
+            <set field="receivingShipmentIdSet" from="[]"/>
+            <set field="shippingShipmentIdSet" from="[]"/>
             <entity-find entity-name="mantle.shipment.ShipmentItemSource" list="shipmentItemSourceList">
                 <econdition field-name="returnId"/></entity-find>
-            <iterate list="shipmentItemSourceList" entry="sis"><script>
-                if (isVendorOrgInternal) { receivingShipmentIdSet.add(sis.shipmentId) }
-                else { shippingShipmentIdSet.add(sis.shipmentId)}
-            </script></iterate>
+            <script>
+                const shipmentIdList = isVendorOrgInternal ? receivingShipmentIdSet : shippingShipmentIdSet
+                for (const sis of shipmentItemSourceList) {
+                    if (!shipmentIdList.includes(sis.shipmentId)) shipmentIdList.push(sis.shipmentId)
+                }
+                shipmentIdList.sort()
+            </script>
 
             <entity-find entity-name="mantle.order.return.ReturnItemBilling" list="returnItemBillingList">
                 <econdition field-name="returnId"/><order-by field-name="returnItemSeqId"/></entity-find>
-            <set field="creditMemoIdSet" from="new TreeSet(returnItemBillingList*.invoiceId)"/>
+            <set field="creditMemoIdSet" from="Array.from(new Set(Array.from(returnItemBillingList, (billing) =&gt; billing.invoiceId))).sort()"/>
         </actions>
     </service>
 
@@ -201,15 +211,11 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions>
             <entity-find-one entity-name="mantle.order.return.ReturnHeader" value-field="returnHeader"/>
-            <script>
-                Calendar lookBackCal = ec.user.nowCalendar
-                lookBackCal.add(Calendar.DAY_OF_MONTH, -lookBackDays)
-                lookBackTs = new java.sql.Timestamp(lookBackCal.getTimeInMillis())
-            </script>
+            <set field="lookBackTs" from="String(Number(ec.user.nowTimestamp) - lookBackDays * 86400000)"/>
 
             <entity-find entity-name="moqui.basic.EnumGroupMember" list="productItemTypeEgms" cache="true">
                 <econdition field-name="enumGroupEnumId" value="EngItemsProduct"/></entity-find>
-            <set field="productItemTypes" from="productItemTypeEgms*.enumId"/>
+            <set field="productItemTypes" from="Array.from(productItemTypeEgms, (egm) =&gt; egm.enumId)"/>
 
             <!-- Match customerPartyId, vendorPartyId (to OrderPart), include (invoiced items (physical shipped or not); shipped items/quantities), exclude returned -->
             <entity-find entity-name="mantle.order.return.ReturnableOrderItemView" list="returnableItems">
@@ -222,16 +228,16 @@ along with this software (see the LICENSE.md file). If not, see
 
             <set field="orderItemInfoList" from="[]"/>
             <iterate list="returnableItems" entry="item">
-                <if condition="item.invoiceQuantity == 0.0"><continue/></if>
+                <if condition="item.invoiceQuantity != null &amp;&amp; toDecimal(item.invoiceQuantity).isZero()"><continue/></if>
 
-                <set field="isProductItemType" from="item.itemTypeEnumId in productItemTypes"/>
+                <set field="isProductItemType" from="productItemTypes.includes(item.itemTypeEnumId)"/>
 
                 <entity-find-one entity-name="mantle.product.Product" value-field="product" cache="true">
                     <field-map field-name="productId" from="item.productId"/></entity-find-one>
                 <set field="isShippable" from="isProductItemType &amp;&amp; product != null ? ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'].includes(product.productTypeEnumId) : false"/>
 
-                <set field="returnedQuantity" from="0.0"/>
-                <set field="returnedTotal" from="0.0"/>
+                <set field="returnedQuantity" from="toDecimal(0)"/>
+                <set field="returnedTotal" from="toDecimal(0)"/>
                 <entity-find entity-name="mantle.order.return.ReturnItemQuantity" list="riqList">
                     <econdition field-name="orderId" from="item.orderId"/>
                     <econdition field-name="orderItemSeqId" from="item.orderItemSeqId"/>
@@ -239,19 +245,19 @@ along with this software (see the LICENSE.md file). If not, see
                     <select-field field-name="returnQuantity,responseAmount"/>
                 </entity-find>
                 <iterate list="riqList" entry="riq">
-                    <set field="retQuantity" from="riq.returnQuantity != null ? riq.returnQuantity : 1.0"/>
-                    <set field="returnedQuantity" from="returnedQuantity + retQuantity"/>
-                    <set field="returnedTotal" from="returnedTotal + (retQuantity * (riq.responseAmount || 0.0)).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+                    <set field="retQuantity" from="toDecimal(riq.returnQuantity ?? 1)"/>
+                    <set field="returnedQuantity" from="returnedQuantity.add(retQuantity)"/>
+                    <set field="returnedTotal" from="returnedTotal.add(retQuantity.multiply(riq.responseAmount ?? 0).setScale(2, 'HALF_UP'))"/>
                 </iterate>
 
-                <set field="invoiceQuantity" from="item.invoiceQuantity != null ? item.invoiceQuantity : 1.0"/>
-                <set field="returnableQuantity" from="invoiceQuantity - returnedQuantity"/>
+                <set field="invoiceQuantity" from="toDecimal(item.invoiceQuantity ?? 1)"/>
+                <set field="returnableQuantity" from="invoiceQuantity.subtract(returnedQuantity)"/>
 
-                <set field="invoiceTotal" from="(invoiceQuantity * (item.invoiceAmount || 0.0)).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
-                <set field="returnableTotal" from="invoiceTotal - returnedTotal"/>
+                <set field="invoiceTotal" from="invoiceQuantity.multiply(item.invoiceAmount ?? 0).setScale(2, 'HALF_UP')"/>
+                <set field="returnableTotal" from="invoiceTotal.subtract(returnedTotal)"/>
 
-                <if condition="returnableQuantity &gt; 0.0 || (!isProductItemType &amp;&amp; returnableTotal &gt; 0.0)">
-                    <script>orderItemInfoList.add({orderId:item.orderId, orderItemSeqId:item.orderItemSeqId,
+                <if condition="returnableQuantity.compare(0) &gt; 0 || (!isProductItemType &amp;&amp; returnableTotal.compare(0) &gt; 0)">
+                    <script>orderItemInfoList.push({orderId:item.orderId, orderItemSeqId:item.orderItemSeqId,
                             itemTypeEnumId:item.itemTypeEnumId, isProductItemType:isProductItemType, isShippable:isShippable,
                             productId:item.productId, invoiceQuantity:invoiceQuantity, invoiceTotal:invoiceTotal,
                             returnedQuantity:returnedQuantity, returnableQuantity:returnableQuantity,
@@ -288,16 +294,16 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="orderItem == null"><entity-find-one entity-name="mantle.order.OrderItem" value-field="orderItem"/></if>
             <if condition="orderItem == null"><return error="true" message="Could not find Order Item ${orderId}:${orderItemSeqId}"/></if>
 
-            <set field="orderQuantity" from="orderItem.quantity != null ? orderItem.quantity : 1.0"/>
-            <set field="orderTotal" from="(orderQuantity * (orderItem.unitAmount || 0.0)).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+            <set field="orderQuantity" from="toDecimal(orderItem.quantity ?? 1)"/>
+            <set field="orderTotal" from="orderQuantity.multiply(orderItem.unitAmount ?? 0).setScale(2, 'HALF_UP')"/>
 
             <entity-find entity-name="moqui.basic.EnumGroupMember" list="productItemTypeEgms" cache="true">
                 <econdition field-name="enumGroupEnumId" value="EngItemsProduct"/></entity-find>
-            <set field="productItemTypes" from="productItemTypeEgms*.enumId"/>
-            <set field="isProductItemType" from="orderItem.itemTypeEnumId in productItemTypes"/>
+            <set field="productItemTypes" from="Array.from(productItemTypeEgms, (egm) =&gt; egm.enumId)"/>
+            <set field="isProductItemType" from="productItemTypes.includes(orderItem.itemTypeEnumId)"/>
 
-            <set field="invoiceQuantity" from="0"/>
-            <set field="invoiceTotal" from="0.0"/>
+            <set field="invoiceQuantity" from="toDecimal(0)"/>
+            <set field="invoiceTotal" from="toDecimal(0)"/>
             <if condition="orderItemBillingList == null">
                 <entity-find entity-name="mantle.order.OrderItemBilling" list="orderItemBillingList">
                     <econdition field-name="orderId"/><econdition field-name="orderItemSeqId"/></entity-find>
@@ -305,20 +311,20 @@ along with this software (see the LICENSE.md file). If not, see
             <iterate list="orderItemBillingList" entry="oib">
                 <!-- check for when orderItemBillingList is passed in -->
                 <if condition="oib.orderId != orderId || oib.orderItemSeqId != orderItemSeqId"><continue/></if>
-                <if condition="oib.quantity == 0.0"><continue/></if>
+                <if condition="oib.quantity != null &amp;&amp; toDecimal(oib.quantity).isZero()"><continue/></if>
 
-                <set field="invQuantity" from="oib.quantity != null ? oib.quantity : 1.0"/>
-                <set field="invoiceQuantity" from="invoiceQuantity + invQuantity"/>
+                <set field="invQuantity" from="toDecimal(oib.quantity ?? 1)"/>
+                <set field="invoiceQuantity" from="invoiceQuantity.add(invQuantity)"/>
 
                 <entity-find-one entity-name="mantle.account.invoice.InvoiceItem" value-field="invoiceItem">
                     <field-map field-name="invoiceId" from="oib.invoiceId"/>
                     <field-map field-name="invoiceItemSeqId" from="oib.invoiceItemSeqId"/>
                 </entity-find-one>
-                <set field="invoiceTotal" from="invoiceTotal + (invQuantity * (invoiceItem?.amount || 0.0)).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+                <set field="invoiceTotal" from="invoiceTotal.add(invQuantity.multiply(invoiceItem?.amount ?? 0).setScale(2, 'HALF_UP'))"/>
             </iterate>
 
-            <set field="returnedQuantity" from="0.0"/>
-            <set field="returnedTotal" from="0.0"/>
+            <set field="returnedQuantity" from="toDecimal(0)"/>
+            <set field="returnedTotal" from="toDecimal(0)"/>
             <if condition="returnItemList == null">
                 <entity-find entity-name="mantle.order.return.ReturnItem" list="returnItemList">
                     <econdition field-name="orderId"/><econdition field-name="orderItemSeqId"/>
@@ -330,14 +336,16 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- check for when orderItemBillingList is passed in -->
                 <if condition="returnItem.orderId != orderId || returnItem.orderItemSeqId != orderItemSeqId"><continue/></if>
 
-                <set field="retQuantity" from="returnItem.returnQuantity != null ? returnItem.returnQuantity : 1.0"/>
-                <set field="returnedQuantity" from="returnedQuantity + retQuantity"/>
-                <set field="returnedTotal" from="returnedTotal + (returnItem.responseAmount != null ? returnItem.responseAmount :
-                        (retQuantity * (returnItem.returnPrice || orderItem.unitAmount || 0.0)).setScale(2, BigDecimal.ROUND_HALF_UP))"/>
+                <set field="retQuantity" from="toDecimal(returnItem.returnQuantity ?? 1)"/>
+                <set field="returnedQuantity" from="returnedQuantity.add(retQuantity)"/>
+                <!-- a zero returnPrice falls through to the order item unitAmount, as the Groovy || did -->
+                <set field="retPrice" from="returnItem.returnPrice != null &amp;&amp; !toDecimal(returnItem.returnPrice).isZero() ? returnItem.returnPrice : (orderItem.unitAmount ?? 0)"/>
+                <set field="returnedTotal" from="returnedTotal.add(returnItem.responseAmount != null ? returnItem.responseAmount :
+                        retQuantity.multiply(retPrice).setScale(2, 'HALF_UP'))"/>
             </iterate>
 
-            <set field="returnableQuantity" from="invoiceQuantity - returnedQuantity"/>
-            <set field="returnableTotal" from="invoiceTotal - returnedTotal"/>
+            <set field="returnableQuantity" from="invoiceQuantity.subtract(returnedQuantity)"/>
+            <set field="returnableTotal" from="invoiceTotal.subtract(returnedTotal)"/>
         </actions>
     </service>
     <service verb="add" noun="OrderItemToReturn">
@@ -367,17 +375,17 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="orderItem == null"><return error="true" message="Could not find Order Item ${orderId}:${orderItemSeqId}"/></if>
 
             <service-call name="mantle.order.ReturnServices.calculate#OrderItemReturnable" in-map="context" out-map="context"/>
-            <set field="returnPrice" from="returnPrice || orderItem.unitAmount || 0.0"/>
-            <set field="returnTotal" from="responseAmount != null ? responseAmount :
-                    ((returnQuantity != null ? returnQuantity : 1.0) * returnPrice).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+            <set field="returnPrice" from="returnPrice != null &amp;&amp; !toDecimal(returnPrice).isZero() ? toDecimal(returnPrice) : toDecimal(orderItem.unitAmount ?? 0)"/>
+            <set field="returnTotal" from="responseAmount != null ? toDecimal(responseAmount) :
+                    toDecimal(returnQuantity ?? 1).multiply(returnPrice).setScale(2, 'HALF_UP')"/>
 
             <if condition="isProductItemType"><then>
                 <!-- make sure returnQuantity + returnedQuantity is not greater than invoiceQuantity -->
-                <if condition="(returnedQuantity + returnQuantity) &gt; invoiceQuantity">
+                <if condition="toDecimal(returnedQuantity).add(returnQuantity).compare(invoiceQuantity) &gt; 0">
                     <return error="true" message="Tried to return more than is returnable; quantity billed ${invoiceQuantity}, already returned ${returnedQuantity}, tried to return ${returnQuantity}"/></if>
             </then><else>
                 <!-- make sure returnTotal + returnedTotal is not greater than invoiceTotal -->
-                <if condition="(returnedTotal + returnTotal) &gt; invoiceTotal">
+                <if condition="toDecimal(returnedTotal).add(returnTotal).compare(invoiceTotal) &gt; 0">
                     <if condition="allowAnyAmount"><then>
                         <log level="warn" message="Adding item to return with total more than is returnable for non-product item; total billed ${ec.l10n.format(invoiceTotal, '#,##0.00')}, already returned ${ec.l10n.format(returnedTotal, '#,##0.00')} for Order Item ${orderId}:${orderItemSeqId}, return total ${ec.l10n.format(returnTotal, '#,##0.00')} on Return ${returnId}"/>
                     </then><else>
@@ -412,28 +420,28 @@ along with this software (see the LICENSE.md file). If not, see
 
                 <!-- if parent is a product item prorate on quantity, otherwise prorate on total amount -->
                 <!-- NOTE what if OrderItem not fully invoiced? for that reason prorate based on invoice values -->
-                <set field="childRetAmount" from="0.0"/>
+                <set field="childRetAmount" from="toDecimal(0)"/>
                 <if condition="isProductItemType"><then>
-                    <if condition="returnQuantity &gt;= (invoiceQuantity - returnedQuantity)"><then>
+                    <if condition="toDecimal(returnQuantity).compare(toDecimal(invoiceQuantity).subtract(returnedQuantity)) &gt;= 0"><then>
                         <!-- all returned, use remaining child item amount -->
                         <set field="childRetAmount" from="childOut.returnableTotal"/>
                     </then><else>
-                        <set field="parentRatio" from="(returnQuantity == null ? null : toDecimal(returnQuantity)).divide((invoiceQuantity == null ? null : toDecimal(invoiceQuantity)), 6, BigDecimal.ROUND_HALF_UP)"/>
-                        <set field="childRetAmount" from="(childOut.invoiceTotal * parentRatio).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+                        <set field="parentRatio" from="toDecimal(returnQuantity).divide(invoiceQuantity).setScale(6, 'HALF_UP')"/>
+                        <set field="childRetAmount" from="toDecimal(childOut.invoiceTotal).multiply(parentRatio).setScale(2, 'HALF_UP')"/>
                     </else></if>
                 </then><else>
                     <!-- NOTE that quantities should always be positive but amounts are negative for discounts so totals may be negative -->
-                    <if condition="returnTotal.abs() &gt;= (invoiceTotal - returnedTotal).abs()"><then>
+                    <if condition="toDecimal(returnTotal).abs().compare(toDecimal(invoiceTotal).subtract(returnedTotal).abs()) &gt;= 0"><then>
                         <!-- all returned, use remaining child item amount -->
                         <set field="childRetAmount" from="childOut.returnableTotal"/>
                     </then><else>
-                        <set field="parentRatio" from="(returnTotal == null ? null : toDecimal(returnTotal)).divide((invoiceTotal == null ? null : toDecimal(invoiceTotal)), 6, BigDecimal.ROUND_HALF_UP).abs()"/>
-                        <set field="childRetAmount" from="(childOut.invoiceTotal * parentRatio).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+                        <set field="parentRatio" from="toDecimal(returnTotal).divide(invoiceTotal).setScale(6, 'HALF_UP').abs()"/>
+                        <set field="childRetAmount" from="toDecimal(childOut.invoiceTotal).multiply(parentRatio).setScale(2, 'HALF_UP')"/>
                     </else></if>
                 </else></if>
 
                 <!-- if there is a child item return amount (negative or positive) create a ReturnItem for it -->
-                <if condition="childRetAmount != 0.0">
+                <if condition="!toDecimal(childRetAmount).isZero()">
                     <service-call name="create#mantle.order.return.ReturnItem" in-map="{returnId:returnId, parentItemSeqId:returnItemSeqId,
                             statusId:statusId, returnReasonEnumId:returnReasonEnumId, returnResponseEnumId:returnResponseEnumId,
                             responseImmediate:responseImmediate, orderId:childOrderItem.orderId, orderItemSeqId:childOrderItem.orderItemSeqId,
@@ -477,7 +485,7 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find entity-name="mantle.order.return.ReturnItem" list="returnItemList">
                 <econdition field-name="returnId"/></entity-find>
             <iterate list="returnItemList" entry="otherItem">
-                <if condition="!(otherItem.statusId in itemStatusIds)">
+                <if condition="!Array.from(itemStatusIds).includes(otherItem.statusId)">
                     <set field="allMatch" from="false"/></if></iterate>
             <if condition="allMatch">
                 <entity-find-one entity-name="mantle.order.return.ReturnHeader" value-field="returnHeader"/>
@@ -492,7 +500,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="statusId" from="returnHeader.statusId"/>
                     <econdition field-name="toStatusId" from="statusId"/>
                 </entity-find>
-                <if condition="transitionList.size() == 0">
+                <if condition="transitionList.length == 0">
                     <log level="warn" message="In checkUpdate#ReturnHeaderStatus return ${returnId} tried to change from status ${returnHeader.statusId} to ${statusId} which has no transition, not updating ReturnHeader.statusId"/>
                     <return/>
                 </if>
@@ -539,12 +547,17 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <set field="receiptSummaryMap" from="{}"/>
             <iterate list="receiptList" entry="receipt">
-                <if condition="receipt.quantityAccepted &lt;= 0.0"><continue/></if>
-                <script>addToBigDecimalInMap({returnId:receipt.returnId, returnItemSeqId:receipt.returnItemSeqId}, receipt.quantityAccepted, receiptSummaryMap)</script>
+                <if condition="toDecimal(receipt.quantityAccepted ?? 0).compare(0) &lt;= 0"><continue/></if>
+                <!-- sum quantityAccepted by returnId:returnItemSeqId, keeping first-seen order -->
+                <script>
+                    const summaryKey = receipt.returnId + ':' + receipt.returnItemSeqId
+                    const summary = receiptSummaryMap[summaryKey] ??= {returnId:receipt.returnId, returnItemSeqId:receipt.returnItemSeqId, quantityAccepted:toDecimal(0)}
+                    summary.quantityAccepted = summary.quantityAccepted.add(receipt.quantityAccepted)
+                </script>
             </iterate>
-            <iterate list="receiptSummaryMap" entry="quantityAccepted" key="idMap">
-                <service-call name="mantle.order.ReturnServices.receive#ReturnItem" in-map="{returnId:idMap.returnId,
-                        returnItemSeqId:idMap.returnItemSeqId, receivedQuantity:quantityAccepted}"/>
+            <iterate list="Object.values(receiptSummaryMap)" entry="summary">
+                <service-call name="mantle.order.ReturnServices.receive#ReturnItem" in-map="{returnId:summary.returnId,
+                        returnItemSeqId:summary.returnItemSeqId, receivedQuantity:summary.quantityAccepted}"/>
             </iterate>
 
             <!-- TODO call mantle.order.ReturnServices.process#ReturnItemResponses for each Shipment instead of relaying on SECA rule on ReturnHeader status change to Received? -->
@@ -559,7 +572,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- find and cancel return shipment -->
             <entity-find entity-name="mantle.shipment.ShipmentItemSource" list="shipmentItemSourceList">
                 <econdition field-name="returnId"/></entity-find>
-            <set field="shipmentIdSet" from="new TreeSet(shipmentItemSourceList*.shipmentId)"/>
+            <set field="shipmentIdSet" from="Array.from(new Set(Array.from(shipmentItemSourceList, (sis) =&gt; sis.shipmentId))).sort()"/>
             <iterate list="shipmentIdSet" entry="shipmentId">
                 <service-call name="mantle.shipment.ShipmentServices.cancel#Shipment"
                         in-map="{shipmentId:shipmentId, undoIssueReceive:false}"/>
@@ -572,7 +585,7 @@ along with this software (see the LICENSE.md file). If not, see
             <iterate list="returnItemList" entry="returnItem">
                 <if condition="!(['ReturnApproved', 'ReturnShipped'].includes(returnItem.statusId))"><continue/></if>
                 <service-call name="mantle.order.ReturnServices.receive#ReturnItem" out-map="context" in-map="{returnId:returnId,
-                    returnItemSeqId:returnItem.returnItemSeqId, receivedQuantity:(returnItem.returnQuantity - (returnItem.receivedQuantity || 0.0))}"/>
+                    returnItemSeqId:returnItem.returnItemSeqId, receivedQuantity:toDecimal(returnItem.returnQuantity).subtract(returnItem.receivedQuantity ?? 0)}"/>
             </iterate>
 
             <!-- process item responses -->
@@ -588,14 +601,14 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="oldStatusId"/><parameter name="statusChanged" type="Boolean"/></out-parameters>
         <actions>
-            <if condition="receivedQuantity == 0.0"><return/></if>
+            <if condition="toDecimal(receivedQuantity).isZero()"><return/></if>
             <entity-find-one entity-name="mantle.order.return.ReturnItem" value-field="returnItem" for-update="true"/>
 
-            <if condition="returnItem.receivedQuantity">
-                <set field="receivedQuantity" from="receivedQuantity + returnItem.receivedQuantity"/></if>
-            <set field="curReceivedRatio" from="returnItem.returnQuantity &amp;&amp; returnItem.returnQuantity != receivedQuantity ?
-                    (receivedQuantity == null ? null : toDecimal(receivedQuantity)).divide(returnItem.returnQuantity, 6, BigDecimal.ROUND_HALF_UP) : 1.0"/>
-            <set field="allReceived" from="returnItem.returnQuantity == receivedQuantity"/>
+            <if condition="returnItem.receivedQuantity != null">
+                <set field="receivedQuantity" from="toDecimal(receivedQuantity).add(returnItem.receivedQuantity)"/></if>
+            <set field="curReceivedRatio" from="returnItem.returnQuantity != null &amp;&amp; !toDecimal(returnItem.returnQuantity).isZero() &amp;&amp; toDecimal(returnItem.returnQuantity).compare(receivedQuantity) != 0 ?
+                    toDecimal(receivedQuantity).divide(returnItem.returnQuantity).setScale(6, 'HALF_UP') : toDecimal(1)"/>
+            <set field="allReceived" from="returnItem.returnQuantity != null &amp;&amp; toDecimal(returnItem.returnQuantity).compare(receivedQuantity) == 0"/>
             <set field="hasResponse" from="returnItem.responseDate != null"/>
 
             <!-- record receivedQuantity and if all received update status to Received -->
@@ -614,7 +627,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="parentItemSeqId" from="returnItemSeqId"/>
             </entity-find>
             <iterate list="childItemList" entry="childItem">
-                <set field="childReceivedQty" from="curReceivedRatio * (childItem.returnQuantity || 1.0)"/>
+                <set field="childReceivedQty" from="toDecimal(curReceivedRatio).multiply(childItem.returnQuantity != null &amp;&amp; !toDecimal(childItem.returnQuantity).isZero() ? childItem.returnQuantity : 1)"/>
                 <set field="childHasResponse" from="childItem.responseDate != null"/>
                 <service-call name="update#mantle.order.return.ReturnItem" out-map="context" in-map="{returnId:returnId,
                         returnItemSeqId:childItem.returnItemSeqId, receivedQuantity:childReceivedQty,
@@ -681,8 +694,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="returnItemSeqId" ignore-if-empty="true"/>
                 <order-by field-name="returnItemSeqId"/>
             </entity-find>
-            <set field="originalReplacementOrderIdSet" from="new HashSet(returnItemList*.replacementOrderId)"/>
-            <script>originalReplacementOrderIdSet.remove(null)</script>
+            <set field="originalReplacementOrderIdSet" from="Array.from(new Set(Array.from(returnItemList, (ri) =&gt; ri.replacementOrderId).filter((orderId) =&gt; orderId != null)))"/>
 
             <!-- split list into credit, refund, replace; check credit and refund items for unpaid invoices to adjust instead -->
             <set field="creditItemList" from="[]"/>
@@ -690,6 +702,9 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="replaceItemList" from="[]"/>
             <set field="remainingAmountBySeqId" from="{}"/>
             <set field="returnInvoiceId" from="null"/>
+            <set field="approvedOrderOut" from="null"/>
+            <set field="placedOrderOut" from="null"/>
+            <set field="paymentMethodId" from="null"/>
             <iterate list="returnItemList" entry="returnItem">
                 <if condition="returnItem.responseDate != null"><continue/></if>
                 <!-- only process response for items in status Received or Completed OR in status Approved or Shipped and are either Replace items or have responseImmediate == Y -->
@@ -701,15 +716,16 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- see if the invoice for returned order item is not yet paid, if so cancel/credit instead of credit or refund -->
                 <if condition="['RrspCredit', 'RrspRefund'].includes(returnItem.returnResponseEnumId)">
                     <entity-find-related-one value-field="returnItem" relationship-name="orderItem" to-value-field="orderItem"/>
-                    <set field="itemQuantity" from="returnItem.receivedQuantity || returnItem.returnQuantity || 0.0"/>
-                    <set field="itemAmount" from="returnItem.returnPrice || orderItem?.unitAmount || 0.0"/>
-                    <set field="amountRemaining" from="(returnItem.responseAmount || (itemQuantity * itemAmount)).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
-                    <if condition="!amountRemaining">
+                    <!-- Groovy || treated a zero as false, so each of these takes the first non-null non-zero value -->
+                    <set field="itemQuantity" from="toDecimal([returnItem.receivedQuantity, returnItem.returnQuantity].find((qty) =&gt; qty != null &amp;&amp; !toDecimal(qty).isZero()) ?? 0)"/>
+                    <set field="itemAmount" from="toDecimal([returnItem.returnPrice, orderItem?.unitAmount].find((amt) =&gt; amt != null &amp;&amp; !toDecimal(amt).isZero()) ?? 0)"/>
+                    <set field="amountRemaining" from="(returnItem.responseAmount != null &amp;&amp; !toDecimal(returnItem.responseAmount).isZero() ? toDecimal(returnItem.responseAmount) : itemQuantity.multiply(itemAmount)).setScale(2, 'HALF_UP')"/>
+                    <if condition="amountRemaining.isZero()">
                         <message>Return Item ${returnId}:${returnItem.returnItemSeqId} has no amount, not processing credit response</message>
-                        <script>remainingAmountBySeqId.put(returnItem.returnItemSeqId, 0.0)</script>
+                        <script>remainingAmountBySeqId[returnItem.returnItemSeqId] = toDecimal(0)</script>
                         <continue/>
                     </if>
-                    <script>remainingAmountBySeqId.put(returnItem.returnItemSeqId, amountRemaining)</script>
+                    <script>remainingAmountBySeqId[returnItem.returnItemSeqId] = amountRemaining</script>
 
                     <!-- always create return credit memo invoice; better not to adjust the original invoice, easier to track and reconcile -->
                     <!-- if only partial quantity received (receivedQuantity < returnQuantity) then prorate product item amounts and child item amounts (via itemQuantity, itemAmount) -->
@@ -765,30 +781,30 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
 
                 <if condition="returnItem.returnResponseEnumId == 'RrspCredit'"><then>
-                    <script>creditItemList.add(returnItem)</script>
+                    <script>creditItemList.push(returnItem)</script>
                 </then><else-if condition="returnItem.returnResponseEnumId == 'RrspRefund'">
-                    <script>refundItemList.add(returnItem)</script>
+                    <script>refundItemList.push(returnItem)</script>
                 </else-if><else-if condition="returnItem.returnResponseEnumId == 'RrspReplace'">
-                    <script>replaceItemList.add(returnItem)</script>
+                    <script>replaceItemList.push(returnItem)</script>
                 </else-if></if>
             </iterate>
             <!-- <log message="Response ${returnId}:${returnItemSeqId} \n creditItemList: ${creditItemList} \n refundItemList: ${refundItemList} \n replaceItemList: ${replaceItemList}"/> -->
 
             <!-- Customer Credit (Financial Account Transaction) -->
-            <if condition="creditItemList">
-                <set field="creditTotal" from="0.0"/>
+            <if condition="creditItemList.length">
+                <set field="creditTotal" from="toDecimal(0)"/>
                 <set field="faItemList" from="[]"/>
                 <iterate list="creditItemList" entry="returnItem">
-                    <set field="itemTotal" from="remainingAmountBySeqId.get(returnItem.returnItemSeqId)"/>
-                    <if condition="itemTotal == 0.0"><continue/></if>
+                    <set field="itemTotal" from="remainingAmountBySeqId[returnItem.returnItemSeqId]"/>
+                    <if condition="toDecimal(itemTotal).isZero()"><continue/></if>
 
-                    <set field="creditTotal" from="creditTotal + itemTotal"/>
-                    <script>faItemList.add(returnItem)</script>
+                    <set field="creditTotal" from="creditTotal.add(itemTotal)"/>
+                    <script>faItemList.push(returnItem)</script>
                     <set field="returnItem.responseAmount" from="itemTotal"/>
                     <set field="returnItem.responseDate" from="responseDate"/>
                 </iterate>
 
-                <if condition="creditTotal">
+                <if condition="!creditTotal.isZero()">
                     <set field="finAccountId" from="returnHeader.finAccountId"/>
                     <if condition="!finAccountId">
                         <service-call name="mantle.account.FinancialAccountServices.getOrCreate#FinancialAccount"
@@ -851,28 +867,28 @@ along with this software (see the LICENSE.md file). If not, see
             -->
 
             <!-- Refund (Payment); consolidate for checks -->
-            <if condition="refundItemList">
+            <if condition="refundItemList.length">
                 <!-- NOTE: Authorize.NET time limit for refunds is 120 days, use 115 days before now as time limit to give small buffer -->
-                <set field="ccEarliestDate" from="ec.user.nowTimestamp - 115"/>
+                <set field="ccEarliestDate" from="String(Number(ec.user.nowTimestamp) - 115 * 86400000)"/>
 
-                <set field="paymentTotal" from="0.0"/>
+                <set field="paymentTotal" from="toDecimal(0)"/>
                 <set field="paymentItemList" from="[]"/>
                 <set field="returnItemByOrderPartId" from="{}"/>
                 <iterate list="refundItemList" entry="returnItem">
-                    <set field="itemTotal" from="remainingAmountBySeqId.get(returnItem.returnItemSeqId)"/>
-                    <if condition="itemTotal == 0.0"><continue/></if>
+                    <set field="itemTotal" from="remainingAmountBySeqId[returnItem.returnItemSeqId]"/>
+                    <if condition="toDecimal(itemTotal).isZero()"><continue/></if>
 
                     <if condition="returnHeader.useSingleRefundPayment != 'Y'">
                         <!-- TODO look at original payments for each OrderPart, if credit card payment found that is not too old then refund to card -->
                     </if>
 
-                    <set field="paymentTotal" from="paymentTotal + itemTotal"/>
-                    <script>paymentItemList.add(returnItem)</script>
+                    <set field="paymentTotal" from="paymentTotal.add(itemTotal)"/>
+                    <script>paymentItemList.push(returnItem)</script>
                     <set field="returnItem.responseAmount" from="itemTotal"/>
                     <set field="returnItem.responseDate" from="responseDate"/>
                 </iterate>
 
-                <if condition="paymentTotal">
+                <if condition="!paymentTotal.isZero()">
                     <!-- lookup Return Refund PaymentMethod (BankAccount) for internal org (vendor) -->
                     <entity-find entity-name="mantle.account.method.PaymentMethod" list="paymentMethodList">
                         <date-filter/><econdition field-name="ownerPartyId" from="returnHeader.vendorPartyId"/>
@@ -924,37 +940,37 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
 
             <!-- Replace (Order); consolidate all -->
-            <if condition="replaceItemList">
+            <if condition="replaceItemList.length">
                 <!-- split into two lists for Placed vs Approved replacement orders (break down big 'validStatus' condition):
                     1. Approved: item status is ReturnReceived or ReturnCompleted OR responseImmediate == 'Y'
                     2. Placed: not in #1 (responseImmediate != 'Y' and in earlier status)
                 -->
-                <set field="approvedItemSet" from="new HashSet()"/>
-                <set field="placedItemSet" from="new HashSet()"/>
+                <set field="approvedItemSet" from="[]"/>
+                <set field="placedItemSet" from="[]"/>
                 <iterate list="replaceItemList" entry="replaceItem">
                     <if condition="replaceItem.responseImmediate == 'Y' || ['ReturnReceived', 'ReturnCompleted'].includes(replaceItem.statusId)"><then>
-                        <script>approvedItemSet.add(replaceItem.returnItemSeqId)</script>
+                        <script>approvedItemSet.push(replaceItem.returnItemSeqId)</script>
                     </then><else>
-                        <script>placedItemSet.add(replaceItem.returnItemSeqId)</script>
+                        <script>placedItemSet.push(replaceItem.returnItemSeqId)</script>
                     </else></if>
                 </iterate>
 
-                <if condition="approvedItemSet">
+                <if condition="approvedItemSet.length">
                     <service-call name="mantle.order.OrderServices.create#Order" out-map="approvedOrderOut"
                             in-map="{vendorPartyId:returnHeader.vendorPartyId, customerPartyId:returnHeader.customerPartyId}"/>
                 </if>
-                <if condition="placedItemSet">
+                <if condition="placedItemSet.length">
                     <service-call name="mantle.order.OrderServices.create#Order" out-map="placedOrderOut"
                             in-map="{vendorPartyId:returnHeader.vendorPartyId, customerPartyId:returnHeader.customerPartyId}"/>
                 </if>
 
                 <iterate list="replaceItemList" entry="returnItem">
-                    <set field="replaceOrderId" from="approvedItemSet.contains(returnItem.returnItemSeqId) ? approvedOrderOut.orderId : placedOrderOut.orderId"/>
-                    <set field="itemQuantity" from="returnItem.receivedQuantity || returnItem.returnQuantity"/>
+                    <set field="replaceOrderId" from="approvedItemSet.includes(returnItem.returnItemSeqId) ? approvedOrderOut.orderId : placedOrderOut.orderId"/>
+                    <set field="itemQuantity" from="returnItem.receivedQuantity != null &amp;&amp; !toDecimal(returnItem.receivedQuantity).isZero() ? returnItem.receivedQuantity : returnItem.returnQuantity"/>
 
                     <service-call name="mantle.order.OrderServices.add#OrderProductQuantity"
                             in-map="{orderId:replaceOrderId, productId:(returnItem.replacementProductId || returnItem.productId),
-                                quantity:itemQuantity, unitAmount:0.0}"/>
+                                quantity:itemQuantity, unitAmount:0}"/>
 
                     <set field="returnItem.replacementOrderId" from="replaceOrderId"/>
                     <set field="returnItem.responseDate" from="responseDate"/>
@@ -995,7 +1011,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <continue/>
                 </if>
                 <if condition="replaceOrderHeader.statusId == 'OrderPlaced'">
-                    <set field="curOrderReturnItemList" from="returnItemList.findAll({ it.replacementOrderId == originalReplacementOrderId })"/>
+                    <set field="curOrderReturnItemList" from="Array.from(returnItemList).filter((ri) =&gt; ri.replacementOrderId === originalReplacementOrderId)"/>
                     <set field="approveOrder" from="true"/>
                     <iterate list="curOrderReturnItemList" entry="curOrderReturnItem">
                         <if condition="!(['ReturnReceived', 'ReturnCompleted'].includes(curOrderReturnItem.statusId))">
@@ -1185,7 +1201,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="createPackage">
                 <service-call name="create#mantle.shipment.ShipmentPackage" in-map="context" out-map="context"/>
             </if>
-            <if condition="shipmentPackageSeqId &amp;&amp; shipmentRouteSegmentSeqId">
+            <if condition="context.shipmentPackageSeqId &amp;&amp; context.shipmentRouteSegmentSeqId">
                 <service-call name="create#mantle.shipment.ShipmentPackageRouteSeg"
                         in-map="{shipmentId:shipmentId, shipmentPackageSeqId:shipmentPackageSeqId,
                                 shipmentRouteSegmentSeqId:shipmentRouteSegmentSeqId}"/>
@@ -1208,7 +1224,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <entity-find entity-name="moqui.basic.EnumGroupMember" list="productItemTypeEgms" cache="true">
                 <econdition field-name="enumGroupEnumId" value="EngItemsProduct"/></entity-find>
-            <set field="productItemTypes" from="productItemTypeEgms*.enumId"/>
+            <set field="productItemTypes" from="Array.from(productItemTypeEgms, (egm) =&gt; egm.enumId)"/>
 
             <iterate list="returnItemList" entry="returnItem">
                 <if condition="returnItem.productId">
@@ -1216,19 +1232,19 @@ along with this software (see the LICENSE.md file). If not, see
                     <entity-find-one entity-name="mantle.product.Product" value-field="product" cache="true">
                         <field-map field-name="productId" from="returnItem.productId"/></entity-find-one>
 
-                    <set field="isProductItemType" from="returnItem.itemTypeEnumId in productItemTypes"/>
+                    <set field="isProductItemType" from="productItemTypes.includes(returnItem.itemTypeEnumId)"/>
                     <set field="isShippable" from="isProductItemType &amp;&amp; product != null ? ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'].includes(product.productTypeEnumId) : false"/>
 
                     <if condition="isShippable">
-                        <set field="itemSisQuantity" from="allItemSisList.findAll({ it.returnItemSeqId == returnItem.returnItemSeqId })*.quantity.sum()"/>
-                        <set field="quantityToReceive" from="(returnItem.returnQuantity||0.0) - (itemSisQuantity||0.0)"/>
-                        <if condition="quantityToReceive == 0.0"><continue/></if>
+                        <set field="itemSisQuantity" from="Array.from(allItemSisList).filter((sis) =&gt; sis.returnItemSeqId === returnItem.returnItemSeqId).reduce((total, sis) =&gt; total.add(sis.quantity ?? 0), toDecimal(0))"/>
+                        <set field="quantityToReceive" from="toDecimal(returnItem.returnQuantity ?? 0).subtract(itemSisQuantity)"/>
+                        <if condition="quantityToReceive.isZero()"><continue/></if>
 
                         <!-- see if there is already a ShipmentItem for the product -->
                         <entity-find-one entity-name="mantle.shipment.ShipmentItem" value-field="shipmentItem">
                             <field-map field-name="shipmentId"/><field-map field-name="productId" from="returnItem.productId"/></entity-find-one>
                         <if condition="shipmentItem"><then>
-                            <set field="shipmentItem.quantity" from="shipmentItem.quantity + quantityToReceive"/>
+                            <set field="shipmentItem.quantity" from="toDecimal(shipmentItem.quantity ?? 0).add(quantityToReceive)"/>
                             <entity-update value-field="shipmentItem"/>
                         </then><else>
                             <service-call name="create#mantle.shipment.ShipmentItem"
@@ -1246,10 +1262,10 @@ along with this software (see the LICENSE.md file). If not, see
                             <econdition field-name="returnId"/><econdition field-name="returnItemSeqId" from="returnItem.returnItemSeqId"/>
                         </entity-find>
                         <iterate list="returnItemBillingList" entry="returnItemBilling">
-                            <if condition="!returnItemBilling.shipmentId &amp;&amp; quantityNotBilled >= returnItemBilling.quantity">
+                            <if condition="!returnItemBilling.shipmentId &amp;&amp; quantityNotBilled.compare(returnItemBilling.quantity ?? 0) &gt;= 0">
                                 <set field="returnItemBilling.shipmentId" from="shipmentId"/>
                                 <entity-update value-field="returnItemBilling"/>
-                                <set field="quantityNotBilled" from="quantityNotBilled - returnItemBilling.quantity"/>
+                                <set field="quantityNotBilled" from="quantityNotBilled.subtract(returnItemBilling.quantity ?? 0)"/>
                             </if>
                         </iterate>
                         <!-- if quantityNotBilled > 0 do anything here? we don't have another Invoice/Item with quantity to match... -->
