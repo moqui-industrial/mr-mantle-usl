@@ -1070,9 +1070,9 @@ General Order Placement and eCommerce Usage
 
             <!-- only update header status if no order part specified, or set status if all parts now same, etc like complete#OrderPart does -->
             <set field="updateMap" from="{orderId:orderId, statusId:statusId}"/>
-            <if condition="placedDate != null &amp;&amp; orderHeader.placedDate == null"><script>updateMap.put('placedDate', placedDate)</script></if>
-            <if condition="approvedDate != null &amp;&amp; orderHeader.approvedDate == null"><script>updateMap.put('approvedDate', approvedDate)</script></if>
-            <if condition="completedDate != null &amp;&amp; orderHeader.completedDate == null"><script>updateMap.put('completedDate', completedDate)</script></if>
+            <if condition="placedDate != null &amp;&amp; orderHeader.placedDate == null"><script>updateMap.placedDate = placedDate</script></if>
+            <if condition="approvedDate != null &amp;&amp; orderHeader.approvedDate == null"><script>updateMap.approvedDate = approvedDate</script></if>
+            <if condition="completedDate != null &amp;&amp; orderHeader.completedDate == null"><script>updateMap.completedDate = completedDate</script></if>
             <if condition="orderPartSeqId"><then>
                 <set field="allPartsSame" from="true"/>
                 <entity-find entity-name="mantle.order.OrderPart" list="allPartList"><econdition field-name="orderId"/></entity-find>
@@ -1127,7 +1127,7 @@ General Order Placement and eCommerce Usage
 
                 <set field="allInventoryAvailable" from="true"/>
                 <iterate list="orderItemList" entry="orderItem">
-                    <set field="isProductItem" from="productItemTypes.contains(orderItem.itemTypeEnumId) &amp;&amp; orderItem.productId"/>
+                    <set field="isProductItem" from="productItemTypes.includes(orderItem.itemTypeEnumId) &amp;&amp; orderItem.productId"/>
                     <if condition="!isProductItem"><continue/></if>
 
                     <entity-find-one entity-name="mantle.product.Product" value-field="product" cache="true">
@@ -1141,7 +1141,7 @@ General Order Placement and eCommerce Usage
                                 orderItemSeqId:orderItem.orderItemSeqId, orderHeader:orderHeader}"/>
                     <set field="availableToPromiseTotal" from="toDecimal(availOut.availableToPromiseTotal ?? 0)"/>
                     <!-- if out of stock show one message, if insufficient available show another -->
-                    <if condition="availableToPromiseTotal &lt; orderItem.quantity">
+                    <if condition="availableToPromiseTotal.compare(orderItem.quantity ?? 0) &lt; 0">
                         <set field="allInventoryAvailable" from="false"/>
                         <if condition="availableToPromiseTotal.compare(0) &lt;= 0"><then>
                             <message public="true" type="warning">OrderInventoryNotAvailable</message>
@@ -1162,7 +1162,7 @@ General Order Placement and eCommerce Usage
                 <econdition field-name="orderId"/>
                 <econdition field-name="orderPartSeqId" ignore-if-empty="true"/>
             </entity-find>
-            <set field="customerPartyId" from="orderPartList ? orderPartList[0].customerPartyId : null"/>
+            <set field="customerPartyId" from="orderPartList?.length &gt; 0 ? orderPartList[0].customerPartyId : null"/>
             <if condition="!customerPartyId"><return/></if><!-- if no customer we don't know if they are new -->
             <set field="includeStatuses" from="['OrderPlaced', 'OrderProcessing', 'OrderApproved', 'OrderSent', 'OrderCompleted', 'OrderHold']"/>
             <entity-find-count entity-name="mantle.order.OrderHeaderAndPart" count-field="ordersCount">
@@ -1204,11 +1204,8 @@ General Order Placement and eCommerce Usage
             </entity-find>
             <iterate list="productStoreList" entry="productStore">
                 <set field="delayMinutes" from="productStore.autoApproveDelay"/>
-                <script>
-                    Calendar delayCal = ec.user.getCalendarSafe()
-                    delayCal.add(Calendar.MINUTE, (int) -delayMinutes)
-                    delayTimestamp = new Timestamp(delayCal.getTimeInMillis())
-                </script>
+                <!-- timestamps reach scripts as epoch millis text -->
+                <script>delayTimestamp = String(Number(ec.user.nowTimestamp) - Math.trunc(Number(delayMinutes)) * 60000)</script>
 
                 <entity-find entity-name="mantle.order.OrderHeader" list="orderList">
                     <econdition field-name="productStoreId" from="productStore.productStoreId"/>
@@ -1217,7 +1214,7 @@ General Order Placement and eCommerce Usage
                     <select-field field-name="orderId"/>
                 </entity-find>
                 <if condition="(orderList?.length > 0)">
-                    <log message="Trying delayed auto-approve for store ${productStore.productStoreId} with ${delayMinutes}m delay (before ${delayTimestamp}) for ${orderList.size()} orders"/>
+                    <log message="Trying delayed auto-approve for store ${productStore.productStoreId} with ${delayMinutes}m delay (before ${delayTimestamp}) for ${orderList.length} orders"/>
 
                     <iterate list="orderList" entry="order">
                         <service-call name="mantle.order.OrderServices.autoApprove#Order" in-map="{orderId:order.orderId}"/>
@@ -1244,12 +1241,12 @@ General Order Placement and eCommerce Usage
                 <econdition field-name="orderId"/>
                 <econdition field-name="statusId" operator="in" from="['PmntAuthorized', 'PmntDelivered', 'PmntConfirmed']"/>
             </entity-find>
-            <set field="totalAuthorized" from="0.0"/>
-            <iterate list="paymentList" entry="payment"><set field="totalAuthorized" from="totalAuthorized + (payment.amount || 0.0)"/></iterate>
+            <set field="totalAuthorized" from="toDecimal(0)"/>
+            <iterate list="paymentList" entry="payment"><set field="totalAuthorized" from="totalAuthorized.add(payment.amount ?? 0)"/></iterate>
 
             <!-- if we authorized all set order to approved; don't use mantle.order.OrderServices.approve#Order service,
                 meant for manual approval and requires permission -->
-            <if condition="totalAuthorized &gt;= orderHeader.grandTotal">
+            <if condition="totalAuthorized.compare(orderHeader.grandTotal ?? 0) &gt;= 0">
                 <!-- run approval checks, don't approve if any warnings or if order has been previously approved -->
                 <service-call name="mantle.order.OrderInfoServices.check#OrderPreApprove" in-map="{orderId:orderId}" out-map="checkOut"/>
                 <!-- if has been Approved before don't auto-approve -->
@@ -1261,11 +1258,11 @@ General Order Placement and eCommerce Usage
                     <select-field field-name="auditHistorySeqId"/>
                 </entity-find>
 
-                <if condition="!checkOut.approveWarnings &amp;&amp; !statusHistoryList?.length"><then>
+                <if condition="!checkOut.approveWarnings?.length &amp;&amp; !statusHistoryList?.length"><then>
                     <service-call name="mantle.order.OrderServices.update#OrderStatus"
                             in-map="{orderId:orderId, statusId:'OrderApproved', approvedDate:ec.user.nowTimestamp}"/>
                 </then><else>
-                    <log message="Not auto-approving Order ${orderId} status history: ${statusHistoryList*.auditHistorySeqId}, warnings: ${checkOut.approveWarnings}"/>
+                    <log message="Not auto-approving Order ${orderId} status history: ${Array.from(statusHistoryList).map((it) =&gt; it.auditHistorySeqId)}, warnings: ${checkOut.approveWarnings}"/>
                 </else></if>
             </if>
         </actions>
@@ -1301,7 +1298,7 @@ General Order Placement and eCommerce Usage
             <!-- set to true, if any found not fulfilled will set to false -->
             <set field="isFulfilled" from="true"/>
             <iterate list="orderItemList" entry="orderItem">
-                <if condition="orderItem.productId &amp;&amp; productItemTypes.contains(orderItem.itemTypeEnumId)">
+                <if condition="orderItem.productId &amp;&amp; productItemTypes.includes(orderItem.itemTypeEnumId)">
                     <service-call name="mantle.order.OrderServices.isFulfilled#OrderItem" out-map="itemOut" out-map-add-to-existing="false"
                             in-map="{orderId:orderId, orderItemSeqId:orderItem.orderItemSeqId, orderItem:orderItem,
                                 orderSubscriptionList:orderSubscriptionList, orderWorkEffortList:orderWorkEffortList,
@@ -1335,7 +1332,7 @@ General Order Placement and eCommerce Usage
 
             <!-- set to true, if any evidence found that it is not fulfilled will set to false -->
             <set field="isFulfilled" from="true"/>
-            <if condition="orderItem.productId &amp;&amp; productItemTypes.contains(orderItem.itemTypeEnumId)"><then>
+            <if condition="orderItem.productId &amp;&amp; productItemTypes.includes(orderItem.itemTypeEnumId)"><then>
                 <entity-find-one entity-name="mantle.product.Product" value-field="product" cache="true">
                     <field-map field-name="productId" from="orderItem.productId"/></entity-find-one>
 
@@ -1352,7 +1349,7 @@ General Order Placement and eCommerce Usage
                             <field-map field-name="orderItemSeqId" from="orderItem.orderItemSeqId"/>
                             <field-map field-name="subscriptionResourceId" from="productSubscriptionResource.subscriptionResourceId"/>
                         </filter-map-list>
-                        <if condition="!currentSubscriptionList">
+                        <if condition="!currentSubscriptionList?.length">
                             <set field="isFulfilled" from="false"/>
                         </if>
                     </iterate>
@@ -1365,8 +1362,9 @@ General Order Placement and eCommerce Usage
                         <filter-map-list list="orderAssetIssuanceList" to-list="currentAssetIssuanceList">
                             <field-map field-name="orderItemSeqId"/></filter-map-list>
                     </else></if>
+                    <!-- NOTE: the Groovy version queried AssetIssuance into currentAssetIssuanceList here (copy and paste), so receipts were never counted; query AssetReceipt -->
                     <if condition="orderAssetReceiptList == null"><then>
-                        <entity-find entity-name="mantle.product.issuance.AssetIssuance" list="currentAssetIssuanceList">
+                        <entity-find entity-name="mantle.product.receipt.AssetReceipt" list="currentAssetReceiptList">
                             <econdition field-name="orderId"/><econdition field-name="orderItemSeqId"/></entity-find>
                     </then><else>
                         <filter-map-list list="orderAssetReceiptList" to-list="currentAssetReceiptList">
@@ -1374,14 +1372,14 @@ General Order Placement and eCommerce Usage
                     </else></if>
 
                     <!-- add up quantity in currentAssetIssuanceList, compare to orderItem.quantity -->
-                    <set field="currentQuantityTotal" from="0" type="BigDecimal"/>
+                    <set field="currentQuantityTotal" from="toDecimal(0)"/>
                     <iterate list="currentAssetIssuanceList" entry="currentAssetIssuance">
-                        <set field="currentQuantityTotal" from="currentQuantityTotal + currentAssetIssuance.quantity"/>
+                        <set field="currentQuantityTotal" from="currentQuantityTotal.add(currentAssetIssuance.quantity ?? 0)"/>
                     </iterate>
                     <iterate list="currentAssetReceiptList" entry="currentAssetReceipt">
-                        <set field="currentQuantityTotal" from="currentQuantityTotal + currentAssetReceipt.quantityAccepted"/>
+                        <set field="currentQuantityTotal" from="currentQuantityTotal.add(currentAssetReceipt.quantityAccepted ?? 0)"/>
                     </iterate>
-                    <if condition="currentQuantityTotal &lt; orderItem.quantity">
+                    <if condition="currentQuantityTotal.compare(orderItem.quantity ?? 0) &lt; 0">
                         <set field="isFulfilled" from="false"/>
                     </if>
                 </if>
@@ -1402,7 +1400,7 @@ General Order Placement and eCommerce Usage
                     </else></if>
 
                     <if condition="(itemWorkEffortList?.length > 0)">
-                        <set field="workEffortIdList" from="itemWorkEffortList*.workEffortId"/>
+                        <set field="workEffortIdList" from="Array.from(itemWorkEffortList).map((it) =&gt; it.workEffortId)"/>
                         <entity-find entity-name="mantle.work.effort.WorkEffort" list="workEffortList">
                             <econdition field-name="workEffortId" operator="in" from="workEffortIdList"/>
                             <select-field field-name="workEffortId,statusId"/>
@@ -1581,10 +1579,10 @@ General Order Placement and eCommerce Usage
             <entity-find entity-name="mantle.shipment.ShipmentItemSource" list="fullShipmentItemSourceList">
                 <econdition field-name="orderId"/></entity-find>
 
-            <set field="quantityIssued" from="0.0"/>
+            <set field="quantityIssued" from="toDecimal(0)"/>
             <iterate list="fullAssetIssuanceList" entry="assetIssuance">
-                <set field="quantityIssued" from="quantityIssued + assetIssuance.quantity"/></iterate>
-            <set field="hasIssuedQuantity" from="quantityIssued &gt; 0.0"/>
+                <set field="quantityIssued" from="quantityIssued.add(assetIssuance.quantity ?? 0)"/></iterate>
+            <set field="hasIssuedQuantity" from="quantityIssued.compare(0) &gt; 0"/>
 
             <entity-find entity-name="mantle.order.OrderItem" list="orderItemList">
                 <econdition field-name="orderId"/></entity-find>
@@ -1836,10 +1834,10 @@ General Order Placement and eCommerce Usage
             <entity-find entity-name="mantle.shipment.ShipmentItemSource" list="fullShipmentItemSourceList">
                 <econdition field-name="orderId"/></entity-find>
 
-            <set field="quantityIssued" from="0.0"/>
+            <set field="quantityIssued" from="toDecimal(0)"/>
             <iterate list="fullAssetIssuanceList" entry="assetIssuance">
-                <set field="quantityIssued" from="quantityIssued + assetIssuance.quantity"/></iterate>
-            <set field="hasIssuedQuantity" from="quantityIssued &gt; 0.0"/>
+                <set field="quantityIssued" from="quantityIssued.add(assetIssuance.quantity ?? 0)"/></iterate>
+            <set field="hasIssuedQuantity" from="quantityIssued.compare(0) &gt; 0"/>
 
             <entity-find entity-name="mantle.order.OrderItem" list="orderItemList">
                 <econdition field-name="orderId"/></entity-find>
