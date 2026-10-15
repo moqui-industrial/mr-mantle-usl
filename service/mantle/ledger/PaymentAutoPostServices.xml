@@ -27,7 +27,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="reverseOfAcctgTransId" from="null"/>
             </entity-find>
             <if condition="(existingTransList?.length > 0)">
-                <return message="Payment ${paymentId} has already been posted in accounting transaction ${existingTransList*.acctgTransId}"/>
+                <return message="Payment ${paymentId} has already been posted in accounting transaction [${existingTransList.map((trans) =&gt; trans.acctgTransId).join(', ')}]"/>
             </if>
 
             <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment" for-update="true"/>
@@ -53,9 +53,9 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- full/single definition to skip unapplied acct: single application, fully applied (unapplied 0), and payment AFTER invoice -->
             <!-- NOTE payment must be after invoice otherwise direct post to AR/AP throws off Invoice Aging vs AR/AP GL reconcile -->
             <!-- appliedDate is the later of invoice and payment dates, so for the appliedTotal only include applications with date <= effectiveDate -->
-            <set field="isFullSinglePa" from="paymentApplicationList.size() == 1 &amp;&amp;
-                    paymentApplicationList[0].amountApplied == payment.amount &amp;&amp;
-                    paymentApplicationList[0].appliedDate &lt;= payment.effectiveDate"/>
+            <set field="isFullSinglePa" from="paymentApplicationList.length === 1 &amp;&amp;
+                    payment.amount != null &amp;&amp; toDecimal(paymentApplicationList[0].amountApplied).eq(payment.amount) &amp;&amp;
+                    Number(paymentApplicationList[0].appliedDate) &lt;= Number(payment.effectiveDate)"/>
 
             <!-- ==== create the main tx record(s) ==== -->
 
@@ -166,9 +166,9 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="!methodGlAccountId"><set field="useErrorJournal" from="true"/></if>
 
                 <entity-make-value entity-name="mantle.ledger.transaction.AcctgTransEntry" value-field="acctgTransEntry"
-                        map="[acctgTransId:fromAcctgTrans.acctgTransId, debitCreditFlag:'C',
+                        map="{acctgTransId:fromAcctgTrans.acctgTransId, debitCreditFlag:'C',
                             glAccountTypeEnumId:methodGlAccountTypeEnumId, glAccountId:methodGlAccountId,
-                            amount:payment.amount, reconcileStatusId:'AterNot', isSummary:'N']"/>
+                            amount:payment.amount, reconcileStatusId:'AterNot', isSummary:'N'}"/>
                 <entity-sequenced-id-secondary value-field="acctgTransEntry"/>
                 <entity-create value-field="acctgTransEntry"/>
             </if>
@@ -185,9 +185,9 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="!methodGlAccountId"><set field="useErrorJournal" from="true"/></if>
 
                 <entity-make-value entity-name="mantle.ledger.transaction.AcctgTransEntry" value-field="acctgTransEntry"
-                        map="[acctgTransId:toAcctgTrans.acctgTransId, debitCreditFlag:'D',
+                        map="{acctgTransId:toAcctgTrans.acctgTransId, debitCreditFlag:'D',
                             glAccountTypeEnumId:methodGlAccountTypeEnumId, glAccountId:methodGlAccountId,
-                            amount:payment.amount, reconcileStatusId:'AterNot', isSummary:'N']"/>
+                            amount:payment.amount, reconcileStatusId:'AterNot', isSummary:'N'}"/>
                 <entity-sequenced-id-secondary value-field="acctgTransEntry"/>
                 <entity-create value-field="acctgTransEntry"/>
             </if>
@@ -333,7 +333,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="isPayable"/>
                     </entity-find>
                 </if>
-                <set field="glAccountId" from="paymentTypeGlAccountList.first?.glAccountId"/>
+                <set field="glAccountId" from="paymentTypeGlAccountList[0]?.glAccountId"/>
             </if>
 
             <if condition="glAccountId">
@@ -384,7 +384,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="organizationPartyId" operator="in" from="orgPartyIdList"/>
                     <econdition field-name="creditCardTypeEnumId"/>
                 </entity-find>
-                <set field="glAccountId" from="creditCardTypeGlAccountList.first?.glAccountId"/>
+                <set field="glAccountId" from="creditCardTypeGlAccountList[0]?.glAccountId"/>
             </if>
             <!-- Financial Account specific mappings -->
             <if condition="!glAccountId">
@@ -393,7 +393,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="organizationPartyId" operator="in" from="orgPartyIdList"/>
                         <econdition field-name="finAccountTypeId"/>
                     </entity-find>
-                    <set field="glAccountId" from="financialAccountTypeGlAccountList.first?.glAccountId"/>
+                    <set field="glAccountId" from="financialAccountTypeGlAccountList[0]?.glAccountId"/>
                 </then><else-if condition="payment.paymentInstrumentEnumId == 'PiFinancialAccount'">
                     <!-- for non-FA type Payment paymentInstrumentEnumId == 'PiFinancialAccount' do based on FA transaction reason to run through FA deposit/withdraw clearing account -->
                     <entity-find entity-name="mantle.ledger.config.FinancialAccountReasonGlAccount" list="accountReasonGlAccountList" cache="true">
@@ -401,7 +401,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <!-- if is payable (outgoing) payment to FA owner will be deposit with default reason FatrReplenish, otherwise is withdraw with default reason  -->
                         <econdition field-name="reasonEnumId" from="isPayable == 'Y' ? 'FatrReplenish' : 'FatrDisbursement'"/>
                     </entity-find>
-                    <set field="glAccountId" from="accountReasonGlAccountList?.first?.glAccountId"/>
+                    <set field="glAccountId" from="accountReasonGlAccountList?.[0]?.glAccountId"/>
                 </else-if></if>
             </if>
 
@@ -418,7 +418,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="paymentInstrumentEnumId"/><econdition field-name="isPayable" value="E"/>
                     </entity-find>
                 </if>
-                <set field="glAccountId" from="paymentInstrumentGlAccountList.first?.glAccountId"/>
+                <set field="glAccountId" from="paymentInstrumentGlAccountList[0]?.glAccountId"/>
             </if>
 
             <if condition="glAccountId">
@@ -435,7 +435,7 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="acctgTransId"/></out-parameters>
         <actions>
             <entity-find-one entity-name="mantle.account.payment.PaymentApplication" value-field="paymentApplication" for-update="true"/>
-            <if condition="paymentApplication.amountApplied == 0.0"><return/></if>
+            <if condition="paymentApplication.amountApplied != null &amp;&amp; toDecimal(paymentApplication.amountApplied).isZero()"><return/></if>
 
             <set field="paymentId" from="paymentApplication.paymentId"/>
             <set field="toPaymentId" from="paymentApplication.toPaymentId"/>
@@ -459,7 +459,7 @@ along with this software (see the LICENSE.md file). If not, see
                         'AttPaymentAdjust', 'AttIncomingPayment', 'AttOutgoingPayment',
                         'AttOutgoingPaymentAp', 'AttIncomingPaymentAp', 'AttPaymentInOutAppl', 'AttInvoiceInOutAppl', 'AttPaymentApplied']"/>
             </entity-find>
-            <if condition="(existingTransList?.length > 0)"><return message="Payment Application ${paymentApplicationId} has already been posted in accounting transaction ${existingTransList*.acctgTransId}"/></if>
+            <if condition="(existingTransList?.length > 0)"><return message="Payment Application ${paymentApplicationId} has already been posted in accounting transaction [${existingTransList.map((trans) =&gt; trans.acctgTransId).join(', ')}]"/></if>
 
             <if condition="paymentId">
                 <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment"/>
@@ -702,7 +702,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="acctgTransTypeEnumId" operator="in" value="AttOutgoingPaymentAp,AttIncomingPaymentAp,AttPaymentInOutAppl,AttInvoiceInOutAppl,AttPaymentApplied"/>
             </entity-find>
             <if condition="(acctgTransList?.length > 0)"><then>
-                <if condition="acctgTransList.size() == 1"><then>
+                <if condition="acctgTransList.length === 1"><then>
                     <service-call name="mantle.ledger.LedgerServices.post#ReverseAcctgTrans" out-map="revOut"
                             in-map="{acctgTransId:acctgTransList[0].acctgTransId, deleteIfNotPosted:true}"/>
                     <if condition="revOut.acctgTransId">

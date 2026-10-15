@@ -31,7 +31,7 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <if condition="(existingTransList?.length > 0)">
                 <!-- This will happen when an invoice goes from paid to Finalized/etc -->
-                <return message="Invoice ${invoiceId} has already been posted in accounting transaction ${existingTransList*.acctgTransId}"/>
+                <return message="Invoice ${invoiceId} has already been posted in accounting transaction [${existingTransList.map((trans) =&gt; trans.acctgTransId).join(', ')}]"/>
             </if>
 
             <entity-find-one entity-name="mantle.account.invoice.Invoice" value-field="invoice" for-update="true"/>
@@ -86,16 +86,16 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- ==== create entries for invoice items ==== -->
 
-            <set field="invoiceTotal" from="0.0"/>
+            <set field="invoiceTotal" from="toDecimal(0)"/>
             <iterate list="invoiceItemList" entry="invoiceItem">
                 <!-- skip adjustment items, handle later -->
                 <if condition="invoiceItem.isAdjustment == 'Y'"><continue/></if>
                 <!-- calc and check item total -->
                 <!-- NOTE: for debits and credits to match on item entries vs invoice level AR/AP entry they must be rounded the same -->
                 <!-- NOTE: CurrencyRoundingMarker scale here may vary by currency, make configurable -->
-                <set field="itemTotal" from="((invoiceItem.quantity != null ? invoiceItem.quantity : 1.0) * (invoiceItem.amount || 0.0)).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
-                <if condition="itemTotal == 0.0"><continue/></if>
-                <set field="invoiceTotal" from="invoiceTotal + itemTotal"/>
+                <set field="itemTotal" from="toDecimal(invoiceItem.quantity ?? 1).multiply(invoiceItem.amount ?? 0).setScale(2, 'HALF_UP')"/>
+                <if condition="itemTotal.isZero()"><continue/></if>
+                <set field="invoiceTotal" from="invoiceTotal.add(itemTotal)"/>
 
                 <set field="entryCommonMap" from="{invoiceItemSeqId:invoiceItem.invoiceItemSeqId,
                         productId:invoiceItem.productId, assetId:invoiceItem.assetId, description:invoiceItem.description}"/>
@@ -114,8 +114,8 @@ along with this software (see the LICENSE.md file). If not, see
                                         assetTypeEnumId:asset.assetTypeEnumId, classEnumId:asset.classEnumId}"/>
                         </if>
                     </if>
-                    <if condition="invoiceItem.itemTypeEnumId == 'ItemAsset' &amp;&amp; assetTypeGlAccount &amp;&amp; asset.acquireCost &amp;&amp;
-                            (assetTypeEnum.enumId == 'AstTpFixed' || assetTypeEnum.parentEnumId == 'AstTpFixed')">
+                    <if condition="invoiceItem.itemTypeEnumId == 'ItemAsset' &amp;&amp; assetTypeGlAccount &amp;&amp; asset.acquireCost != null &amp;&amp;
+                            !toDecimal(asset.acquireCost).isZero() &amp;&amp; (assetTypeEnum.enumId == 'AstTpFixed' || assetTypeEnum.parentEnumId == 'AstTpFixed')">
                         <!-- handle special entries for fixed asset sale: -->
 
                         <!-- credit Unissued Asset (acquireCost) -->
@@ -131,12 +131,12 @@ along with this software (see the LICENSE.md file). If not, see
                         </if>
                         <if condition="!issuanceGlAccountId"><set field="useErrorJournal" from="true"/></if>
                         <service-call name="mantle.ledger.LedgerServices.create#AcctgTransEntry"
-                                in-map="entryCommonMap + [amount:asset.acquireCost, acctgTransId:fromAcctgTrans.acctgTransId,
+                                in-map="Object.assign({}, entryCommonMap, {amount:asset.acquireCost, acctgTransId:fromAcctgTrans.acctgTransId,
                                     acctgTrans:fromAcctgTrans, debitCreditFlag:'C',
-                                    glAccountTypeEnumId:issuanceGlAccountTypeEnumId, glAccountId:issuanceGlAccountId]"/>
+                                    glAccountTypeEnumId:issuanceGlAccountTypeEnumId, glAccountId:issuanceGlAccountId})"/>
 
                         <!-- debit Accumulated Depreciation (depreciation) -->
-                        <if condition="asset.depreciation">
+                        <if condition="asset.depreciation != null &amp;&amp; !toDecimal(asset.depreciation).isZero()">
                             <set field="accDepGlAccountTypeEnumId" value="GatFaAccumDepreciation"/>
                             <set field="accDepreciationGlAccountId" from="assetTypeGlAccount.accDepreciationGlAccountId"/>
                             <if condition="!accDepreciationGlAccountId">
@@ -149,25 +149,25 @@ along with this software (see the LICENSE.md file). If not, see
                             </if>
                             <if condition="!accDepreciationGlAccountId"><set field="useErrorJournal" from="true"/></if>
                             <service-call name="mantle.ledger.LedgerServices.create#AcctgTransEntry"
-                                    in-map="entryCommonMap + [amount:asset.depreciation, acctgTransId:fromAcctgTrans.acctgTransId,
+                                    in-map="Object.assign({}, entryCommonMap, {amount:asset.depreciation, acctgTransId:fromAcctgTrans.acctgTransId,
                                         acctgTrans:fromAcctgTrans, debitCreditFlag:'D',
-                                        glAccountTypeEnumId:accDepGlAccountTypeEnumId, glAccountId:accDepreciationGlAccountId]"/>
+                                        glAccountTypeEnumId:accDepGlAccountTypeEnumId, glAccountId:accDepreciationGlAccountId})"/>
 
                         </if>
 
                         <!-- create profit/loss entry -->
-                        <set field="profitLoss" from="itemTotal - (asset.acquireCost - (asset.depreciation || 0.0))"/>
+                        <set field="profitLoss" from="itemTotal.subtract(toDecimal(asset.acquireCost).subtract(asset.depreciation ?? 0))"/>
                         <!-- <log level="info" message="======= Fixed asset sale: itemTotal=${itemTotal}, acquireCost=${asset.acquireCost}, depreciation=${asset.depreciation}, profitLoss=${profitLoss}"/> -->
-                        <if condition="profitLoss &gt; 0.0"><then>
+                        <if condition="profitLoss.compare(0) &gt; 0"><then>
                             <!-- credit Profit/Gain on Sale/Disposal (sale amount - (acquireCost - depreciation)) -->
 
                             <!-- just set itemTotal and let the standard entry handle it -->
                             <set field="itemTotal" from="profitLoss"/>
-                        </then><else-if condition="profitLoss &lt; 0.0">
+                        </then><else-if condition="profitLoss.compare(0) &lt; 0">
                             <!-- debit Loss on Sale/Disposal (sale amount - (acquireCost - depreciation)) -->
 
                             <!-- set itemTotal=0 so standard post doesn't do anything -->
-                            <set field="itemTotal" from="0.0"/>
+                            <set field="itemTotal" from="toDecimal(0)"/>
 
                             <!-- use InvoiceItem.overrideGlAccountId if specified -->
                             <set field="lossGlAccountId" from="invoiceItem.overrideGlAccountId"/>
@@ -198,15 +198,15 @@ along with this software (see the LICENSE.md file). If not, see
                             <if condition="!lossGlAccountId"><set field="useErrorJournal" from="true"/></if>
 
                             <service-call name="mantle.ledger.LedgerServices.create#AcctgTransEntry"
-                                    in-map="entryCommonMap + [amount:-profitLoss, acctgTransId:fromAcctgTrans.acctgTransId, acctgTrans:fromAcctgTrans,
-                                        debitCreditFlag:'D', glAccountTypeEnumId:lossGlAccountTypeEnumId, glAccountId:lossGlAccountId]"/>
+                                    in-map="Object.assign({}, entryCommonMap, {amount:profitLoss.multiply(-1), acctgTransId:fromAcctgTrans.acctgTransId, acctgTrans:fromAcctgTrans,
+                                        debitCreditFlag:'D', glAccountTypeEnumId:lossGlAccountTypeEnumId, glAccountId:lossGlAccountId})"/>
                         </else-if><else>
                             <!-- NOTE: if profitLoss == 0 don't post anything -->
-                            <set field="itemTotal" from="0.0"/>
+                            <set field="itemTotal" from="toDecimal(0)"/>
                         </else></if>
                     </if>
 
-                    <if condition="itemTotal != 0.0">
+                    <if condition="!itemTotal.isZero()">
                         <!-- <log level="info" message="======= Create invoice item tx entry: itemTotal=${itemTotal}"/> -->
 
                         <!-- use InvoiceItem.overrideGlAccountId if specified -->
@@ -233,9 +233,9 @@ along with this software (see the LICENSE.md file). If not, see
                         <if condition="!itemGlAccountId"><set field="useErrorJournal" from="true"/></if>
 
                         <service-call name="mantle.ledger.LedgerServices.create#AcctgTransEntry"
-                                in-map="entryCommonMap + [amount:itemTotal, acctgTransId:fromAcctgTrans.acctgTransId,
+                                in-map="Object.assign({}, entryCommonMap, {amount:itemTotal, acctgTransId:fromAcctgTrans.acctgTransId,
                                     acctgTrans:fromAcctgTrans, debitCreditFlag:'C', glAccountTypeEnumId:itemGlAccountTypeEnumId,
-                                    glAccountId:itemGlAccountId]"/>
+                                    glAccountId:itemGlAccountId})"/>
                     </if>
                 </if>
 
@@ -261,8 +261,8 @@ along with this software (see the LICENSE.md file). If not, see
                     <if condition="!itemGlAccountId"><set field="useErrorJournal" from="true"/></if>
 
                     <service-call name="mantle.ledger.LedgerServices.create#AcctgTransEntry"
-                            in-map="entryCommonMap + [amount:itemTotal, acctgTransId:toAcctgTrans.acctgTransId, acctgTrans:toAcctgTrans,
-                                debitCreditFlag:'D', glAccountTypeEnumId:itemGlAccountTypeEnumId, glAccountId:itemGlAccountId]"/>
+                            in-map="Object.assign({}, entryCommonMap, {amount:itemTotal, acctgTransId:toAcctgTrans.acctgTransId, acctgTrans:toAcctgTrans,
+                                debitCreditFlag:'D', glAccountTypeEnumId:itemGlAccountTypeEnumId, glAccountId:itemGlAccountId})"/>
                 </if>
             </iterate>
 
@@ -343,7 +343,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="reverseOfAcctgTransId" from="null"/>
             </entity-find>
             <if condition="(existingTransList?.length > 0)">
-                <return message="Invoice Adjustment Item ${invoiceId}:${invoiceItemSeqId} has already been posted in accounting transaction ${existingTransList*.acctgTransId}"/>
+                <return message="Invoice Adjustment Item ${invoiceId}:${invoiceItemSeqId} has already been posted in accounting transaction [${existingTransList.map((trans) =&gt; trans.acctgTransId).join(', ')}]"/>
             </if>
 
             <entity-find-one entity-name="mantle.account.invoice.Invoice" value-field="invoice"/>
@@ -406,11 +406,12 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- ==== create entry for invoice item ==== -->
 
-            <set field="invoiceTotal" from="0.0"/>
+            <set field="invoiceTotal" from="toDecimal(0)"/>
 
-            <set field="itemTotal" from="(invoiceItem.amount || 0.0) * (invoiceItem.quantity || 1.0)"/>
-            <if condition="itemTotal == 0.0"><return/></if>
-            <set field="invoiceTotal" from="invoiceTotal + itemTotal"/>
+            <!-- a zero quantity counts as 1, as the Groovy truth test did -->
+            <set field="itemTotal" from="toDecimal(invoiceItem.amount ?? 0).multiply(invoiceItem.quantity != null &amp;&amp; !toDecimal(invoiceItem.quantity).isZero() ? invoiceItem.quantity : 1)"/>
+            <if condition="itemTotal.isZero()"><return/></if>
+            <set field="invoiceTotal" from="invoiceTotal.add(itemTotal)"/>
 
             <set field="entryCommonMap" from="{invoiceItemSeqId:invoiceItem.invoiceItemSeqId,
                     productId:invoiceItem.productId, assetId:invoiceItem.assetId}"/>
@@ -436,9 +437,9 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="!itemGlAccountId"><set field="useErrorJournal" from="true"/></if>
 
                 <service-call name="mantle.ledger.LedgerServices.create#AcctgTransEntry"
-                        in-map="entryCommonMap + [amount:itemTotal, acctgTransId:fromAcctgTrans.acctgTransId,
+                        in-map="Object.assign({}, entryCommonMap, {amount:itemTotal, acctgTransId:fromAcctgTrans.acctgTransId,
                             acctgTrans:fromAcctgTrans, debitCreditFlag:'C', glAccountTypeEnumId:itemGlAccountTypeEnumId,
-                            glAccountId:itemGlAccountId]"/>
+                            glAccountId:itemGlAccountId})"/>
             </if>
             <!-- entry for to Party (purchase invoice) -->
             <if condition="toPartyAcctgPreference">
@@ -462,8 +463,8 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="!itemGlAccountId"><set field="useErrorJournal" from="true"/></if>
 
                 <service-call name="mantle.ledger.LedgerServices.create#AcctgTransEntry"
-                        in-map="entryCommonMap + [amount:itemTotal, acctgTransId:toAcctgTrans.acctgTransId, acctgTrans:toAcctgTrans,
-                            debitCreditFlag:'D', glAccountTypeEnumId:itemGlAccountTypeEnumId, glAccountId:itemGlAccountId]"/>
+                        in-map="Object.assign({}, entryCommonMap, {amount:itemTotal, acctgTransId:toAcctgTrans.acctgTransId, acctgTrans:toAcctgTrans,
+                            debitCreditFlag:'D', glAccountTypeEnumId:itemGlAccountTypeEnumId, glAccountId:itemGlAccountId})"/>
             </if>
 
             <!-- ==== create balancing entry ==== -->
@@ -569,8 +570,8 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="invoiceTypeEnumId"/>
                 <econdition field-name="isPayable"/>
             </entity-find>
-            <set field="acctgTransTypeEnumId" from="invoiceTypeTransTypeList.first?.acctgTransTypeEnumId"/>
-            <set field="glAccountId" from="invoiceTypeTransTypeList.first?.glAccountId"/>
+            <set field="acctgTransTypeEnumId" from="invoiceTypeTransTypeList[0]?.acctgTransTypeEnumId"/>
+            <set field="glAccountId" from="invoiceTypeTransTypeList[0]?.glAccountId"/>
 
             <if condition="glAccountId">
                 <entity-find-one entity-name="mantle.ledger.account.GlAccount" value-field="glAccount" cache="true">
@@ -607,15 +608,15 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- look by productId first (if passed in) -->
             <entity-find entity-name="moqui.basic.EnumGroupMember" list="productItemTypeEgms" cache="true">
                 <econdition field-name="enumGroupEnumId" value="EngItemsProduct"/></entity-find>
-            <set field="productItemTypes" from="productItemTypeEgms*.enumId"/>
-            <if condition="productId &amp;&amp; itemTypeEnumId in productItemTypes">
+            <set field="productItemTypes" from="productItemTypeEgms.map((egm) =&gt; egm.enumId)"/>
+            <if condition="productId &amp;&amp; productItemTypes.includes(itemTypeEnumId)">
                 <entity-find entity-name="mantle.product.category.ProductCategoryMember" list="productCategoryMemberList">
                     <date-filter/><econdition field-name="productId"/></entity-find>
                 <entity-find entity-name="mantle.ledger.config.ProductCategoryGlAccount" list="productCategoryGlAccountList">
-                    <econdition field-name="productCategoryId" operator="in" from="productCategoryMemberList.productCategoryId"/>
+                    <econdition field-name="productCategoryId" operator="in" from="productCategoryMemberList.map((member) =&gt; member.productCategoryId)"/>
                     <econdition field-name="organizationPartyId" operator="in" from="orgPartyIdList"/>
                 </entity-find>
-                <set field="glAccountId" from="productCategoryGlAccountList ?
+                <set field="glAccountId" from="productCategoryGlAccountList.length ?
                     (direction == 'O' ? productCategoryGlAccountList[0].glAccountId : productCategoryGlAccountList[0].contraGlAccountId) : null"/>
 
                 <if condition="!glAccountId">
@@ -623,7 +624,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="productId"/>
                         <econdition field-name="organizationPartyId" operator="in" from="orgPartyIdList"/>
                     </entity-find>
-                    <set field="glAccountId" from="productGlAccountList ?
+                    <set field="glAccountId" from="productGlAccountList.length ?
                         (direction == 'O' ? productGlAccountList[0].glAccountId : productGlAccountList[0].contraGlAccountId) : null"/>
                 </if>
 
@@ -647,7 +648,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="itemTypeEnumId"/>
                     <econditions combine="or"><econdition field-name="direction"/><econdition field-name="direction" value="E"/></econditions>
                 </entity-find>
-                <set field="glAccountId" from="itemTypeGlAccountList.first?.glAccountId"/>
+                <set field="glAccountId" from="itemTypeGlAccountList[0]?.glAccountId"/>
             </if>
 
             <if condition="glAccountId">
@@ -719,7 +720,7 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <if condition="(existingTransList?.length > 0)"><then>
                 <!-- unpost and delete existing, put distinct IDs in a set to only do each once -->
-                <set field="acctgTransIdSet" from="new TreeSet(existingTransList*.acctgTransId)"/>
+                <set field="acctgTransIdSet" from="Array.from(new Set(existingTransList.map((trans) =&gt; trans.acctgTransId))).sort()"/>
                 <iterate list="acctgTransIdSet" entry="acctgTransId">
                     <service-call name="mantle.ledger.LedgerServices.unpost#AcctgTrans" in-map="{acctgTransId:acctgTransId}"/>
                     <service-call name="mantle.ledger.LedgerServices.delete#AcctgTrans" in-map="{acctgTransId:acctgTransId}"/>
@@ -745,7 +746,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="invoiceDate" operator="greater-equals" from="fromDate"/>
                 <order-by field-name="invoiceDate"/>
             </entity-find>
-            <log message="Reposting ${invoiceList.size()} invoices from ${fromDate}"/>
+            <log message="Reposting ${invoiceList.length} invoices from ${fromDate}"/>
             <iterate list="invoiceList" entry="invoice">
                 <service-call name="mantle.ledger.InvoiceAutoPostServices.repost#Invoice" in-map="{invoiceId:invoice.invoiceId}"/>
             </iterate>

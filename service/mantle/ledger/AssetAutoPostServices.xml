@@ -23,7 +23,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <entity-find-one entity-name="mantle.product.receipt.AssetReceipt" value-field="assetReceipt" for-update="true"/>
             <if condition="assetReceipt == null"><return error="true" message="Not posting inventory transaction, could not find Asset Receipt with ID ${assetReceiptId}"/></if>
-            <if condition="!assetReceipt.quantityAccepted"><return message="No quantity accepted on receipt, not posting inventory transaction to GL for receipt ${assetReceiptId}"/></if>
+            <if condition="assetReceipt.quantityAccepted == null || toDecimal(assetReceipt.quantityAccepted).isZero()"><return message="No quantity accepted on receipt, not posting inventory transaction to GL for receipt ${assetReceiptId}"/></if>
             <set field="asset" from="assetReceipt['mantle.product.asset.Asset']"/>
             <set field="organizationPartyId" from="asset.ownerPartyId"/>
 
@@ -54,7 +54,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="reverseOfAcctgTransId" from="null"/>
             </entity-find>
             <if condition="(existingTransList?.length > 0)">
-                <return message="Asset Receipt ${assetReceiptId} has already been posted in accounting transaction ${existingTransList*.acctgTransId}"/></if>
+                <return message="Asset Receipt ${assetReceiptId} has already been posted in accounting transaction [${existingTransList.map((trans) =&gt; trans.acctgTransId).join(', ')}]"/></if>
 
             <!-- get assetTypeGlAccount -->
             <service-call name="mantle.ledger.AssetAutoPostServices.get#AssetTypeGlAccount" out-map="context"
@@ -126,7 +126,7 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
 
             <!-- set the amount -->
-            <set field="amount" from="assetReceipt.quantityAccepted * asset.acquireCost"/>
+            <set field="amount" from="toDecimal(assetReceipt.quantityAccepted).multiply(asset.acquireCost)"/>
 
             <!-- create the AcctgTrans -->
             <set field="useErrorJournal" from="false"/>
@@ -196,7 +196,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- now post the AssetReceipt again (if has acquireCost and ownerPartyId) -->
             <entity-find-one entity-name="mantle.product.asset.Asset" value-field="asset">
                 <field-map field-name="assetId" from="assetReceipt.assetId"/></entity-find-one>
-            <if condition="asset?.acquireCost &amp;&amp; asset?.ownerPartyId">
+            <if condition="asset?.acquireCost != null &amp;&amp; !toDecimal(asset.acquireCost).isZero() &amp;&amp; asset.ownerPartyId">
                 <service-call name="mantle.ledger.AssetAutoPostServices.post#AssetReceipt" in-map="{assetReceiptId:assetReceiptId}"/></if>
         </actions>
     </service>
@@ -209,7 +209,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <entity-find-one entity-name="mantle.product.issuance.AssetIssuance" value-field="assetIssuance" for-update="true"/>
             <if condition="assetIssuance == null"><return error="true" message="Not posting inventory transaction, could not find Asset Issuance with ID ${assetIssuanceId}"/></if>
-            <if condition="!assetIssuance.quantity"><return message="No quantity issued, not posting inventory transaction to GL for issuance ${assetIssuanceId}"/></if>
+            <if condition="assetIssuance.quantity == null || toDecimal(assetIssuance.quantity).isZero()"><return message="No quantity issued, not posting inventory transaction to GL for issuance ${assetIssuanceId}"/></if>
 
             <set field="asset" from="assetIssuance['mantle.product.asset.Asset']"/>
             <set field="organizationPartyId" from="asset.ownerPartyId"/>
@@ -225,7 +225,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <return/>
             </if>
             <!-- check acquireCost -->
-            <if condition="asset.acquireCost == null || asset.acquireCost == 0.0">
+            <if condition="asset.acquireCost == null || toDecimal(asset.acquireCost).isZero()">
                 <set field="assetIssuance.acctgTransResultEnumId" value="AtrNoAcquireCost"/>
                 <entity-update value-field="assetIssuance"/>
                 <return message="Not posting Asset Issuance ${assetIssuanceId}, Asset ${asset.assetId} has no Acquire Cost"/>
@@ -240,7 +240,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="reverseOfAcctgTransId" from="null"/>
             </entity-find>
             <if condition="(existingTransList?.length > 0)">
-                <return message="Asset Issuance ${assetIssuanceId} has already been posted in accounting transaction ${existingTransList*.acctgTransId}"/></if>
+                <return message="Asset Issuance ${assetIssuanceId} has already been posted in accounting transaction [${existingTransList.map((trans) =&gt; trans.acctgTransId).join(', ')}]"/></if>
 
             <!-- get assetTypeGlAccount -->
             <service-call name="mantle.ledger.AssetAutoPostServices.get#AssetTypeGlAccount" out-map="context"
@@ -317,7 +317,7 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
 
             <!-- set the amount -->
-            <set field="amount" from="assetIssuance.quantity * asset.acquireCost"/>
+            <set field="amount" from="toDecimal(assetIssuance.quantity).multiply(asset.acquireCost)"/>
 
             <!-- create the AcctgTrans -->
             <service-call name="mantle.ledger.LedgerServices.create#AcctgTrans" out-map="context"
@@ -369,14 +369,14 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="acctgTransTypeEnumId" operator="in" value="AttAssetIssuance,AttInventoryIssuance"/>
             </entity-find>
             <if condition="(acctgTransList?.length > 0)"><then>
-                <if condition="acctgTransList.size() == 1"><then>
-                    <set field="curAcctgTransId" from="acctgTransList.first.acctgTransId"/>
+                <if condition="acctgTransList.length === 1"><then>
+                    <set field="curAcctgTransId" from="acctgTransList[0].acctgTransId"/>
                     <!-- make asset issuance transactions lighter weight by unpost/delete instead of adding a reverse TX -->
                     <service-call name="mantle.ledger.LedgerServices.unpost#AcctgTrans" in-map="{acctgTransId:curAcctgTransId}"/>
                     <service-call name="mantle.ledger.LedgerServices.delete#AcctgTrans" in-map="{acctgTransId:curAcctgTransId}"/>
                     <!-- old approach:
                     <service-call name="mantle.ledger.LedgerServices.post#ReverseAcctgTrans"
-                            in-map="[acctgTransId:acctgTransList.first.acctgTransId, deleteIfNotPosted:true]"/> -->
+                            in-map="{acctgTransId:acctgTransList[0].acctgTransId, deleteIfNotPosted:true}"/> -->
                 </then><else>
                     <return error="true" message="Found more than one accounting transaction for Asset Issuance ${assetIssuanceId}, may already be reversed, not posting reverse transaction."/>
                 </else></if>
@@ -404,7 +404,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="!existingTransList?.length"><then>
                 <log level="warn" message="In repost#AssetIssuance ${assetIssuanceId} no existing AcctgTrans records found"/>
             </then><else>
-                <log message="In repost#AssetIssuance ${assetIssuanceId} unposting and deleting AcctgTrans ${existingTransList*.acctgTransId}"/>
+                <log message="In repost#AssetIssuance ${assetIssuanceId} unposting and deleting AcctgTrans [${existingTransList.map((trans) =&gt; trans.acctgTransId).join(', ')}]"/>
             </else></if>
             <!-- unpost and delete existing -->
             <iterate list="existingTransList" entry="acctgTrans">
@@ -415,7 +415,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- now post the AssetIssuance again (if has acquireCost and ownerPartyId) -->
             <entity-find-one entity-name="mantle.product.asset.Asset" value-field="asset">
                 <field-map field-name="assetId" from="assetIssuance.assetId"/></entity-find-one>
-            <if condition="asset?.acquireCost &amp;&amp; asset?.ownerPartyId">
+            <if condition="asset?.acquireCost != null &amp;&amp; !toDecimal(asset.acquireCost).isZero() &amp;&amp; asset.ownerPartyId">
                 <service-call name="mantle.ledger.AssetAutoPostServices.post#AssetIssuance" in-map="{assetIssuanceId:assetIssuanceId}"/></if>
         </actions>
     </service>
@@ -446,48 +446,49 @@ along with this software (see the LICENSE.md file). If not, see
                 <return/>
             </if>
 
-            <if condition="!asset.acquireCost"><message error="true">Asset [${assetId}] has no Acquire Cost, not calculating depreciation</message></if>
+            <if condition="asset.acquireCost == null || toDecimal(asset.acquireCost).isZero()"><message error="true">Asset [${assetId}] has no Acquire Cost, not calculating depreciation</message></if>
             <if condition="!asset.acquiredDate"><message error="true">Asset [${assetId}] has no Acquired Date, not calculating depreciation</message></if>
             <if condition="!asset.expectedEndOfLife"><message error="true">Asset [${assetId}] has no Expected End of Life, not calculating depreciation</message></if>
             <check-errors/>
 
+            <!-- A date reaches a script as epoch millis text (UTC midnight for a Date field), so the years and days of the
+                year are taken in UTC; plusMonths clamps the day as Calendar.add does -->
             <script><![CDATA[
-                Calendar nowCalendar = ec.user.nowCalendar
+                function dateOf(value) {
+                    const text = String(value)
+                    if (/^-?\d+$/.test(text)) { const at = new Date(Number(text)); return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate())) }
+                    const [y, m, d] = text.slice(0, 10).split('-').map(Number)
+                    return new Date(Date.UTC(y, m - 1, d))
+                }
+                function plusMonths(dt, n) {
+                    const first = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth() + n, 1))
+                    const last = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate()
+                    return new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), Math.min(dt.getUTCDate(), last)))
+                }
+                function dayOfYear(dt) { return Math.round((dt.getTime() - Date.UTC(dt.getUTCFullYear(), 0, 1)) / 86400000) + 1 }
 
-                Calendar acquiredCal = nowCalendar.clone()
-                acquiredCal.setTime(asset.acquiredDate)
-                Calendar expectedEndOfLifeCal = nowCalendar.clone()
-                expectedEndOfLifeCal.setTime(asset.expectedEndOfLife)
+                const acquiredDt = dateOf(asset.acquiredDate)
+                const endOfLifeDt = dateOf(asset.expectedEndOfLife)
+                // use integer number of years, partial year depreciation is not common and should be needed (may cause issues)
+                usefulLifeYears = endOfLifeDt.getUTCFullYear() - acquiredDt.getUTCFullYear()
 
-                usefulLifeYears = expectedEndOfLifeCal.get(Calendar.YEAR) - acquiredCal.get(Calendar.YEAR)
-                /* use integer number of years, partial year depreciation is not common and should be needed (may cause issues)
-                int days = expectedEndOfLifeCal.get(Calendar.DAY_OF_YEAR) - acquiredCal.get(Calendar.DAY_OF_YEAR)
-                // NOTE: using 365 days isn't always correct, should use number of days in expectedEndOfLife year, but shouldn't matter much
-                int daysInYear = 365
-                if (days < 0) { yearsInt = yearsInt - 1; days = daysInYear + days }
-                usefulLifeYears = (yearsInt == null ? null : toDecimal(yearsInt)) + days/daysInYear
-                */
-
-                Calendar txCal = nowCalendar.clone()
-                txCal.setTime(transactionDate)
-                yearsRemaining = expectedEndOfLifeCal.get(Calendar.YEAR) -  txCal.get(Calendar.YEAR)
+                const txDt = dateOf(transactionDate)
+                yearsRemaining = endOfLifeDt.getUTCFullYear() - txDt.getUTCFullYear()
                 // if we are before the day in the year of end of life, add 1 year (we haven't gone to the next year for this asset)
-                boolean txBeforeDayOfYear = false
-                if (txCal.get(Calendar.DAY_OF_YEAR) < expectedEndOfLifeCal.get(Calendar.DAY_OF_YEAR) - 1) {
-                    yearsRemaining = yearsRemaining + 1I
+                let txBeforeDayOfYear = false
+                if (dayOfYear(txDt) < dayOfYear(endOfLifeDt) - 1) {
+                    yearsRemaining = yearsRemaining + 1
                     txBeforeDayOfYear = true
                 }
 
                 // see if it is the last period for each depreciation year (based on Asset.expectedEndOfLife)
-                Calendar nextMonthCal =  txCal.clone()
-                nextMonthCal.add(Calendar.MONTH, 1)
-                isLastYearPeriod = (txBeforeDayOfYear && nextMonthCal.get(Calendar.DAY_OF_YEAR) > expectedEndOfLifeCal.get(Calendar.DAY_OF_YEAR))
+                isLastYearPeriod = (txBeforeDayOfYear && dayOfYear(plusMonths(txDt, 1)) > dayOfYear(endOfLifeDt))
             ]]></script>
 
-            <set field="netBookValue" from="asset.acquireCost - (asset.salvageValue || 0) - (asset.depreciation || 0)"/>
-            <set field="yearBeginNetBookValue" from="asset.acquireCost - (asset.salvageValue || 0) - (asset.yearBeginDepreciation || 0)"/>
+            <set field="netBookValue" from="toDecimal(asset.acquireCost).subtract(asset.salvageValue ?? 0).subtract(asset.depreciation ?? 0)"/>
+            <set field="yearBeginNetBookValue" from="toDecimal(asset.acquireCost).subtract(asset.salvageValue ?? 0).subtract(asset.yearBeginDepreciation ?? 0)"/>
 
-            <if condition="netBookValue == 0">
+            <if condition="netBookValue.isZero()">
                 <log level="trace" message="Asset [${assetId}], is fully depreciated (net book value is zero)"/>
                 <set field="annualDepreciation" from="0"/>
                 <set field="monthlyDepreciation" from="0"/>
@@ -498,7 +499,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <then>
                     <!-- Straight Line -->
                     <!-- require acquireCost, acquiredDate, expectedEndOfLife; optional salvageValue, depreciation (both default to 0) -->
-                    <set field="annualDepreciation" from="(asset.acquireCost - (asset.salvageValue || 0)) / usefulLifeYears"/>
+                    <set field="annualDepreciation" from="toDecimal(asset.acquireCost).subtract(asset.salvageValue ?? 0).divide(usefulLifeYears)"/>
                 </then>
                 <else-if condition="asset.depreciationTypeEnumId == 'DtpDoubleDeclining'">
                     <!-- Double Declining -->
@@ -506,16 +507,17 @@ along with this software (see the LICENSE.md file). If not, see
                     <if condition="yearsRemaining == 1">
                         <!-- handle last year where full net book value should be used -->
                         <then><set field="annualDepreciation" from="yearBeginNetBookValue"/></then>
-                        <else><set field="annualDepreciation" from="yearBeginNetBookValue * (2 / usefulLifeYears)"/></else>
+                        <else><set field="annualDepreciation" from="yearBeginNetBookValue.multiply(toDecimal(2).divide(usefulLifeYears))"/></else>
                     </if>
                 </else-if>
                 <else-if condition="asset.depreciationTypeEnumId == 'DtpSumYearsDigits'">
                     <!-- Sum of Years Digits -->
                     <script><![CDATA[
-                        sumOfYearsDigits = 0I
-                        for (int i = usefulLifeYears; i > 0; i--) sumOfYearsDigits += i
+                        let digits = 0
+                        for (let i = usefulLifeYears; i > 0; i--) digits += i
+                        sumOfYearsDigits = digits
                     ]]></script>
-                    <set field="annualDepreciation" from="(asset.acquireCost - (asset.salvageValue || 0)) * (yearsRemaining / sumOfYearsDigits)"/>
+                    <set field="annualDepreciation" from="toDecimal(asset.acquireCost).subtract(asset.salvageValue ?? 0).multiply(toDecimal(yearsRemaining).divide(sumOfYearsDigits))"/>
                 </else-if>
                 <!-- TODO support DtpUnitsProduction (specify a meter to use for the calculation?)
                 <else-if condition="asset.depreciationTypeEnumId == 'DtpUnitsProduction'">
@@ -527,13 +529,13 @@ along with this software (see the LICENSE.md file). If not, see
                 </else>
             </if>
 
-            <if condition="annualDepreciation"><then>
-                <if condition="annualDepreciation &gt; yearBeginNetBookValue">
+            <if condition="annualDepreciation != null &amp;&amp; !toDecimal(annualDepreciation).isZero()"><then>
+                <if condition="toDecimal(annualDepreciation).compare(yearBeginNetBookValue) &gt; 0">
                     <set field="annualDepreciation" from="yearBeginNetBookValue"/></if>
-                <set field="annualDepreciation" from="((BigDecimal) annualDepreciation).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+                <set field="annualDepreciation" from="toDecimal(annualDepreciation).setScale(2, 'HALF_UP')"/>
 
-                <set field="monthlyDepreciation" from="(annualDepreciation / 12).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
-                <if condition="monthlyDepreciation &gt; netBookValue"><set field="monthlyDepreciation" from="netBookValue"/></if>
+                <set field="monthlyDepreciation" from="annualDepreciation.divide(12).setScale(2, 'HALF_UP')"/>
+                <if condition="monthlyDepreciation.compare(netBookValue) &gt; 0"><set field="monthlyDepreciation" from="netBookValue"/></if>
             </then><else>
                 <set field="annualDepreciation" from="0"/>
                 <set field="monthlyDepreciation" from="0"/>
@@ -657,9 +659,9 @@ along with this software (see the LICENSE.md file). If not, see
             </else></if>
 
             <!-- update Asset.depreciation and Asset.yearBeginDepreciation -->
-            <set field="asset.depreciation" from="(asset.depreciation || 0) + monthlyDepreciation"/>
+            <set field="asset.depreciation" from="toDecimal(asset.depreciation ?? 0).add(monthlyDepreciation)"/>
             <if condition="isLastYearPeriod">
-                <set field="asset.yearBeginDepreciation" from="(asset.yearBeginDepreciation || 0) + annualDepreciation"/></if>
+                <set field="asset.yearBeginDepreciation" from="toDecimal(asset.yearBeginDepreciation ?? 0).add(annualDepreciation)"/></if>
             <entity-update value-field="asset"/>
 
             <!-- create the AssetDepreciation history record -->
@@ -699,7 +701,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <service-call name="mantle.ledger.AssetAutoPostServices.calculate#FixedAssetDepreciation"
                     in-map="context" out-map="context"/>
-            <if condition="monthlyDepreciation">
+            <if condition="monthlyDepreciation != null &amp;&amp; !toDecimal(monthlyDepreciation).isZero()">
                 <service-call name="mantle.ledger.AssetAutoPostServices.post#FixedAssetDepreciation"
                         in-map="context" out-map="context"/>
             </if>
@@ -720,20 +722,20 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="timePeriod.timePeriodTypeId != 'FiscalMonth'">
                 <return error="true" message="Can only post fixed asset depreciation to Fiscal Month periods"/></if>
             <if condition="!transactionDate">
-                <set field="transactionDate" from="new Timestamp(timePeriod.thruDate.time - 1)"/></if>
+                <set field="transactionDate" from="String(Number(timePeriod.thruDate) - 1)"/></if>
 
             <service-call name="mantle.ledger.LedgerServices.expand#ChildOrganizationList" out-map="expandResult"
                     in-map="{organizationPartyId:timePeriod.partyId, onlyWithNoAcctgPreference:true}"/>
             <set field="orgPartyIdList" from="expandResult.orgPartyIdList"/>
-            <if condition="!orgPartyIdList.contains(timePeriod.partyId)">
-                <script>orgPartyIdList.add(timePeriod.partyId)</script></if>
+            <if condition="!orgPartyIdList.includes(timePeriod.partyId)">
+                <script>orgPartyIdList.push(timePeriod.partyId)</script></if>
             <entity-find entity-name="mantle.product.asset.Asset" list="assetList">
-                <econdition field-name="ownerPartyId" operator="in" from="expandResult.orgPartyIdList"/>
+                <econdition field-name="ownerPartyId" operator="in" from="orgPartyIdList"/>
                 <econdition field-name="depreciationTypeEnumId" operator="not-equals" from="null"/>
                 <order-by field-name="assetId"/>
             </entity-find>
 
-            <log level="info" message="Calculating and posting depreciation for organizations: ${expandResult.orgPartyIdList}, assets: ${assetList.assetId}"/>
+            <log level="info" message="Calculating and posting depreciation for organizations: ${orgPartyIdList}, assets: ${assetList.map((asset) =&gt; asset.assetId)}"/>
             <iterate list="assetList" entry="asset">
                 <service-call name="mantle.ledger.AssetAutoPostServices.calculateAndPost#FixedAssetDepreciation"
                         in-map="{assetId:asset.assetId, timePeriodId:timePeriodId, transactionDate:transactionDate}"/>
@@ -749,7 +751,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <entity-find-one entity-name="mantle.product.asset.AssetDetail" value-field="assetDetail" for-update="true"/>
             <if condition="!assetDetail.physicalInventoryId"><return/></if>
-            <if condition="!assetDetail.quantityOnHandDiff"><return/></if>
+            <if condition="assetDetail.quantityOnHandDiff == null || toDecimal(assetDetail.quantityOnHandDiff).isZero()"><return/></if>
 
             <set field="assetId" from="assetDetail.assetId"/>
             <set field="physicalInventoryId" from="assetDetail.physicalInventoryId"/>
@@ -773,7 +775,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="reverseOfAcctgTransId" from="null"/>
             </entity-find>
             <if condition="(existingTransList?.length > 0)">
-                <return message="Physical Inventory change in asset detail ${assetDetailId}, physical inventory ${assetDetail.physicalInventoryId} has already been posted in accounting transaction ${existingTransList*.acctgTransId}"/></if>
+                <return message="Physical Inventory change in asset detail ${assetDetailId}, physical inventory ${assetDetail.physicalInventoryId} has already been posted in accounting transaction [${existingTransList.map((trans) =&gt; trans.acctgTransId).join(', ')}]"/></if>
 
             <set field="transactionDate" from="physicalInventory.physicalInventoryDate || assetDetail.effectiveDate"/>
             <set field="organizationPartyId" from="asset.ownerPartyId"/>
@@ -784,9 +786,9 @@ along with this software (see the LICENSE.md file). If not, see
                 <return/>
             </if>
 
-            <set field="isFound" from="assetDetail.quantityOnHandDiff &gt; 0"/>
-            <set field="quantity" from="assetDetail.quantityOnHandDiff &gt; 0 ? assetDetail.quantityOnHandDiff : -assetDetail.quantityOnHandDiff"/>
-            <set field="amount" from="quantity * asset.acquireCost"/>
+            <set field="isFound" from="toDecimal(assetDetail.quantityOnHandDiff).compare(0) &gt; 0"/>
+            <set field="quantity" from="isFound ? toDecimal(assetDetail.quantityOnHandDiff) : toDecimal(assetDetail.quantityOnHandDiff).multiply(-1)"/>
+            <set field="amount" from="quantity.multiply(asset.acquireCost)"/>
 
             <service-call name="mantle.ledger.LedgerServices.find#PartyAcctgPreference" out-map="papOut"
                     in-map="{organizationPartyId:organizationPartyId}"/>
@@ -886,7 +888,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <entity-find-one entity-name="mantle.product.asset.AssetDetail" value-field="assetDetail" for-update="true"/>
             <if condition="!assetDetail.physicalInventoryId"><return/></if>
-            <if condition="!assetDetail.quantityOnHandDiff"><return/></if>
+            <if condition="assetDetail.quantityOnHandDiff == null || toDecimal(assetDetail.quantityOnHandDiff).isZero()"><return/></if>
 
             <entity-find entity-name="mantle.ledger.transaction.AcctgTrans" list="existingTransList">
                 <econdition field-name="physicalInventoryId" from="assetDetail.physicalInventoryId"/>
@@ -905,7 +907,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- now post the PhysicalInventoryVariance again (if has acquireCost and ownerPartyId) -->
             <entity-find-one entity-name="mantle.product.asset.Asset" value-field="asset">
                 <field-map field-name="assetId" from="assetDetail.assetId"/></entity-find-one>
-            <if condition="asset?.acquireCost &amp;&amp; asset?.ownerPartyId">
+            <if condition="asset?.acquireCost != null &amp;&amp; !toDecimal(asset.acquireCost).isZero() &amp;&amp; asset.ownerPartyId">
                 <service-call name="mantle.ledger.AssetAutoPostServices.post#PhysicalInventoryVariance" in-map="{assetDetailId:assetDetailId}"/></if>
         </actions>
     </service>
@@ -927,7 +929,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="assetId">
                 <entity-find entity-name="mantle.ledger.config.AssetTypeGlAccount" list="assetTypeGlAccountList" cache="true">
                     <econdition field-name="organizationPartyId"/><econdition field-name="assetId"/></entity-find>
-                <set field="assetTypeGlAccount" from="assetTypeGlAccountList ? assetTypeGlAccountList[0] : null"/>
+                <set field="assetTypeGlAccount" from="assetTypeGlAccountList.length ? assetTypeGlAccountList[0] : null"/>
             </if>
 
             <!-- try by assetTypeEnumId AND classEnumId -->
@@ -935,7 +937,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find entity-name="mantle.ledger.config.AssetTypeGlAccount" list="assetTypeGlAccountList" cache="true">
                     <econdition field-name="organizationPartyId"/>
                     <econdition field-name="assetTypeEnumId"/><econdition field-name="classEnumId"/></entity-find>
-                <set field="assetTypeGlAccount" from="assetTypeGlAccountList ? assetTypeGlAccountList[0] : null"/>
+                <set field="assetTypeGlAccount" from="assetTypeGlAccountList.length ? assetTypeGlAccountList[0] : null"/>
             </if>
 
             <!-- try by assetTypeEnumId only (classEnumId == null) -->
@@ -943,7 +945,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find entity-name="mantle.ledger.config.AssetTypeGlAccount" list="assetTypeGlAccountList" cache="true">
                     <econdition field-name="organizationPartyId"/><econdition field-name="assetTypeEnumId"/>
                     <econdition field-name="classEnumId" from="null"/></entity-find>
-                <set field="assetTypeGlAccount" from="assetTypeGlAccountList ? assetTypeGlAccountList[0] : null"/>
+                <set field="assetTypeGlAccount" from="assetTypeGlAccountList.length ? assetTypeGlAccountList[0] : null"/>
             </if>
 
             <!-- not found? try the parent org -->
