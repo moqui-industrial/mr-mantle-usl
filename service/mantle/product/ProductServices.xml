@@ -28,7 +28,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find entity-name="mantle.shipment.ShipmentItem" list="shipmentItemList">
                     <econdition field-name="shipmentId"/>
                 </entity-find>
-                <set field="productIdList" from="shipmentItemList*.productId"/>
+                <set field="productIdList" from="shipmentItemList.map((it) =&gt; it.productId)"/>
             </if>
 
             <if condition="ownerPartyId"><then>
@@ -41,7 +41,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <order-by field-name="partyId"/>
                 </entity-find>
                 <if condition="(assetOwnerPartyList?.length > 0)">
-                    <set field="ownerPartyIds" from="['_NA_'] + assetOwnerPartyList*.partyId"/></if>
+                    <set field="ownerPartyIds" from="['_NA_'].concat(assetOwnerPartyList.map((it) =&gt; it.partyId))"/></if>
             </else></if>
 
             <!-- see if idValue is a pseudoId -->
@@ -59,10 +59,10 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="ownerPartyId" operator="in" from="ownerPartyIds" ignore-if-empty="true"/>
                     <econdition field-name="productId" operator="in" from="productIdList" ignore-if-empty="true"/>
                 </entity-find>
-                <if condition="prodIdentList.size() == 1"><then>
+                <if condition="prodIdentList.length == 1"><then>
                     <set field="productId" from="prodIdentList[0].productId"/>
-                </then><else-if condition="prodIdentList.size() &gt; 1">
-                    <message type="warning">Found multiple products with ID ${idValue}: ${prodIdentList*.productId.join(', ')}</message>
+                </then><else-if condition="prodIdentList.length &gt; 1">
+                    <message type="warning">Found multiple products with ID ${idValue}: ${prodIdentList.map((it) =&gt; it.productId).join(', ')}</message>
                 </else-if></if>
             </if>
             <!-- lastly see if idValue is a productId, respecting ownerPartyId if specified -->
@@ -289,7 +289,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <iterate list="pcfgaList" entry="pcfga">
                     <entity-find-one entity-name="mantle.product.feature.ProductFeatureGroup" value-field="pfg" cache="true">
                         <field-map field-name="productFeatureGroupId" from="pcfga.productFeatureGroupId"/></entity-find-one>
-                    <script>productFeatureGroupList.add(pfg)</script>
+                    <script>productFeatureGroupList.push(pfg)</script>
                 </iterate>
             </iterate>
         </actions>
@@ -317,10 +317,10 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="productFeatureTypeEnumId" ignore-if-empty="true"/>
                 </entity-find>
                 <iterate list="pfagaList" entry="pfaga">
-                    <script>productFeatureMap.put(pfaga.productFeatureId, pfaga)</script>
+                    <script>productFeatureMap[pfaga.productFeatureId] = pfaga</script>
                 </iterate>
             </iterate>
-            <set field="productFeatureList" from="new ArrayList(productFeatureMap.values())"/>
+            <set field="productFeatureList" from="Object.values(productFeatureMap)"/>
         </actions>
     </service>
     <service verb="get" noun="ProductCategoryFeatureList">
@@ -335,8 +335,8 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.product.ProductServices.find#ProductCategoryFeatures" out-map="context" in-map="context"/>
             <script>
                 resultList = []
-                for (def productFeature in productFeatureList)
-                    resultList.add({productFeatureId:productFeature.productFeatureId, label:ec.resource.expand('ProductFeatureNameTemplate', '', productFeature)})
+                for (const productFeature of productFeatureList)
+                    resultList.push({productFeatureId:productFeature.productFeatureId, label:ec.resource.expand('ProductFeatureNameTemplate', '', productFeature)})
             </script>
         </actions>
     </service>
@@ -368,14 +368,14 @@ along with this software (see the LICENSE.md file). If not, see
                     </else>
                 </if>
                 <if condition="feature.productFeatureTypeEnumId == productFeatureTypeEnumId">
-                    <script>resultList.add({productFeatureId:feature.productFeatureId, label:ec.resource.expand('ProductFeatureNameTemplate', '', feature)})</script>
+                    <script>resultList.push({productFeatureId:feature.productFeatureId, label:ec.resource.expand('ProductFeatureNameTemplate', '', feature)})</script>
                 </if>
             </iterate>
-            <if condition="!resultList">
+            <if condition="!resultList.length">
                 <entity-find entity-name="mantle.product.feature.ProductFeature" list="featureList">
                     <econdition field-name="productFeatureTypeEnumId"/></entity-find>
                 <iterate list="featureList" entry="feature">
-                    <script>resultList.add({productFeatureId:feature.productFeatureId, label:ec.resource.expand('ProductFeatureNameTemplate', '', feature)})</script>
+                    <script>resultList.push({productFeatureId:feature.productFeatureId, label:ec.resource.expand('ProductFeatureNameTemplate', '', feature)})</script>
                 </iterate>
             </if>
             <order-map-list list="resultList"><order-by field-name="label"/></order-map-list>
@@ -397,12 +397,12 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="productId"/></out-parameters>
         <actions>
-            <if condition="productFeatureIdSet.size() == 0"><return/></if>
-            <set field="productFeatureIdList" from="new ArrayList(productFeatureIdSet)"/>
+            <set field="productFeatureIdList" from="Array.from(productFeatureIdSet)"/>
+            <if condition="productFeatureIdList.length == 0"><return/></if>
 
             <!-- find variants with first feature, filter from there -->
             <set field="firstProductFeatureId" from="productFeatureIdList[0]"/>
-            <script>productFeatureIdList.remove(0)</script>
+            <script>productFeatureIdList.shift()</script>
             <entity-find entity-name="ProductAssocAndToFeatureAppl" list="paatafaList">
                 <date-filter/><econdition field-name="productId" from="baseProductId"/>
                 <econdition field-name="productAssocTypeEnumId" value="PatVariant"/>
@@ -661,8 +661,8 @@ along with this software (see the LICENSE.md file). If not, see
 
             <entity-find-one entity-name="mantle.product.Product" value-field="product"/>
             <if condition="product != null">
-                <script>deletedProduct = product.deleteWithRelated(new HashSet(['assocs', 'toAssocs', 'contents', 'dimensions', 'geos',
-                                                                   'identifications', 'parties', 'prices', 'categories', 'features']))</script>
+                <script>deletedProduct = product.deleteWithRelated(['assocs', 'toAssocs', 'contents', 'dimensions', 'geos',
+                                                                   'identifications', 'parties', 'prices', 'categories', 'features'])</script>
                 <if condition="deletedProduct"><then><message>Deleted product ${product.pseudoId}: ${product.productName}</message></then>
                     <else><message>Not deleting product ${product.pseudoId}: ${product.productName}, has records that use it</message></else></if>
             </if>
@@ -679,7 +679,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="productIdList" type="List"><parameter name="productId"/></parameter>
         </in-parameters>
         <actions>
-            <if condition="!productIdList"><return type="danger" message="No products specified"/></if>
+            <if condition="!productIdList?.length"><return type="danger" message="No products specified"/></if>
 
             <set field="addedCount" from="0"/>
             <set field="alreadyCount" from="0"/>
@@ -707,7 +707,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="productIdList" type="List"><parameter name="productId"/></parameter>
         </in-parameters>
         <actions>
-            <if condition="!productIdList"><return type="danger" message="No products specified"/></if>
+            <if condition="!productIdList?.length"><return type="danger" message="No products specified"/></if>
 
             <set field="removedCount" from="0"/>
             <set field="alreadyCount" from="0"/>
@@ -739,7 +739,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="productIdList" type="List"><parameter name="productId"/></parameter>
         </in-parameters>
         <actions>
-            <if condition="!productIdList"><return type="danger" message="No products specified"/></if>
+            <if condition="!productIdList?.length"><return type="danger" message="No products specified"/></if>
 
             <set field="addedCount" from="0"/>
             <set field="alreadyCount" from="0"/>
@@ -767,7 +767,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="productIdList" type="List"><parameter name="productId"/></parameter>
         </in-parameters>
         <actions>
-            <if condition="!productIdList"><return type="danger" message="No products specified"/></if>
+            <if condition="!productIdList?.length"><return type="danger" message="No products specified"/></if>
 
             <set field="removedCount" from="0"/>
             <set field="alreadyCount" from="0"/>
@@ -856,7 +856,7 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="contentLocation"/></out-parameters>
         <actions>
             <set field="filename" from="contentFile.getName()"/>
-            <if condition="org.moqui.resource.ResourceReference.isTextFilename(filename)"><then>
+            <if condition="ResourceReference.isTextFilename(filename)"><then>
                 <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content'"/>
             </then><else>
                 <set field="contentRoot" from="ec.user.getPreference('mantle.content.large.root') || 'dbresource://mantle/content'"/>
@@ -865,7 +865,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <set field="docRr" from="ec.resource.getLocationReference(contentLocation)"/>
             <script>
-                fileStream = contentFile.getInputStream()
+                const fileStream = contentFile.getInputStream()
                 try { docRr.putStream(fileStream) } finally { fileStream.close() }
             </script>
 
@@ -930,7 +930,7 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="contentLocation"/></out-parameters>
         <actions>
             <set field="filename" from="contentFile.getName()"/>
-            <if condition="org.moqui.resource.ResourceReference.isTextFilename(filename)"><then>
+            <if condition="ResourceReference.isTextFilename(filename)"><then>
                 <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content'"/>
             </then><else>
                 <set field="contentRoot" from="ec.user.getPreference('mantle.content.large.root') || 'dbresource://mantle/content'"/>
@@ -939,7 +939,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <set field="docRr" from="ec.resource.getLocationReference(contentLocation)"/>
             <script>
-                fileStream = contentFile.getInputStream()
+                const fileStream = contentFile.getInputStream()
                 try { docRr.putStream(fileStream) } finally { fileStream.close() }
             </script>
 
