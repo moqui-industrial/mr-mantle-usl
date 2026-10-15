@@ -98,7 +98,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="facilityId" from="productStore.inventoryFacilityId"/>
                 <econdition field-name="contactMechPurposeId" value="PostalShippingOrigin"/>
             </entity-find>
-            <set field="fromFcm" from="fromFcmList?.first"/>
+            <set field="fromFcm" from="fromFcmList?.[0]"/>
 
             <!-- loop through the OrderParts, or only single OrderPart if orderPartSeqId is specified -->
             <entity-find entity-name="mantle.order.OrderPart" list="orderPartList">
@@ -116,24 +116,25 @@ along with this software (see the LICENSE.md file). If not, see
                 </entity-find>
                 <set field="items" from="[]"/>
                 <iterate list="orderItemList" entry="orderItem">
-                    <set field="combinedQuantity" from="(orderItem.quantity != null ? orderItem.quantity : 1.0) * (orderItem.selectedAmount || 1.0)"/>
-                    <if condition="combinedQuantity == 0.0"><continue/></if>
+                    <set field="combinedQuantity" from="toDecimal(orderItem.quantity ?? 1).multiply((orderItem.selectedAmount != null &amp;&amp; !toDecimal(orderItem.selectedAmount).isZero()) ? orderItem.selectedAmount : 1)"/>
+                    <if condition="combinedQuantity.isZero()"><continue/></if>
 
                     <set field="product" from="orderItem['mantle.product.Product']"/>
                     <if condition="!product?.taxable || product?.taxable == 'Y'">
                         <!-- NOTE: CurrencyRoundingMarker scale here may vary by currency, make configurable -->
-                        <set field="itemTotal" from="(combinedQuantity * (orderItem.unitAmount || 0.0)).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+                        <set field="itemTotal" from="combinedQuantity.multiply(orderItem.unitAmount ?? 0).setScale(2, 'HALF_UP')"/>
 
-                        <set field="discountTotal" from="0.0"/>
+                        <set field="discountTotal" from="toDecimal(0)"/>
                         <iterate list="orderItemList" entry="discountItem">
                             <if condition="discountItem.itemTypeEnumId == 'ItemDiscount' &amp;&amp;
-                                    discountItem.parentItemSeqId == orderItem.orderItemSeqId &amp;&amp; discountItem.unitAmount">
-                                <set field="discountTotal" from="discountTotal + ((discountItem.quantity != null ? discountItem.quantity : 1.0) * discountItem.unitAmount)"/>
+                                    discountItem.parentItemSeqId == orderItem.orderItemSeqId &amp;&amp;
+                                    discountItem.unitAmount != null &amp;&amp; !toDecimal(discountItem.unitAmount).isZero()">
+                                <set field="discountTotal" from="discountTotal.add(toDecimal(discountItem.quantity ?? 1).multiply(discountItem.unitAmount))"/>
                             </if>
                         </iterate>
 
-                        <set field="unitAmountLessDiscounts" from="((itemTotal + discountTotal) == null ? null : toDecimal((itemTotal + discountTotal))).divide((combinedQuantity == null ? null : toDecimal(combinedQuantity)), 3, BigDecimal.ROUND_HALF_UP)"/>
-                        <script>items.add({itemId:orderItem.orderItemSeqId, itemTypeEnumId:orderItem.itemTypeEnumId,
+                        <set field="unitAmountLessDiscounts" from="itemTotal.add(discountTotal).divide(combinedQuantity).setScale(3, 'HALF_UP')"/>
+                        <script>items.push({itemId:orderItem.orderItemSeqId, itemTypeEnumId:orderItem.itemTypeEnumId,
                                 quantity:orderItem.quantity, unitAmount:orderItem.unitAmount, unitAmountLessDiscounts:unitAmountLessDiscounts,
                                 itemTotal:itemTotal, discountTotal:discountTotal,
                                 productId:orderItem.productId, taxCode:product?.taxCode})</script>
@@ -145,20 +146,20 @@ along with this software (see the LICENSE.md file). If not, see
 
                 <!-- add tax child OrderItems to db -->
                 <iterate list="taxResults" entry="taxResult">
-                    <if condition="!taxResult.taxAmount"><continue/></if>
-                    <set field="orderItem" from="orderItemList.find({ it.orderItemSeqId == taxResult.itemId })"/>
+                    <if condition="taxResult.taxAmount == null || toDecimal(taxResult.taxAmount).isZero()"><continue/></if>
+                    <set field="orderItem" from="orderItemList.find((it) =&gt; it.orderItemSeqId == taxResult.itemId)"/>
                     <if condition="orderItem == null">
                         <log level="warn" message="In calculate#OrderSalesTax got back entry with invalid orderItemSeqId ${taxResult.itemId} for order ${orderId}, skipping"/>
                         <continue/>
                     </if>
-                    <set field="taxAmount" from="(taxResult.taxAmount == null ? null : toDecimal(taxResult.taxAmount)).setScale(3, BigDecimal.ROUND_HALF_UP)"/>
+                    <set field="taxAmount" from="toDecimal(taxResult.taxAmount).setScale(3, 'HALF_UP')"/>
                     <entity-find-one entity-name="mantle.other.tax.TaxAuthority" value-field="taxAuthority" cache="true">
                         <field-map field-name="taxAuthorityId" from="taxResult.taxAuthorityId"/></entity-find-one>
                     <set field="itemDescription" value="${taxAuthority?.description ? taxAuthority.description + ' ' : ''}${taxResult.taxName||''}"/>
                     <service-call name="create#mantle.order.OrderItem" out-map="context"
                             in-map="{orderId:orderId, orderPartSeqId:orderPart.orderPartSeqId, parentItemSeqId:taxResult.itemId,
-                                itemTypeEnumId:'ItemSalesTax', quantity:(taxResult.taxQuantity || orderItem.quantity),
-                                unitAmount:taxAmount, sourcePercentage:(taxResult.taxRate*100.0),
+                                itemTypeEnumId:'ItemSalesTax', quantity:((taxResult.taxQuantity != null &amp;&amp; !toDecimal(taxResult.taxQuantity).isZero()) ? taxResult.taxQuantity : orderItem.quantity),
+                                unitAmount:taxAmount, sourcePercentage:toDecimal(taxResult.taxRate).multiply(100),
                                 taxAuthorityId:taxResult.taxAuthorityId, itemDescription:itemDescription}"/>
                 </iterate>
             </iterate>
@@ -217,7 +218,7 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions>
             <!-- if no formMap at least get payer and recipient basic info -->
-            <if condition="!formMap &amp;&amp; formId == 'UsaIrs1099Misc'">
+            <if condition="(formMap == null || Object.keys(formMap).length === 0) &amp;&amp; formId == 'UsaIrs1099Misc'">
                 <entity-find-one entity-name="mantle.party.time.TimePeriod" value-field="timePeriod"/>
                 <service-call name="mantle.other.TaxServices.get#UsaIrs1099MiscFormData" out-map="context"
                         in-map="{recipientPartyId:partyId, payerPartyId:timePeriod.partyId}"/>
@@ -320,17 +321,17 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="cropInsuranceProceeds" from="0"/><set field="grossProceedsToAttorney" from="0"/>
             <set field="otherIncome" from="0"/>
             <iterate list="invoiceItemSummaryList" entry="invoiceItemSummary">
-                <if condition="rentTypes.contains(invoiceItemSummary.itemTypeEnumId)">
-                    <then><set field="rents" from="rents + invoiceItemSummary.itemsTotal"/></then>
-                    <else-if condition="royaltyTypes.contains(invoiceItemSummary.itemTypeEnumId)">
-                        <set field="royalties" from="royalties + invoiceItemSummary.itemsTotal"/></else-if>
-                    <else-if condition="medicalHealthTypes.contains(invoiceItemSummary.itemTypeEnumId)">
-                        <set field="medicalAndHealthCarePayments" from="medicalAndHealthCarePayments + invoiceItemSummary.itemsTotal"/></else-if>
-                    <else-if condition="nonEmpCompTypes.contains(invoiceItemSummary.itemTypeEnumId)">
-                        <set field="nonemployeeCompensation" from="nonemployeeCompensation + invoiceItemSummary.itemsTotal"/></else-if>
-                    <else-if condition="attorneyTypes.contains(invoiceItemSummary.itemTypeEnumId)">
-                        <set field="grossProceedsToAttorney" from="grossProceedsToAttorney + invoiceItemSummary.itemsTotal"/></else-if>
-                    <else><set field="otherIncome" from="otherIncome + invoiceItemSummary.itemsTotal"/></else>
+                <if condition="rentTypes.includes(invoiceItemSummary.itemTypeEnumId)">
+                    <then><set field="rents" from="toDecimal(rents).add(invoiceItemSummary.itemsTotal ?? 0)"/></then>
+                    <else-if condition="royaltyTypes.includes(invoiceItemSummary.itemTypeEnumId)">
+                        <set field="royalties" from="toDecimal(royalties).add(invoiceItemSummary.itemsTotal ?? 0)"/></else-if>
+                    <else-if condition="medicalHealthTypes.includes(invoiceItemSummary.itemTypeEnumId)">
+                        <set field="medicalAndHealthCarePayments" from="toDecimal(medicalAndHealthCarePayments).add(invoiceItemSummary.itemsTotal ?? 0)"/></else-if>
+                    <else-if condition="nonEmpCompTypes.includes(invoiceItemSummary.itemTypeEnumId)">
+                        <set field="nonemployeeCompensation" from="toDecimal(nonemployeeCompensation).add(invoiceItemSummary.itemsTotal ?? 0)"/></else-if>
+                    <else-if condition="attorneyTypes.includes(invoiceItemSummary.itemTypeEnumId)">
+                        <set field="grossProceedsToAttorney" from="toDecimal(grossProceedsToAttorney).add(invoiceItemSummary.itemsTotal ?? 0)"/></else-if>
+                    <else><set field="otherIncome" from="toDecimal(otherIncome).add(invoiceItemSummary.itemsTotal ?? 0)"/></else>
                 </if>
             </iterate>
 
@@ -367,21 +368,21 @@ along with this software (see the LICENSE.md file). If not, see
 
             <set field="formMap" from="{}"/>
 
-            <set field="formMap.'1099m_a'" value="${payer.name}\n${payer.addressString}\n${payer.phoneString}"/>
-            <set field="formMap.'1099m_b'" from="payer.ein"/>
-            <set field="formMap.'1099m_c'" from="recipient.ssn || recipient.ein"/>
+            <set field="formMap['1099m_a']" value="${payer.name}\n${payer.addressString}\n${payer.phoneString}"/>
+            <set field="formMap['1099m_b']" from="payer.ein"/>
+            <set field="formMap['1099m_c']" from="recipient.ssn || recipient.ein"/>
 
-            <set field="formMap.'1099m_d1'" value="${recipient.firstName||''} ${recipient.lastName||''} ${recipient.suffix||''}"/>
-            <set field="formMap.'1099m_d2'" from="recipient.homeStreetString"/>
-            <set field="formMap.'1099m_d3'" from="recipient.homeCszString"/>
+            <set field="formMap['1099m_d1']" value="${recipient.firstName||''} ${recipient.lastName||''} ${recipient.suffix||''}"/>
+            <set field="formMap['1099m_d2']" from="recipient.homeStreetString"/>
+            <set field="formMap['1099m_d3']" from="recipient.homeCszString"/>
 
-            <if condition="rents"><set field="formMap.'1099m_01'" from="ec.l10n.format(rents, '#,##0.00')"/></if>
-            <if condition="royalties"><set field="formMap.'1099m_02'" from="ec.l10n.format(royalties, '#,##0.00')"/></if>
-            <if condition="otherIncome"><set field="formMap.'1099m_03'" from="ec.l10n.format(otherIncome, '#,##0.00')"/></if>
-            <if condition="medicalAndHealthCarePayments"><set field="formMap.'1099m_06'" from="ec.l10n.format(medicalAndHealthCarePayments, '#,##0.00')"/></if>
-            <if condition="nonemployeeCompensation"><set field="formMap.'1099m_07'" from="ec.l10n.format(nonemployeeCompensation, '#,##0.00')"/></if>
-            <if condition="cropInsuranceProceeds"><set field="formMap.'1099m_10'" from="ec.l10n.format(cropInsuranceProceeds, '#,##0.00')"/></if>
-            <if condition="grossProceedsToAttorney"><set field="formMap.'1099m_14'" from="ec.l10n.format(grossProceedsToAttorney, '#,##0.00')"/></if>
+            <if condition="rents != null &amp;&amp; !toDecimal(rents).isZero()"><set field="formMap['1099m_01']" from="ec.l10n.format(rents, '#,##0.00')"/></if>
+            <if condition="royalties != null &amp;&amp; !toDecimal(royalties).isZero()"><set field="formMap['1099m_02']" from="ec.l10n.format(royalties, '#,##0.00')"/></if>
+            <if condition="otherIncome != null &amp;&amp; !toDecimal(otherIncome).isZero()"><set field="formMap['1099m_03']" from="ec.l10n.format(otherIncome, '#,##0.00')"/></if>
+            <if condition="medicalAndHealthCarePayments != null &amp;&amp; !toDecimal(medicalAndHealthCarePayments).isZero()"><set field="formMap['1099m_06']" from="ec.l10n.format(medicalAndHealthCarePayments, '#,##0.00')"/></if>
+            <if condition="nonemployeeCompensation != null &amp;&amp; !toDecimal(nonemployeeCompensation).isZero()"><set field="formMap['1099m_07']" from="ec.l10n.format(nonemployeeCompensation, '#,##0.00')"/></if>
+            <if condition="cropInsuranceProceeds != null &amp;&amp; !toDecimal(cropInsuranceProceeds).isZero()"><set field="formMap['1099m_10']" from="ec.l10n.format(cropInsuranceProceeds, '#,##0.00')"/></if>
+            <if condition="grossProceedsToAttorney != null &amp;&amp; !toDecimal(grossProceedsToAttorney).isZero()"><set field="formMap['1099m_14']" from="ec.l10n.format(grossProceedsToAttorney, '#,##0.00')"/></if>
         </actions>
     </service>
     <service verb="get" noun="RecipientTaxInfo">
@@ -407,7 +408,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.party.ContactServices.get#PartyContactInfo" out-map="homeContactInfo"
                     in-map="{partyId:partyId, postalContactMechPurposeId:'PostalPayment'}"/>
             <script>homeStreetString = `${homeContactInfo?.postalAddress?.address1 ? homeContactInfo.postalAddress.address1 + (homeContactInfo.postalAddress.unitNumber ? ' #' + homeContactInfo.postalAddress.unitNumber : '') : ''}${homeContactInfo?.postalAddress?.address2 ? '\n' + homeContactInfo.postalAddress.address2 : ''}`</script>
-            <script>homeCszString = `${homeContactInfo?.postalAddress ? (homeContactInfo.postalAddress.city ?: '') + (homeContactInfo.postalAddressStateGeo?.geoCodeAlpha2 ? ', ' + homeContactInfo.postalAddressStateGeo.geoCodeAlpha2 : '') + ' ' + (homeContactInfo.postalAddress.postalCode ?: '') + (homeContactInfo.postalAddress.postalCodeExt ? '-' + homeContactInfo.postalAddress.postalCodeExt : '') + (homeContactInfo.postalAddressCountryGeo?.geoCodeAlpha3 ? ' ' + homeContactInfo.postalAddressCountryGeo.geoCodeAlpha3 : '') : ''}`</script>
+            <script>homeCszString = `${homeContactInfo?.postalAddress ? (homeContactInfo.postalAddress.city || '') + (homeContactInfo.postalAddressStateGeo?.geoCodeAlpha2 ? ', ' + homeContactInfo.postalAddressStateGeo.geoCodeAlpha2 : '') + ' ' + (homeContactInfo.postalAddress.postalCode || '') + (homeContactInfo.postalAddress.postalCodeExt ? '-' + homeContactInfo.postalAddress.postalCodeExt : '') + (homeContactInfo.postalAddressCountryGeo?.geoCodeAlpha3 ? ' ' + homeContactInfo.postalAddressCountryGeo.geoCodeAlpha3 : '') : ''}`</script>
             <script>homeString = `${homeStreetString}\n${homeCszString}`</script>
         </actions>
     </service>
@@ -434,8 +435,8 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.party.ContactServices.get#PartyContactInfo" out-map="contactInfo"
                     in-map="{partyId:partyId, postalContactMechPurposeId:'PostalTax', telecomContactMechPurposeId:'PhoneTax',
                             emailContactMechPurposeId:'EmailPrimary'}"/>
-            <script>addressString = `${contactInfo?.postalAddress?.address1 ? contactInfo.postalAddress.address1 + (contactInfo.postalAddress.unitNumber ? ' #' + contactInfo.postalAddress.unitNumber : '') + '\n' : ''}${contactInfo?.postalAddress?.address2 ? contactInfo.postalAddress.address2 + '\n' : ''}${contactInfo?.postalAddress ? (contactInfo.postalAddress.city ?: '') + (contactInfo.postalAddressStateGeo?.geoCodeAlpha2 ? ', ' + contactInfo.postalAddressStateGeo.geoCodeAlpha2 : '') + ' ' + (contactInfo.postalAddress.postalCode ?: '') + (contactInfo.postalAddress.postalCodeExt ? '-' + contactInfo.postalAddress.postalCodeExt : '') + (contactInfo.postalAddressCountryGeo?.geoCodeAlpha3 ? ' ' + contactInfo.postalAddressCountryGeo.geoCodeAlpha3 : '') : ''}`</script>
-            <script>phoneString = `${contactInfo?.telecomNumber ? (contactInfo.telecomNumber.countryCode ? contactInfo.telecomNumber.countryCode + '-' : '') + (contactInfo.telecomNumber.areaCode ? contactInfo.telecomNumber.areaCode + '-' : '') + (contactInfo.telecomNumber.contactNumber ?: '') : ''}`</script>
+            <script>addressString = `${contactInfo?.postalAddress?.address1 ? contactInfo.postalAddress.address1 + (contactInfo.postalAddress.unitNumber ? ' #' + contactInfo.postalAddress.unitNumber : '') + '\n' : ''}${contactInfo?.postalAddress?.address2 ? contactInfo.postalAddress.address2 + '\n' : ''}${contactInfo?.postalAddress ? (contactInfo.postalAddress.city || '') + (contactInfo.postalAddressStateGeo?.geoCodeAlpha2 ? ', ' + contactInfo.postalAddressStateGeo.geoCodeAlpha2 : '') + ' ' + (contactInfo.postalAddress.postalCode || '') + (contactInfo.postalAddress.postalCodeExt ? '-' + contactInfo.postalAddress.postalCodeExt : '') + (contactInfo.postalAddressCountryGeo?.geoCodeAlpha3 ? ' ' + contactInfo.postalAddressCountryGeo.geoCodeAlpha3 : '') : ''}`</script>
+            <script>phoneString = `${contactInfo?.telecomNumber ? (contactInfo.telecomNumber.countryCode ? contactInfo.telecomNumber.countryCode + '-' : '') + (contactInfo.telecomNumber.areaCode ? contactInfo.telecomNumber.areaCode + '-' : '') + (contactInfo.telecomNumber.contactNumber || '') : ''}`</script>
             <script>faxString = ""</script> <!-- TODO: Fax number needs to be retrieved as well; should be 10 digits, without country code -->
 
             <service-call name="mantle.ledger.LedgerServices.find#PartyAcctgPreference" out-map="context"
