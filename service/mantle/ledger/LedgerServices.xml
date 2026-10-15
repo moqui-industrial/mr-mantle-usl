@@ -1536,6 +1536,12 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="organizationPartyIds" from="Array.from(new Set(timePeriodList.map((tp) =&gt; tp.partyId)))"/>
             <set field="noTxOrgPartyIds" from="[]"/>
             <set field="glAccountIsDebitMap" from="{}"/>
+            <!-- NOTE: differs from the Groovy original for speed. The periods below are processed in fromDate order and each one
+                carries its balances forward through every later period of its type, so a period that is itself in this list will
+                carry them on when its turn comes. Carry forward only up to and including the first later period that is in this
+                list (all later ones if none is), which gives the same balances without rewriting each later period once per
+                earlier period (cost went with the square of the period count). -->
+            <set field="listedPeriodIds" from="new Set(timePeriodList.map((tp) =&gt; tp.timePeriodId))"/>
 
             <if condition="deleteExisting">
                 <entity-find-count entity-name="mantle.ledger.account.GlAccountOrgTimePeriod" count-field="glaotpCount">
@@ -1660,7 +1666,8 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="subsequentPeriodIds" from="[nextTimePeriodId]"/>
                 <set field="curSubPeriodId" from="nextTimePeriodId"/>
                 <script><![CDATA[
-                    while (curSubPeriodId) {
+                    // stop at the first period in timePeriodList, it carries the balances on when it is processed (see NOTE above)
+                    while (curSubPeriodId && !listedPeriodIds.has(curSubPeriodId)) {
                         const subNextResult = ec.service.sync().name("mantle.party.TimeServices.get#NextTimePeriod")
                                 .parameter("timePeriodId", curSubPeriodId).call()
                         curSubPeriodId = subNextResult.nextTimePeriodId
@@ -1800,7 +1807,8 @@ along with this software (see the LICENSE.md file). If not, see
                             <field-map field-name="organizationPartyId" from="timePeriod.partyId"/>
                             <field-map field-name="timePeriodId" from="subsequentPeriodId"/>
                         </entity-find-one>
-                        <if condition="nextGlAccountOrgTimePeriod == null">
+                        <set field="nextFound" from="nextGlAccountOrgTimePeriod != null"/>
+                        <if condition="!nextFound">
                             <entity-make-value entity-name="mantle.ledger.account.GlAccountOrgTimePeriod" value-field="nextGlAccountOrgTimePeriod"
                                     map="{glAccountId:glAccountOrgTimePeriod.glAccountId, organizationPartyId:timePeriod.partyId,
                                         timePeriodId:subsequentPeriodId, beginningBalance:0, postedDebits:0, postedCredits:0,
@@ -1813,7 +1821,9 @@ along with this software (see the LICENSE.md file). If not, see
                         <set field="nextGlAccountOrgTimePeriod.beginningBalance" from="lastGlAccountOrgTimePeriod.endingBalance"/>
 
                         <set field="nextGlAccountOrgTimePeriod.balanceLastUpdated" from="ec.user.nowTimestamp"/>
-                        <entity-create value-field="nextGlAccountOrgTimePeriod" or-update="true"/>
+                        <!-- the row was just read for update, so update or create it directly instead of a second read -->
+                        <if condition="nextFound"><then><script>nextGlAccountOrgTimePeriod.update()</script></then>
+                            <else><script>nextGlAccountOrgTimePeriod.create()</script></else></if>
 
                         <set field="lastGlAccountOrgTimePeriod" from="nextGlAccountOrgTimePeriod"/>
                     </iterate>
