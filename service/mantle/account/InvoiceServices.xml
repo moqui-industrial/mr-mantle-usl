@@ -50,10 +50,10 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- calc invoice totals -->
             <service-call name="mantle.account.InvoiceServices.get#InvoiceTotal" in-map="{invoiceId:invoiceId}" out-map="context"/>
 
-            <set field="editableStatusIds" from="new HashSet(['InvoiceInProcess', 'InvoiceIncoming', 'InvoiceReceived'])"/>
-            <set field="invoiceEditable" from="editableStatusIds.contains(invoice.statusId)"/>
-            <set field="recordPaymentStatusIds" from="new HashSet(['InvoiceInProcess', 'InvoiceFinalized', 'InvoiceSent', 'InvoiceAcked', 'InvoiceWriteOff', 'InvoiceReceived', 'InvoiceApproved'])"/>
-            <set field="canRecordPayments" from="recordPaymentStatusIds.contains(invoice.statusId) &amp;&amp; unpaidTotal > 0.0"/>
+            <set field="editableStatusIds" from="['InvoiceInProcess', 'InvoiceIncoming', 'InvoiceReceived']"/>
+            <set field="invoiceEditable" from="editableStatusIds.includes(invoice.statusId)"/>
+            <set field="recordPaymentStatusIds" from="['InvoiceInProcess', 'InvoiceFinalized', 'InvoiceSent', 'InvoiceAcked', 'InvoiceWriteOff', 'InvoiceReceived', 'InvoiceApproved']"/>
+            <set field="canRecordPayments" from="recordPaymentStatusIds.includes(invoice.statusId) &amp;&amp; toDecimal(unpaidTotal ?? 0).compare(0) > 0"/>
 
             <!-- see if from/to parties are internal orgs -->
             <entity-find-count entity-name="mantle.party.PartyRole" count-field="fromOrgInternalCount">
@@ -67,13 +67,13 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- for context sensitive selection of the OrgInternal to use if both from and to parties are OrgInternal start with activeOrgId -->
             <!-- also consider userOrgIds if no activeOrdId; better default in some cases for particular users even if forget to set active org -->
-            <service-call name="mantle.party.PartyServices.get#PartyOrganizationInfo" out-map="context" in-map="{partyId:partyId}"/>
+            <service-call name="mantle.party.PartyServices.get#PartyOrganizationInfo" out-map="context"/>
             <if condition="activeOrgId &amp;&amp; ((isFromPartyOrgInternal &amp;&amp; activeOrgId == invoice.fromPartyId) ||
                     (isToPartyOrgInternal &amp;&amp; activeOrgId == invoice.toPartyId))"><then>
                 <set field="organizationPartyId" from="activeOrgId"/>
-            </then><else-if condition="isToPartyOrgInternal &amp;&amp; invoice.toPartyId in userOrgIds">
+            </then><else-if condition="isToPartyOrgInternal &amp;&amp; (userOrgIds ?? []).includes(invoice.toPartyId)">
                 <set field="organizationPartyId" from="invoice.toPartyId"/>
-            </else-if><else-if condition="isFromPartyOrgInternal &amp;&amp; invoice.fromPartyId in userOrgIds">
+            </else-if><else-if condition="isFromPartyOrgInternal &amp;&amp; (userOrgIds ?? []).includes(invoice.fromPartyId)">
                 <set field="organizationPartyId" from="invoice.fromPartyId"/>
             </else-if><else>
                 <set field="organizationPartyId" from="isFromPartyOrgInternal ? invoice.fromPartyId : invoice.toPartyId"/>
@@ -173,7 +173,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="toPartyId" from="invoice.fromPartyId"/>
                 <econdition field-name="paymentTypeEnumId" operator="in" value="PtInvoicePayment,PtPrePayment,PtPrePaymentInventory"/>
                 <econdition field-name="statusId" operator="in" value="PmntPromised,PmntAuthorized,PmntDelivered,PmntConfirmed"/>
-                <econdition field-name="unappliedTotal" operator="greater" from="0.0"/>
+                <econdition field-name="unappliedTotal" operator="greater" from="toDecimal(0)"/>
                 <order-by field-name="effectiveDate,paymentId"/>
             </entity-find>
             <set field="unappliedPaymentInfoList" from="[]"/>
@@ -181,9 +181,9 @@ along with this software (see the LICENSE.md file). If not, see
                 <service-call name="mantle.account.PaymentServices.get#PaymentTotals" in-map="{paymentId:unappliedPayment.paymentId}"
                         out-map="pmtTotal" out-map-add-to-existing="false"/>
                 <set field="maxApplicableAmount" from="unpaidTotal"/>
-                <if condition="maxApplicableAmount > pmtTotal.unappliedTotal"><set field="maxApplicableAmount" from="pmtTotal.unappliedTotal"/></if>
-                <script>unappliedPaymentInfoList.add(pmtTotal + [payment:unappliedPayment, maxApplicableAmount:maxApplicableAmount,
-                        allowApply:(maxApplicableAmount &amp;&amp; ['PmntDelivered','PmntConfirmed'].includes(unappliedPayment.statusId))])</script>
+                <if condition="toDecimal(maxApplicableAmount).compare(pmtTotal.unappliedTotal) > 0"><set field="maxApplicableAmount" from="pmtTotal.unappliedTotal"/></if>
+                <script>unappliedPaymentInfoList.push(Object.assign({}, pmtTotal, {payment:unappliedPayment, maxApplicableAmount:maxApplicableAmount,
+                        allowApply:(!toDecimal(maxApplicableAmount ?? 0).isZero() &amp;&amp; ['PmntDelivered','PmntConfirmed'].includes(unappliedPayment.statusId))}))</script>
             </iterate>
             <!-- get invoices with reverse from/to parties that this payment might be applied to -->
             <entity-find entity-name="mantle.account.invoice.Invoice" list="unpaidInvoiceList" limit="50">
@@ -191,7 +191,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="toPartyId" from="invoice.fromPartyId"/>
                 <econdition field-name="statusId" operator="in"
                         value="InvoiceInProcess,InvoiceFinalized,InvoiceSent,InvoiceAcked,InvoiceReceived,InvoiceApproved"/>
-                <econdition field-name="unpaidTotal" operator="greater" from="0.0"/>
+                <econdition field-name="unpaidTotal" operator="greater" from="toDecimal(0)"/>
                 <order-by field-name="invoiceDate,invoiceId"/>
             </entity-find>
             <set field="unpaidInvoiceInfoList" from="[]"/>
@@ -199,9 +199,9 @@ along with this software (see the LICENSE.md file). If not, see
                 <service-call name="mantle.account.InvoiceServices.get#InvoiceTotal" in-map="{invoiceId:unpaidInvoice.invoiceId}"
                         out-map="invTot" out-map-add-to-existing="false"/>
                 <set field="maxApplicableAmount" from="unpaidTotal"/>
-                <if condition="maxApplicableAmount > invTot.unpaidTotal"><set field="maxApplicableAmount" from="invTot.unpaidTotal"/></if>
-                <script>unpaidInvoiceInfoList.add(invTot + [invoice:unpaidInvoice, maxApplicableAmount:maxApplicableAmount,
-                    allowApply:(maxApplicableAmount &amp;&amp; ['InvoiceFinalized','InvoiceSent','InvoiceAcked','InvoiceApproved'].includes(unpaidInvoice.statusId))])</script>
+                <if condition="toDecimal(maxApplicableAmount).compare(invTot.unpaidTotal) > 0"><set field="maxApplicableAmount" from="invTot.unpaidTotal"/></if>
+                <script>unpaidInvoiceInfoList.push(Object.assign({}, invTot, {invoice:unpaidInvoice, maxApplicableAmount:maxApplicableAmount,
+                    allowApply:(!toDecimal(maxApplicableAmount ?? 0).isZero() &amp;&amp; ['InvoiceFinalized','InvoiceSent','InvoiceAcked','InvoiceApproved'].includes(unpaidInvoice.statusId))}))</script>
             </iterate>
 
             <!-- get status history -->
@@ -216,9 +216,9 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find entity-name="mantle.order.OrderItemBilling" list="orderItemBillingList">
                 <econdition field-name="invoiceId"/><order-by field-name="invoiceItemSeqId"/></entity-find>
             <!-- extract related order IDs -->
-            <set field="orderIdSet" from="new TreeSet(orderItemBillingList*.orderId)"/>
+            <set field="orderIdSet" from="Array.from(new Set(Array.from(orderItemBillingList).map((it) => it.orderId))).sort()"/>
             <!-- get promised payments for associated orders -->
-            <if condition="orderIdSet">
+            <if condition="orderIdSet.length">
                 <entity-find entity-name="mantle.account.payment.Payment" list="orderPromisedPaymentList">
                     <econdition field-name="orderId" operator="in" from="orderIdSet"/>
                     <econdition field-name="statusId" operator="in" value="PmntPromised,PmntAuthorized"/>
@@ -228,17 +228,17 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- get associated shipment items -->
             <entity-find entity-name="mantle.shipment.ShipmentItemSource" list="shipmentItemSourceList">
                 <econdition field-name="invoiceId"/></entity-find>
-            <set field="shipmentIdSet" from="new TreeSet(shipmentItemSourceList*.shipmentId)"/>
+            <set field="shipmentIdSet" from="Array.from(new Set(Array.from(shipmentItemSourceList).map((it) => it.shipmentId))).sort()"/>
 
             <!-- get associated return items -->
             <entity-find entity-name="mantle.order.return.ReturnItemBilling" list="returnItemBillingList">
                 <econdition field-name="invoiceId"/></entity-find>
-            <set field="returnIdSet" from="new TreeSet(returnItemBillingList*.returnId)"/>
+            <set field="returnIdSet" from="Array.from(new Set(Array.from(returnItemBillingList).map((it) => it.returnId))).sort()"/>
 
             <!-- get associated accounting transactions -->
             <entity-find entity-name="mantle.ledger.transaction.AcctgTrans" list="acctgTransList">
                 <econdition field-name="invoiceId"/></entity-find>
-            <set field="acctgTransIdSet" from="new TreeSet(acctgTransList*.acctgTransId)"/>
+            <set field="acctgTransIdSet" from="Array.from(new Set(Array.from(acctgTransList).map((it) => it.acctgTransId))).sort()"/>
         </actions>
     </service>
 
@@ -316,7 +316,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="invoice.unpaidTotal" from="totalOut.unpaidTotal"/>
                 <entity-update value-field="invoice"/>
             </iterate>
-            <log level="warn" message="Calculated totals for ${invoiceList.size()} Invoices"/>
+            <log level="warn" message="Calculated totals for ${invoiceList.length} Invoices"/>
         </actions>
     </service>
 
@@ -367,7 +367,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <entity-find entity-name="mantle.order.OrderItemBilling" list="orderItemBillingList">
                 <econdition field-name="invoiceId"/><order-by field-name="invoiceItemSeqId"/></entity-find>
-            <set field="orderIdSet" from="new TreeSet(orderItemBillingList*.orderId)"/>
+            <set field="orderIdSet" from="Array.from(new Set(Array.from(orderItemBillingList).map((it) => it.orderId))).sort()"/>
 
             <entity-find entity-name="mantle.account.payment.PaymentApplication" list="paymentApplicationList">
                 <econditions combine="or">
@@ -383,7 +383,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="isAdjustment" value="N" or-null="true"/>
                 <order-by field-name="invoiceItemSeqId"/>
             </entity-find>
-            <set field="topItemList" from="invoiceItemList.findAll({ it.parentItemSeqId == null })"/>
+            <set field="topItemList" from="Array.from(invoiceItemList).filter((it) => it.parentItemSeqId == null)"/>
 
             <entity-find entity-name="mantle.account.invoice.InvoiceItem" list="adjustmentItemList">
                 <econdition field-name="invoiceId"/>
@@ -391,15 +391,15 @@ along with this software (see the LICENSE.md file). If not, see
                 <order-by field-name="invoiceItemSeqId"/>
             </entity-find>
 
-            <set field="noAdjustmentTotal" from="0.0"/>
+            <set field="noAdjustmentTotal" from="toDecimal(0)"/>
             <iterate list="invoiceItemList" entry="invoiceItem">
-                <set field="noAdjustmentTotal" from="noAdjustmentTotal + ((invoiceItem.quantity != null ? invoiceItem.quantity : 1.0) * (invoiceItem.amount || 0.0))"/></iterate>
-            <set field="noAdjustmentTotal" from="(noAdjustmentTotal == null ? null : toDecimal(noAdjustmentTotal)).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+                <set field="noAdjustmentTotal" from="noAdjustmentTotal.add(toDecimal(invoiceItem.quantity != null ? invoiceItem.quantity : 1).multiply(invoiceItem.amount != null ? invoiceItem.amount : 0))"/></iterate>
+            <set field="noAdjustmentTotal" from="noAdjustmentTotal.setScale(2, 'HALF_UP')"/>
 
-            <set field="adjustmentTotal" from="0.0"/>
+            <set field="adjustmentTotal" from="toDecimal(0)"/>
             <iterate list="adjustmentItemList" entry="invoiceItem">
-                <set field="adjustmentTotal" from="adjustmentTotal + ((invoiceItem.quantity != null ? invoiceItem.quantity : 1.0) * (invoiceItem.amount || 0.0))"/></iterate>
-            <set field="adjustmentTotal" from="(adjustmentTotal == null ? null : toDecimal(adjustmentTotal)).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+                <set field="adjustmentTotal" from="adjustmentTotal.add(toDecimal(invoiceItem.quantity != null ? invoiceItem.quantity : 1).multiply(invoiceItem.amount != null ? invoiceItem.amount : 0))"/></iterate>
+            <set field="adjustmentTotal" from="adjustmentTotal.setScale(2, 'HALF_UP')"/>
 
             <!-- build itemTypeSummaryMapMap with itemTypeEnumId, amount (only for ItemTimeEntry), quantity, total -->
             <set field="hasProductItems" from="false"/>
@@ -408,21 +408,23 @@ along with this software (see the LICENSE.md file). If not, see
             <iterate list="invoiceItemList" entry="invoiceItem">
                 <set field="mapKey" from="invoiceItem.itemTypeEnumId"/>
                 <if condition="invoiceItem.itemTypeEnumId == 'ItemTimeEntry'">
-                    <set field="mapKey" from="mapKey + '::' + invoiceItem.amount"/>
+                    <set field="mapKey" from="mapKey + '::' + String(invoiceItem.amount)"/>
                     <set field="hasTimeEntryItems" from="true"/>
                 </if>
                 <if condition="invoiceItem.productId"><set field="hasProductItems" from="true"/></if>
-                <set field="itemTypeSummaryMap" from="itemTypeSummaryMapMap.get(mapKey)"/>
-                <if condition="!itemTypeSummaryMap">
-                    <set field="itemTypeSummaryMap" from="{itemTypeEnumId:invoiceItem.itemTypeEnumId, quantity:0, total:0}"/>
-                    <if condition="invoiceItem.itemTypeEnumId == 'ItemTimeEntry'">
-                        <set field="itemTypeSummaryMap.amount" from="invoiceItem.amount"/></if>
-                    <script>itemTypeSummaryMapMap.put(mapKey, itemTypeSummaryMap)</script>
-                </if>
-                <set field="itemTypeSummaryMap.quantity" from="itemTypeSummaryMap.quantity + (invoiceItem.quantity || 1)"/>
-                <set field="itemTypeSummaryMap.total" from="itemTypeSummaryMap.total + ((invoiceItem.quantity || 1) * (invoiceItem.amount || 0))"/>
+                <script><![CDATA[
+                    let itemTypeSummaryMap = itemTypeSummaryMapMap[mapKey]
+                    if (!itemTypeSummaryMap) {
+                        itemTypeSummaryMap = {itemTypeEnumId:invoiceItem.itemTypeEnumId, quantity:toDecimal(0), total:toDecimal(0)}
+                        if (invoiceItem.itemTypeEnumId === 'ItemTimeEntry') itemTypeSummaryMap.amount = invoiceItem.amount
+                        itemTypeSummaryMapMap[mapKey] = itemTypeSummaryMap
+                    }
+                    const itemQuantity = toDecimal(invoiceItem.quantity != null ? invoiceItem.quantity : 1)
+                    itemTypeSummaryMap.quantity = itemTypeSummaryMap.quantity.add(itemQuantity)
+                    itemTypeSummaryMap.total = itemTypeSummaryMap.total.add(itemQuantity.multiply(invoiceItem.amount != null ? invoiceItem.amount : 0))
+                ]]></script>
             </iterate>
-            <set field="itemTypeSummaryMapList" from="itemTypeSummaryMapMap.values()"/>
+            <set field="itemTypeSummaryMapList" from="Object.values(itemTypeSummaryMapMap)"/>
 
             <entity-find-one entity-name="mantle.party.PartyDetail" value-field="fromParty">
                 <field-map field-name="partyId" from="invoice.fromPartyId"/></entity-find-one>
@@ -455,7 +457,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="fromRoleTypeId" value="ClientBilling"/>
             </entity-find>
             <entity-find-one entity-name="mantle.party.PartyDetail" value-field="toBillingRep">
-                <field-map field-name="partyId" from="toBillingRelList?.first?.fromPartyId"/></entity-find-one>
+                <field-map field-name="partyId" from="toBillingRelList?.[0]?.fromPartyId"/></entity-find-one>
 
             <!-- get Finalized status history -->
             <entity-find entity-name="moqui.entity.EntityAuditLog" list="finalizedStatusHistoryList">
@@ -470,10 +472,10 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="templateLocation" from="null"/>
             <!-- see if a template is configured by ProductStoreSetting -->
             <service-call name="mantle.account.InvoiceServices.find#InvoiceProductStores" in-map="context" out-map="context"/>
-            <if condition="productStoreIdSet">
+            <if condition="productStoreIdSet?.length">
                 <entity-find entity-name="mantle.product.store.ProductStoreSetting" list="productStoreSettingList" cache="true">
                     <date-filter/>
-                    <econdition field-name="productStoreId" from="productStoreIdSet.first()"/>
+                    <econdition field-name="productStoreId" from="productStoreIdSet[0]"/>
                     <econdition field-name="settingTypeEnumId" value="Psst${templateSettingSuffix}"/>
                     <order-by field-name="-fromDate"/>
                 </entity-find>
@@ -522,8 +524,7 @@ along with this software (see the LICENSE.md file). If not, see
             </parameter></parameter>
         </out-parameters>
         <actions>
-            <set field="periodDaysBd" from="new BigDecimal(periodDays)"/>
-            <set field="asOfTimestamp" from="asOfDate ? ec.l10n.parseTimestamp(ec.l10n.format(asOfDate, 'yyyy-MM-dd') + ' 23:59:59.999', 'yyyy-MM-dd HH:mm:ss.SSS') : ec.user.nowTimestamp"/>
+                        <set field="asOfTimestamp" from="asOfDate ? ec.l10n.parseTimestamp(ec.l10n.format(asOfDate, 'yyyy-MM-dd') + ' 23:59:59.999', 'yyyy-MM-dd HH:mm:ss.SSS') : ec.user.nowTimestamp"/>
 
             <entity-find-one entity-name="mantle.party.PartyDetail" value-field="toParty">
                 <field-map field-name="partyId" from="toPartyId"/></entity-find-one>
@@ -537,12 +538,12 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="fromRoleTypeId" value="ClientBilling"/>
             </entity-find>
             <entity-find-one entity-name="mantle.party.PartyDetail" value-field="toBillingRep">
-                <field-map field-name="partyId" from="toBillingRelList?.first?.fromPartyId"/></entity-find-one>
+                <field-map field-name="partyId" from="toBillingRelList?.[0]?.fromPartyId"/></entity-find-one>
 
             <!-- all Invoices -->
             <entity-find entity-name="mantle.account.invoice.Invoice" list="allInvoiceList">
                 <econdition field-name="statusId" operator="in" value="InvoiceFinalized,InvoiceSent,InvoiceAcked"/>
-                <econdition field-name="unpaidTotal" operator="not-equals" from="0.0"/>
+                <econdition field-name="unpaidTotal" operator="not-equals" from="toDecimal(0)"/>
                 <econdition field-name="toPartyId"/>
                 <econdition field-name="fromPartyId" ignore-if-empty="true"/>
                 <order-by field-name="invoiceDate"/>
@@ -551,57 +552,58 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find entity-name="mantle.account.payment.Payment" list="allUnappliedPaymentList">
                 <econdition field-name="fromPartyId" from="toPartyId"/>
                 <econdition field-name="toPartyId" from="fromPartyId" ignore-if-empty="true"/>
-                <econdition field-name="unappliedTotal" operator="not-equals" from="0.0"/>
+                <econdition field-name="unappliedTotal" operator="not-equals" from="toDecimal(0)"/>
                 <econdition field-name="statusId" operator="in" value="PmntDelivered,PmntConfirmed"/>
             </entity-find>
-            <set field="fromPartyIds" from="new TreeSet(allInvoiceList*.fromPartyId + allUnappliedPaymentList*.toPartyId)"/>
+            <set field="fromPartyIds" from="Array.from(new Set(Array.from(allInvoiceList).map((it) => it.fromPartyId).concat(Array.from(allUnappliedPaymentList).map((it) => it.toPartyId)))).sort()"/>
 
             <set field="receivableInfoList" from="[]"/>
             <iterate list="fromPartyIds" entry="fromPartyId">
                 <set field="invoiceList" from="[]"/>
-                <set field="invoiceTotal" from="0.0"/>
-                <set field="unpaidTotal" from="0.0"/>
-                <set field="receivableAgingList" from="new ArrayList([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])"/>
-                <set field="receivableDueAgingList" from="new ArrayList([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])"/>
+                <set field="invoiceTotal" from="toDecimal(0)"/>
+                <set field="unpaidTotal" from="toDecimal(0)"/>
+                <set field="receivableAgingList" from="[0, 1, 2, 3, 4, 5].map(() => toDecimal(0))"/>
+                <set field="receivableDueAgingList" from="[0, 1, 2, 3, 4, 5].map(() => toDecimal(0))"/>
                 <iterate list="allInvoiceList" entry="invoice">
                     <if condition="invoice.fromPartyId != fromPartyId"><continue/></if>
                     <script><![CDATA[
-                        invoiceList.add(invoice)
-                        invoiceTotal += invoice.invoiceTotal
-                        unpaidTotal += invoice.unpaidTotal
+                        invoiceList.push(invoice)
+                        invoiceTotal = invoiceTotal.add(invoice.invoiceTotal ?? 0)
+                        unpaidTotal = unpaidTotal.add(invoice.unpaidTotal ?? 0)
                         if (invoice.currencyUomId) currencyUomId = invoice.currencyUomId
 
-                        Integer invoiceDateDays = invoice.invoiceDate != null ? asOfTimestamp - invoice.invoiceDate : null
-                        Integer invoiceDateIdx = invoiceDateDays != null ? (invoiceDateDays < 0 ? 0 :
-                                ((invoiceDateDays == null ? null : toDecimal(invoiceDateDays)) / periodDaysBd).setScale(0, BigDecimal.ROUND_DOWN).intValue() + 1) : null
-                        if (invoiceDateIdx != null && invoiceDateIdx > 5) invoiceDateIdx = 5
-                        Integer dueDateDays = invoice.dueDate != null ? asOfTimestamp - invoice.dueDate : null
-                        Integer dueDateIdx = dueDateDays != null ? (dueDateDays < 0 ? 0 :
-                                ((dueDateDays == null ? null : toDecimal(dueDateDays)) / periodDaysBd).setScale(0, BigDecimal.ROUND_DOWN).intValue() + 1) : null
-                        if (dueDateIdx != null && dueDateIdx > 5) dueDateIdx = 5
+                        // whole days from the date to the as-of moment, then the period index (0 is not yet, 5 is the last)
+                        const agingIndex = (date) => {
+                            if (date == null) return null
+                            const days = Math.trunc((Number(asOfTimestamp) - Number(date)) / 86400000)
+                            return days < 0 ? 0 : Math.min(Math.floor(days / Number(periodDays)) + 1, 5)
+                        }
+                        const invoiceDateIdx = agingIndex(invoice.invoiceDate)
+                        const dueDateIdx = agingIndex(invoice.dueDate)
 
-                        if (invoiceDateIdx != null) receivableAgingList[invoiceDateIdx] = receivableAgingList[invoiceDateIdx] + invoice.unpaidTotal
-                        if (dueDateIdx != null) receivableDueAgingList[dueDateIdx] = receivableDueAgingList[dueDateIdx] + invoice.unpaidTotal
+                        if (invoiceDateIdx != null) receivableAgingList[invoiceDateIdx] = receivableAgingList[invoiceDateIdx].add(invoice.unpaidTotal ?? 0)
+                        if (dueDateIdx != null) receivableDueAgingList[dueDateIdx] = receivableDueAgingList[dueDateIdx].add(invoice.unpaidTotal ?? 0)
                     ]]></script>
                 </iterate>
                 <script>
+                    const sumOf = (list) => list.reduce((total, amount) => total.add(amount), toDecimal(0))
                     agingSummaryList = []
-                    agingSummaryList.add({description:'By Due Date', current:receivableDueAgingList[0], period0:receivableDueAgingList[1],
+                    agingSummaryList.push({description:'By Due Date', current:receivableDueAgingList[0], period0:receivableDueAgingList[1],
                             period1:receivableDueAgingList[2], period2:receivableDueAgingList[3], period3:receivableDueAgingList[4],
-                            periodRemaining:receivableDueAgingList[5], total:receivableDueAgingList.sum()})
-                    agingSummaryList.add({description:'By Invoice Date', current:receivableAgingList[0], period0:receivableAgingList[1],
+                            periodRemaining:receivableDueAgingList[5], total:sumOf(receivableDueAgingList)})
+                    agingSummaryList.push({description:'By Invoice Date', current:receivableAgingList[0], period0:receivableAgingList[1],
                             period1:receivableAgingList[2], period2:receivableAgingList[3], period3:receivableAgingList[4],
-                            periodRemaining:receivableAgingList[5], total:receivableAgingList.sum()})
+                            periodRemaining:receivableAgingList[5], total:sumOf(receivableAgingList)})
                 </script>
 
                 <set field="unappliedPaymentList" from="[]"/>
-                <set field="paymentTotal" from="0.0"/>
-                <set field="unappliedTotal" from="0.0"/>
+                <set field="paymentTotal" from="toDecimal(0)"/>
+                <set field="unappliedTotal" from="toDecimal(0)"/>
                 <iterate list="allUnappliedPaymentList" entry="payment">
                     <if condition="payment.toPartyId != fromPartyId"><continue/></if>
-                    <script>unappliedPaymentList.add(payment)</script>
-                    <set field="paymentTotal" from="paymentTotal + (payment.amount || 0.0)"/>
-                    <set field="unappliedTotal" from="unappliedTotal + payment.unappliedTotal"/>
+                    <script>unappliedPaymentList.push(payment)</script>
+                    <set field="paymentTotal" from="paymentTotal.add(payment.amount ?? 0)"/>
+                    <set field="unappliedTotal" from="unappliedTotal.add(payment.unappliedTotal ?? 0)"/>
                 </iterate>
 
                 <entity-find-one entity-name="mantle.party.PartyDetail" value-field="fromParty">
@@ -612,10 +614,10 @@ along with this software (see the LICENSE.md file). If not, see
                 <service-call name="mantle.party.PartyServices.get#PartyContentLocation" out-map="logoImageOut"
                         in-map="{partyId:fromPartyId, partyContentTypeEnumIdList:['PcntLogoImage', 'PcntPrimaryImage']}"/>
                 <set field="logoImageLocation" from="logoImageOut.contentLocation"/>
-                <script>receivableInfoList.add({fromPartyId:fromPartyId, fromParty:fromParty, fromContactInfo:fromContactInfo,
+                <script>receivableInfoList.push({fromPartyId:fromPartyId, fromParty:fromParty, fromContactInfo:fromContactInfo,
                         logoImageLocation:logoImageOut.contentLocation, invoiceList:invoiceList,
                         invoiceTotal:invoiceTotal, unpaidTotal:unpaidTotal, paymentTotal:paymentTotal, unappliedTotal:unappliedTotal,
-                        balanceDue:(unpaidTotal - unappliedTotal), unappliedPaymentList:unappliedPaymentList,
+                        balanceDue:unpaidTotal.subtract(unappliedTotal), unappliedPaymentList:unappliedPaymentList,
                         agingSummaryList:agingSummaryList, receivableAgingList:receivableAgingList,
                         receivableDueAgingList:receivableDueAgingList})</script>
             </iterate>
@@ -862,12 +864,12 @@ along with this software (see the LICENSE.md file). If not, see
                 <return error="true" message="Invoice Item with ID ${invoiceId}:${invoiceItemSeqId} is not an Adjustment item"/></if>
 
             <!-- make sure doesn't make unpaid total negative -->
-            <if condition="(amount != null &amp;&amp; amount != invoiceItem.amount) || (quantity != null &amp;&amp; quantity != invoiceItem.quantity)">
-                <set field="origTotal" from="(invoiceItem.amount || 0.0) * (invoiceItem.quantity || 1.0)"/>
-                <set field="newTotal" from="(amount != null ? amount : (invoiceItem.amount || 0.0)) * (quantity != null ? quantity : (invoiceItem.quantity || 1.0))"/>
-                <set field="amountDiff" from="newTotal - origTotal"/>
+            <if condition="(amount != null &amp;&amp; (invoiceItem.amount == null || toDecimal(amount).compare(invoiceItem.amount) != 0)) || (quantity != null &amp;&amp; (invoiceItem.quantity == null || toDecimal(quantity).compare(invoiceItem.quantity) != 0))">
+                <set field="origTotal" from="toDecimal(invoiceItem.amount ?? 0).multiply(invoiceItem.quantity ?? 1)"/>
+                <set field="newTotal" from="toDecimal(amount != null ? amount : (invoiceItem.amount ?? 0)).multiply(quantity != null ? quantity : (invoiceItem.quantity ?? 1))"/>
+                <set field="amountDiff" from="newTotal.subtract(origTotal)"/>
                 <service-call name="mantle.account.InvoiceServices.get#InvoiceTotal" in-map="{invoiceId:invoiceId}" out-map="totalOut"/>
-                <if condition="totalOut.unpaidTotal + amountDiff &lt; 0.0">
+                <if condition="totalOut.unpaidTotal.add(amountDiff).compare(0) &lt; 0">
                     <return error="true" message="Adjustment item ${invoiceId}:${invoiceItemSeqId} amount difference of ${amountDiff} would make Unpaid Total less than zero"/></if>
             </if>
 
@@ -907,7 +909,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="invoiceItemSeqId"/>
             </entity-find>
             <if condition="(itemBillingList?.length > 0)">
-                <message type="warning">Deleting Invoice Item ${invoiceId}:${invoiceItemSeqId} associations with Order ${itemBillingList*.orderId.join(', ')}</message>
+                <message type="warning">Deleting Invoice Item ${invoiceId}:${invoiceItemSeqId} associations with Order ${Array.from(itemBillingList).map((it) => it.orderId).join(', ')}</message>
                 <iterate list="itemBillingList" entry="itemBilling">
                     <service-call name="delete#mantle.order.OrderItemBilling" in-map="{orderItemBillingId:itemBilling.orderItemBillingId}"/>
                 </iterate>
@@ -946,12 +948,12 @@ along with this software (see the LICENSE.md file). If not, see
                 <return error="true" message="Invoices may only be adjusted in the Finalized, Sent, or Acknowledged statuses for receivables, and the Approved status for payables; invoice ${invoiceId} is in status ${invoice.status?.description}"/></if>
 
             <if condition="itemDate == null"><set field="itemDate" from="invoice.invoiceDate"/></if>
-            <set field="adjustTotal" from="(amount || 0) * quantity"/>
+            <set field="adjustTotal" from="toDecimal(amount ?? 0).multiply(quantity ?? 1)"/>
 
             <!-- if adjustment is negative, have enough unpaid for it? -->
-            <if condition="adjustTotal &lt; 0">
+            <if condition="adjustTotal.compare(0) &lt; 0">
                 <service-call name="mantle.account.InvoiceServices.get#InvoiceTotal" in-map="{invoiceId:invoiceId}" out-map="invTotal"/>
-                <if condition="(-adjustTotal) > invTotal.unpaidTotal">
+                <if condition="adjustTotal.multiply(-1).compare(invTotal.unpaidTotal) > 0">
                     <return error="true" message="Cannot adjust invoice ${invoiceId}, adjustment total ${adjustTotal} is greater than unpaid total ${invTotal.unpaidTotal}"/></if>
             </if>
 
@@ -996,7 +998,7 @@ along with this software (see the LICENSE.md file). If not, see
                         otherPartyOrderId:orderPart.otherPartyOrderId, settlementTermId:orderPart.settlementTermId,
                         productStoreId:orderHeader.productStoreId, systemMessageRemoteId:orderHeader.systemMessageRemoteId}"/>
 
-            <if condition="partialOrderItemList"><then>
+            <if condition="partialOrderItemList?.length"><then>
                 <set field="orderItemList" from="partialOrderItemList"/>
             </then><else>
                 <entity-find entity-name="mantle.order.OrderItem" list="orderItemList">
@@ -1008,10 +1010,10 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="oibBaseMap" from="{orderId:orderId, orderItemSeqId:orderItem.orderItemSeqId}"/>
                 <entity-find entity-name="mantle.order.OrderItemBilling" list="orderItemBillingList">
                     <econdition-object field="oibBaseMap"/></entity-find>
-                <set field="quantityNotBilled" from="(orderItem.quantity != null ? orderItem.quantity : 1.0) * (orderItem.selectedAmount || 1.0)"/>
+                <set field="quantityNotBilled" from="toDecimal(orderItem.quantity != null ? orderItem.quantity : 1).multiply(toDecimal(orderItem.selectedAmount ?? 0).isZero() ? 1 : orderItem.selectedAmount)"/>
                 <iterate list="orderItemBillingList" entry="orderItemBilling">
-                    <set field="quantityNotBilled" from="quantityNotBilled - orderItemBilling.quantity"/></iterate>
-                <if condition="quantityNotBilled &gt; 0">
+                    <set field="quantityNotBilled" from="quantityNotBilled.subtract(orderItemBilling.quantity ?? 0)"/></iterate>
+                <if condition="quantityNotBilled.compare(0) &gt; 0">
                     <!-- create InvoiceItem -->
                     <!-- is prorate by quantity needed? -->
                     <service-call name="create#mantle.account.invoice.InvoiceItem"
@@ -1029,11 +1031,11 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="orderId"/><econdition field-name="orderItemSeqId" from="orderItem.orderItemSeqId"/>
                     </entity-find>
                     <iterate list="shipmentItemSourceList" entry="shipmentItemSource">
-                        <if condition="!shipmentItemSource.invoiceId &amp;&amp; quantityNotShipSourced >= shipmentItemSource.quantity">
+                        <if condition="!shipmentItemSource.invoiceId &amp;&amp; quantityNotShipSourced.compare(shipmentItemSource.quantity ?? 0) &gt;= 0">
                             <set field="shipmentItemSource.invoiceId" from="invoiceId"/>
                             <set field="shipmentItemSource.invoiceItemSeqId" from="orderItem.orderItemSeqId"/>
                             <entity-update value-field="shipmentItemSource"/>
-                            <set field="quantityNotShipSourced" from="quantityNotShipSourced - shipmentItemSource.quantity"/>
+                            <set field="quantityNotShipSourced" from="quantityNotShipSourced.subtract(shipmentItemSource.quantity ?? 0)"/>
                             <set field="curShipmentId" from="shipmentItemSource.shipmentId"/>
                         </if>
                     </iterate>
@@ -1041,8 +1043,8 @@ along with this software (see the LICENSE.md file). If not, see
 
                     <!-- now create OrderItemBilling with shipmentId if available -->
                     <service-call name="create#mantle.order.OrderItemBilling"
-                            in-map="oibBaseMap + [invoiceId:invoiceId, invoiceItemSeqId:orderItem.orderItemSeqId,
-                                amount:orderItem.unitAmount, quantity:quantityNotBilled, shipmentId:curShipmentId]"/>
+                            in-map="Object.assign({}, oibBaseMap, {invoiceId:invoiceId, invoiceItemSeqId:orderItem.orderItemSeqId,
+                                amount:orderItem.unitAmount, quantity:quantityNotBilled, shipmentId:curShipmentId})"/>
                 </if>
             </iterate>
 
@@ -1089,7 +1091,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <entity-find entity-name="moqui.basic.EnumGroupMember" list="productItemTypeEgms" cache="true">
                 <econdition field-name="enumGroupEnumId" value="EngItemsProduct"/></entity-find>
-            <set field="productItemTypes" from="productItemTypeEgms*.enumId"/>
+            <set field="productItemTypes" from="Array.from(productItemTypeEgms).map((it) => it.enumId)"/>
 
             <entity-find entity-name="mantle.shipment.ShipmentItemSource" list="shipmentItemSourceList" for-update="true">
                 <econdition field-name="shipmentId"/>
@@ -1102,7 +1104,7 @@ along with this software (see the LICENSE.md file). If not, see
             <iterate list="shipmentItemSourceList" entry="shipmentItemSource">
                 <set field="orderItem" from="shipmentItemSource['mantle.order.OrderItem']"/>
                 <if condition="orderItem == null"><continue/></if>
-                <set field="orderItemQty" from="(orderItem.quantity != null ? orderItem.quantity : 1.0) * (orderItem.selectedAmount || 1.0)"/>
+                <set field="orderItemQty" from="toDecimal(orderItem.quantity != null ? orderItem.quantity : 1).multiply(toDecimal(orderItem.selectedAmount ?? 0).isZero() ? 1 : orderItem.selectedAmount)"/>
                 <!-- invoice even if unitAmount is zero, otherwise no record of sales for inventory/etc purposes (sales invoice analysis)
                 <set field="itemAmount" from="(orderItem.unitAmount ?: 0) * (orderItemQty)"/>
                 <if condition="itemAmount == 0"><continue/></if>
@@ -1111,21 +1113,21 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- look for existing OrderItemBilling quantity: quantity already billed minus quantity on order shipments -->
                 <!-- bill only quantity not already billed -->
                 <set field="billingList" from="orderItem.billings"/>
-                <set field="billedQuantity" from="billingList*.quantity.sum()"/>
+                <set field="billedQuantity" from="Array.from(billingList).reduce((total, it) => total.add(it.quantity ?? 0), toDecimal(0))"/>
                 <set field="allItemSources" from="orderItem.shipmentSources"/>
-                <set field="allShippedQuantity" from="allItemSources*.quantity.sum()"/>
+                <set field="allShippedQuantity" from="Array.from(allItemSources).reduce((total, it) => total.add(it.quantity ?? 0), toDecimal(0))"/>
                 <!-- get shippedNotBilled from this OrderItem's quantity on all shipments, including this one, minus billedQuantity -->
                 <!-- only bill up to the quantity on this shipment -->
-                <set field="shippedNotBilled" from="(allShippedQuantity || 0.0) - (billedQuantity || 0.0)"/>
-                <set field="quantityToBill" from="shipmentItemSource.quantity &gt; shippedNotBilled ? shippedNotBilled : shipmentItemSource.quantity"/>
-                <if condition="quantityToBill == 0.0"><continue/></if>
+                <set field="shippedNotBilled" from="allShippedQuantity.subtract(billedQuantity)"/>
+                <set field="quantityToBill" from="toDecimal(shipmentItemSource.quantity).compare(shippedNotBilled) &gt; 0 ? shippedNotBilled : shipmentItemSource.quantity"/>
+                <if condition="toDecimal(quantityToBill).isZero()"><continue/></if>
 
-                <set field="orderHeader" from="orderHeaderMap.get(shipmentItemSource.orderId)"/>
+                <set field="orderHeader" from="orderHeaderMap[shipmentItemSource.orderId]"/>
                 <if condition="orderHeader == null">
                     <set field="orderHeader" from="shipmentItemSource['mantle.order.OrderHeader']"/>
-                    <script>orderHeaderMap.put(shipmentItemSource.orderId, orderHeader)</script>
+                    <script>orderHeaderMap[shipmentItemSource.orderId] = orderHeader</script>
                 </if>
-                <set field="invoiceId" from="invoiceIdByOrderPartIdMap.get(orderItem.orderId + ':' + orderItem.orderPartSeqId)"/>
+                <set field="invoiceId" from="invoiceIdByOrderPartIdMap[orderItem.orderId + ':' + orderItem.orderPartSeqId]"/>
 
                 <if condition="!invoiceId">
                     <!-- find the OrderPart for the from/toPartyId, etc -->
@@ -1146,7 +1148,7 @@ along with this software (see the LICENSE.md file). If not, see
                                     otherPartyOrderId:orderPart.otherPartyOrderId, settlementTermId:orderPart.settlementTermId,
                                     productStoreId:orderHeader.productStoreId, systemMessageRemoteId:orderHeader.systemMessageRemoteId}"/>
                         <set field="invoiceId" from="invOut.invoiceId"/>
-                        <script>invoiceIdByOrderPartIdMap.put(orderItem.orderId + ':' + orderItem.orderPartSeqId, invoiceId)</script>
+                        <script>invoiceIdByOrderPartIdMap[orderItem.orderId + ':' + orderItem.orderPartSeqId] = invoiceId</script>
 
                         <!-- set Payment.forInvoiceId on order part payments, if not already set -->
                         <set field="partPayments" from="orderPart.payments"/>
@@ -1174,9 +1176,9 @@ along with this software (see the LICENSE.md file). If not, see
                             <order-by field-name="orderItemSeqId"/>
                         </entity-find>
                         <iterate list="assetIssuanceList" entry="assetIssuance">
-                            <set field="issuanceQuantityToBill" from="quantityNotBilled &gt; assetIssuance.quantity ?
+                            <set field="issuanceQuantityToBill" from="quantityNotBilled.compare(assetIssuance.quantity ?? 0) &gt; 0 ?
                                     assetIssuance.quantity : quantityNotBilled"/>
-                            <if condition="issuanceQuantityToBill &lt;= 0.0"><continue/></if>
+                            <if condition="issuanceQuantityToBill.compare(0) &lt;= 0"><continue/></if>
                             <!-- should we make sure the total quantity on all AssetIssuance records matches the
                                 quantity on the ShipmentItemSource record? that should be handled when they are created... -->
                             <service-call name="create#mantle.account.invoice.InvoiceItem" out-map="iiOut"
@@ -1200,8 +1202,8 @@ along with this software (see the LICENSE.md file). If not, see
                             <!-- if invoiceDate not on same day (in Java default time zone) as issuedDate items were packed/issued
                                 and then shipment packed much later so set issuedDate to invoiceDate so that COGS/etc are on same
                                 day as receivable invoice -->
-                            <if condition="invoiceDate.toString().substring(0, 10) != assetIssuance.issuedDate.toString().substring(0, 10)">
-                                <log message="AssetIssuance ${assetIssuance.assetIssuanceId} issuedDate ${assetIssuance.issuedDate.toString().substring(0, 10)} on different day from invoiceDate ${invoiceDate.toString().substring(0, 10)}, updating to invoiceDate"/>
+                            <if condition="ec.l10n.format(invoiceDate, 'yyyy-MM-dd') != ec.l10n.format(assetIssuance.issuedDate, 'yyyy-MM-dd')">
+                                <log message="AssetIssuance ${assetIssuance.assetIssuanceId} issuedDate ${ec.l10n.format(assetIssuance.issuedDate, 'yyyy-MM-dd')} on different day from invoiceDate ${ec.l10n.format(invoiceDate, 'yyyy-MM-dd')}, updating to invoiceDate"/>
                                 <service-call name="mantle.product.AssetServices.update#AssetIssuedDate"
                                         in-map="{assetIssuanceId:assetIssuance.assetIssuanceId, issuedDate:invoiceDate}"/>
                             </if>
@@ -1217,7 +1219,7 @@ along with this software (see the LICENSE.md file). If not, see
                                 <set field="newShipmentItemSource.quantity" from="issuanceQuantityToBill"/>
                                 <entity-create value-field="newShipmentItemSource"/>
 
-                                <set field="shipmentItemSource.quantity" from="shipmentItemSource.quantity - issuanceQuantityToBill"/>
+                                <set field="shipmentItemSource.quantity" from="toDecimal(shipmentItemSource.quantity).subtract(issuanceQuantityToBill)"/>
                                 <entity-update value-field="shipmentItemSource"/>
                             </then><else>
                                 <set field="shipmentItemSource.invoiceId" from="invoiceId"/>
@@ -1225,7 +1227,7 @@ along with this software (see the LICENSE.md file). If not, see
                                 <entity-update value-field="shipmentItemSource"/>
                             </else></if>
 
-                            <set field="quantityNotBilled" from="quantityNotBilled - issuanceQuantityToBill"/>
+                            <set field="quantityNotBilled" from="quantityNotBilled.subtract(issuanceQuantityToBill)"/>
                         </iterate>
                     </if>
 
@@ -1233,13 +1235,13 @@ along with this software (see the LICENSE.md file). If not, see
                         spite of the name handle these too -->
                     <if condition="handleReceipts">
                         <entity-find entity-name="mantle.product.receipt.AssetReceipt" list="assetReceiptList" for-update="true">
-                            <econdition-object field="[orderId:orderItem.orderId, orderItemSeqId:orderItem.orderItemSeqId, shipmentId:shipmentId]"/>
+                            <econdition-object field="{orderId:orderItem.orderId, orderItemSeqId:orderItem.orderItemSeqId, shipmentId:shipmentId}"/>
                             <order-by field-name="orderItemSeqId"/>
                         </entity-find>
                         <iterate list="assetReceiptList" entry="assetReceipt">
-                            <set field="receiptQuantityToBill" from="quantityNotBilled &gt; assetReceipt.quantityAccepted ?
+                            <set field="receiptQuantityToBill" from="quantityNotBilled.compare(assetReceipt.quantityAccepted ?? 0) &gt; 0 ?
                                     assetReceipt.quantityAccepted : quantityNotBilled"/>
-                            <if condition="receiptQuantityToBill &lt;= 0.0"><continue/></if>
+                            <if condition="receiptQuantityToBill.compare(0) &lt;= 0"><continue/></if>
                             <!-- should we make sure the total quantity on all AssetReceipt records matches the
                                 quantity on the ShipmentItemSource record? that should be handled when they are created... -->
                             <service-call name="create#mantle.account.invoice.InvoiceItem" out-map="iiOut"
@@ -1269,7 +1271,7 @@ along with this software (see the LICENSE.md file). If not, see
                                 <set field="newShipmentItemSource.quantity" from="receiptQuantityToBill"/>
                                 <entity-create value-field="newShipmentItemSource"/>
 
-                                <set field="shipmentItemSource.quantity" from="shipmentItemSource.quantity - receiptQuantityToBill"/>
+                                <set field="shipmentItemSource.quantity" from="toDecimal(shipmentItemSource.quantity).subtract(receiptQuantityToBill)"/>
                                 <entity-update value-field="shipmentItemSource"/>
                             </then><else>
                                 <set field="shipmentItemSource.invoiceId" from="invoiceId"/>
@@ -1277,12 +1279,12 @@ along with this software (see the LICENSE.md file). If not, see
                                 <entity-update value-field="shipmentItemSource"/>
                             </else></if>
 
-                            <set field="quantityNotBilled" from="quantityNotBilled - receiptQuantityToBill"/>
+                            <set field="quantityNotBilled" from="quantityNotBilled.subtract(receiptQuantityToBill)"/>
                         </iterate>
                     </if>
 
                     <!-- there should not be any quantity left over after issuance/receipt records, but just make sure -->
-                    <if condition="quantityNotBilled &gt; 0">
+                    <if condition="quantityNotBilled.compare(0) &gt; 0">
                         <!-- NOTE: in this case we don't have an assetId -->
                         <service-call name="create#mantle.account.invoice.InvoiceItem" out-map="mainIiOut" out-map-add-to-existing="false"
                                 in-map="{invoiceId:invoiceId, itemTypeEnumId:orderItem.itemTypeEnumId || 'ItemProduct',
@@ -1301,7 +1303,7 @@ along with this software (see the LICENSE.md file). If not, see
                             <set field="newShipmentItemSource.quantity" from="quantityNotBilled"/>
                             <entity-create value-field="newShipmentItemSource"/>
 
-                            <set field="shipmentItemSource.quantity" from="shipmentItemSource.quantity - quantityNotBilled"/>
+                            <set field="shipmentItemSource.quantity" from="toDecimal(shipmentItemSource.quantity).subtract(quantityNotBilled)"/>
                             <entity-update value-field="shipmentItemSource"/>
                         </then><else>
                             <set field="shipmentItemSource.invoiceId" from="invoiceId"/>
@@ -1315,8 +1317,8 @@ along with this software (see the LICENSE.md file). If not, see
                     <order-map-list list="childOrderItemList"><order-by field-name="orderItemSeqId"/></order-map-list>
                     <iterate list="childOrderItemList" entry="childOrderItem">
                         <!-- only ship if not a product item, that should be shipped before invoiced -->
-                        <if condition="childOrderItem.itemTypeEnumId in productItemTypes">
-                            <log message="Not invoicing child item ${childOrderItemList.orderId}:${childOrderItemList.orderItemSeqId}, has product item type ${childOrderItem.itemTypeEnumId}"/>
+                        <if condition="productItemTypes.includes(childOrderItem.itemTypeEnumId)">
+                            <log message="Not invoicing child item ${childOrderItem.orderId}:${childOrderItem.orderItemSeqId}, has product item type ${childOrderItem.itemTypeEnumId}"/>
                             <continue/>
                         </if>
 
@@ -1325,35 +1327,35 @@ along with this software (see the LICENSE.md file). If not, see
                             <econdition field-name="orderItemSeqId" from="childOrderItem.orderItemSeqId"/>
                             <select-field field-name="quantity,amount"/>
                         </entity-find>
-                        <set field="childBilledQuantity" from="0.0"/>
-                        <set field="childBilledTotal" from="0.0"/>
+                        <set field="childBilledQuantity" from="toDecimal(0)"/>
+                        <set field="childBilledTotal" from="toDecimal(0)"/>
                         <iterate list="childItemBillingList" entry="childItemBilling">
-                            <set field="childInvQuantity" from="childItemBilling.quantity != null ? childItemBilling.quantity : 1.0"/>
-                            <set field="childBilledQuantity" from="childBilledQuantity + childInvQuantity"/>
-                            <set field="childBilledTotal" from="childBilledTotal + (childInvQuantity * (childItemBilling.amount || 0.0)).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+                            <set field="childInvQuantity" from="toDecimal(childItemBilling.quantity != null ? childItemBilling.quantity : 1)"/>
+                            <set field="childBilledQuantity" from="childBilledQuantity.add(childInvQuantity)"/>
+                            <set field="childBilledTotal" from="childBilledTotal.add(childInvQuantity.multiply(childItemBilling.amount ?? 0).setScale(2, 'HALF_UP'))"/>
                         </iterate>
 
-                        <set field="childQty" from="(childOrderItem.quantity != null ? childOrderItem.quantity : 1.0) * (childOrderItem.selectedAmount || 1.0)"/>
-                        <set field="childQuantityNotBilled" from="childQty - childBilledQuantity"/>
-                        <set field="childTotal" from="(childQty * (childOrderItem.unitAmount || 0.0)).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
-                        <set field="childTotalNotBilled" from="childTotal - childBilledTotal"/>
+                        <set field="childQty" from="toDecimal(childOrderItem.quantity != null ? childOrderItem.quantity : 1).multiply(toDecimal(childOrderItem.selectedAmount ?? 0).isZero() ? 1 : childOrderItem.selectedAmount)"/>
+                        <set field="childQuantityNotBilled" from="childQty.subtract(childBilledQuantity)"/>
+                        <set field="childTotal" from="childQty.multiply(childOrderItem.unitAmount ?? 0).setScale(2, 'HALF_UP')"/>
+                        <set field="childTotalNotBilled" from="childTotal.subtract(childBilledTotal)"/>
 
                         <!-- only need to if total not billed != 0.0 (total can be positive or negative because unitAmount can be negative) -->
-                        <if condition="childTotalNotBilled != 0.0">
+                        <if condition="!childTotalNotBilled.isZero()">
                             <!-- if child qty == parent qty then handle by quantity, otherwise prorate by total -->
-                            <set field="childQtyToBill" from="0.0"/>
-                            <set field="childAmountToBill" from="0.0"/>
-                            <if condition="childQty == orderItemQty"><then>
+                            <set field="childQtyToBill" from="toDecimal(0)"/>
+                            <set field="childAmountToBill" from="toDecimal(0)"/>
+                            <if condition="childQty.compare(orderItemQty) == 0"><then>
                                 <set field="childQtyToBill" from="quantityToBill"/>
                                 <set field="childAmountToBill" from="childOrderItem.unitAmount"/>
                             </then><else>
-                                <set field="childQtyToBill" from="1.0"/>
+                                <set field="childQtyToBill" from="toDecimal(1)"/>
                                 <!-- if full order item qty now shipped (last shipment) use childTotalNotBilled, otherwise prorate based on childTotal -->
-                                <if condition="allShippedQuantity &gt;= orderItemQty"><then>
+                                <if condition="allShippedQuantity.compare(orderItemQty) &gt;= 0"><then>
                                     <set field="childAmountToBill" from="childTotalNotBilled"/>
                                 </then><else>
-                                    <set field="parentRatio" from="(quantityToBill == null ? null : toDecimal(quantityToBill)).divide((orderItemQty == null ? null : toDecimal(orderItemQty)), 6, BigDecimal.ROUND_HALF_EVEN)"/>
-                                    <set field="childAmountToBill" from="(childTotal * parentRatio).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+                                    <set field="parentRatio" from="toDecimal(quantityToBill).divide(orderItemQty).setScale(6, 'HALF_EVEN')"/>
+                                    <set field="childAmountToBill" from="childTotal.multiply(parentRatio).setScale(2, 'HALF_UP')"/>
                                 </else></if>
                             </else></if>
 
@@ -1374,15 +1376,15 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- for each order invoice uninvoiced, non-Product OrderItems such as shipping charges, etc... -->
             <!-- do all on first invoice (all unbilled on each shipment for each order)... in the future consider prorating by total on this shipment versus order total -->
-            <iterate list="invoiceIdByOrderPartIdMap.entrySet()" entry="invoiceIdByOrderIdEntry">
-                <set field="orderAndPartId" from="invoiceIdByOrderIdEntry.key"/>
+            <iterate list="Object.entries(invoiceIdByOrderPartIdMap)" entry="invoiceIdByOrderIdEntry">
+                <set field="orderAndPartId" from="invoiceIdByOrderIdEntry[0]"/>
                 <set field="orderId" from="orderAndPartId.substring(0, orderAndPartId.indexOf(':'))"/>
                 <set field="orderPartSeqId" from="orderAndPartId.substring(orderAndPartId.indexOf(':') + 1)"/>
-                <set field="invoiceId" from="invoiceIdByOrderIdEntry.value"/>
-                <set field="orderHeader" from="orderHeaderMap.get(orderId)"/>
+                <set field="invoiceId" from="invoiceIdByOrderIdEntry[1]"/>
+                <set field="orderHeader" from="orderHeaderMap[orderId]"/>
                 <if condition="orderHeader == null">
                     <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
-                    <script>orderHeaderMap.put(orderId, orderHeader)</script>
+                    <script>orderHeaderMap[orderId] = orderHeader</script>
                 </if>
                 <entity-find entity-name="mantle.order.OrderItem" list="otherOrderItemList">
                     <econdition field-name="orderId"/><econdition field-name="orderPartSeqId"/>
@@ -1392,18 +1394,18 @@ along with this software (see the LICENSE.md file). If not, see
                 </entity-find>
                 <iterate list="otherOrderItemList" entry="otherOrderItem">
                     <set field="parentInvoiceItemSeqId" from="null"/>
-                    <set field="otherItemQty" from="(otherOrderItem.quantity != null ? otherOrderItem.quantity : 1.0) * (otherOrderItem.selectedAmount || 1.0)"/>
-                    <set field="otherItemTotal" from="(otherItemQty * (otherOrderItem.unitAmount || 0.0)).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+                    <set field="otherItemQty" from="toDecimal(otherOrderItem.quantity != null ? otherOrderItem.quantity : 1).multiply(toDecimal(otherOrderItem.selectedAmount ?? 0).isZero() ? 1 : otherOrderItem.selectedAmount)"/>
+                    <set field="otherItemTotal" from="otherItemQty.multiply(otherOrderItem.unitAmount ?? 0).setScale(2, 'HALF_UP')"/>
 
                     <!-- TODO: handle partial quantity billed, bill remaining qty or rather otherTotalToBill needs to be calculated -->
                     <set field="otherTotalToBill" from="otherItemTotal"/>
                     <entity-find entity-name="mantle.order.OrderItemBilling" list="otherItemBillingList">
                         <econdition field-name="orderId" from="otherOrderItem.orderId"/>
                         <econdition field-name="orderItemSeqId" from="otherOrderItem.orderItemSeqId"/>
-                        <econdition field-name="quantity" operator="not-equals" from="0.0"/>
+                        <econdition field-name="quantity" operator="not-equals" from="toDecimal(0)"/>
                     </entity-find>
                     <if condition="!otherItemBillingList?.length">
-                        <set field="otherItemQty" from="(otherOrderItem.quantity != null ? otherOrderItem.quantity : 1.0) * (otherOrderItem.selectedAmount || 1.0)"/>
+                        <set field="otherItemQty" from="toDecimal(otherOrderItem.quantity != null ? otherOrderItem.quantity : 1).multiply(toDecimal(otherOrderItem.selectedAmount ?? 0).isZero() ? 1 : otherOrderItem.selectedAmount)"/>
                         <!-- TODO is prorate by quantity needed? for example pro-rate order level shipping for partial shipment -->
                         <service-call name="create#mantle.account.invoice.InvoiceItem" out-map="iiOut"
                                 in-map="{invoiceId:invoiceId, itemTypeEnumId:otherOrderItem.itemTypeEnumId || 'ItemSales',
@@ -1422,8 +1424,8 @@ along with this software (see the LICENSE.md file). If not, see
                     <order-map-list list="childOrderItemList"><order-by field-name="orderItemSeqId"/></order-map-list>
                     <iterate list="childOrderItemList" entry="childOrderItem">
                         <!-- only ship if not a product item, that should be shipped before invoiced -->
-                        <if condition="childOrderItem.itemTypeEnumId in productItemTypes">
-                            <log message="Not invoicing child item ${childOrderItemList.orderId}:${childOrderItemList.orderItemSeqId}, has product item type ${childOrderItem.itemTypeEnumId}"/>
+                        <if condition="productItemTypes.includes(childOrderItem.itemTypeEnumId)">
+                            <log message="Not invoicing child item ${childOrderItem.orderId}:${childOrderItem.orderItemSeqId}, has product item type ${childOrderItem.itemTypeEnumId}"/>
                             <continue/>
                         </if>
 
@@ -1432,36 +1434,36 @@ along with this software (see the LICENSE.md file). If not, see
                             <econdition field-name="orderItemSeqId" from="childOrderItem.orderItemSeqId"/>
                             <select-field field-name="quantity,amount"/>
                         </entity-find>
-                        <set field="childBilledQuantity" from="0.0"/>
-                        <set field="childBilledTotal" from="0.0"/>
+                        <set field="childBilledQuantity" from="toDecimal(0)"/>
+                        <set field="childBilledTotal" from="toDecimal(0)"/>
                         <iterate list="childItemBillingList" entry="childItemBilling">
-                            <set field="childInvQuantity" from="childItemBilling.quantity != null ? childItemBilling.quantity : 1.0"/>
-                            <set field="childBilledQuantity" from="childBilledQuantity + childInvQuantity"/>
-                            <set field="childBilledTotal" from="childBilledTotal + (childInvQuantity * (childItemBilling.amount || 0.0)).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+                            <set field="childInvQuantity" from="toDecimal(childItemBilling.quantity != null ? childItemBilling.quantity : 1)"/>
+                            <set field="childBilledQuantity" from="childBilledQuantity.add(childInvQuantity)"/>
+                            <set field="childBilledTotal" from="childBilledTotal.add(childInvQuantity.multiply(childItemBilling.amount ?? 0).setScale(2, 'HALF_UP'))"/>
                         </iterate>
 
-                        <set field="childQty" from="(childOrderItem.quantity != null ? childOrderItem.quantity : 1.0) * (childOrderItem.selectedAmount || 1.0)"/>
-                        <set field="childQuantityNotBilled" from="childQty - childBilledQuantity"/>
-                        <set field="childTotal" from="(childQty * (childOrderItem.unitAmount || 0.0)).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
-                        <set field="childTotalNotBilled" from="childTotal - childBilledTotal"/>
+                        <set field="childQty" from="toDecimal(childOrderItem.quantity != null ? childOrderItem.quantity : 1).multiply(toDecimal(childOrderItem.selectedAmount ?? 0).isZero() ? 1 : childOrderItem.selectedAmount)"/>
+                        <set field="childQuantityNotBilled" from="childQty.subtract(childBilledQuantity)"/>
+                        <set field="childTotal" from="childQty.multiply(childOrderItem.unitAmount ?? 0).setScale(2, 'HALF_UP')"/>
+                        <set field="childTotalNotBilled" from="childTotal.subtract(childBilledTotal)"/>
 
                         <!-- only need to if total not billed != 0.0 (total can be positive or negative because unitAmount can be negative) -->
-                        <if condition="childTotalNotBilled != 0.0">
+                        <if condition="!childTotalNotBilled.isZero()">
                             <!-- if child qty == parent qty then handle by quantity, otherwise prorate by total -->
-                            <set field="childQtyToBill" from="0.0"/>
-                            <set field="childAmountToBill" from="0.0"/>
-                            <if condition="childQty == orderItemQty"><then>
+                            <set field="childQtyToBill" from="toDecimal(0)"/>
+                            <set field="childAmountToBill" from="toDecimal(0)"/>
+                            <if condition="childQty.compare(orderItemQty) == 0"><then>
                                 <set field="childQtyToBill" from="quantityToBill"/>
                                 <set field="childAmountToBill" from="childOrderItem.unitAmount"/>
                             </then><else>
-                                <set field="childQtyToBill" from="1.0"/>
+                                <set field="childQtyToBill" from="toDecimal(1)"/>
                                 <!-- if full order item qty now shipped (last shipment) use childTotalNotBilled, otherwise prorate based on childTotal -->
-                                <if condition="allShippedQuantity &gt;= orderItemQty"><then>
+                                <if condition="allShippedQuantity.compare(orderItemQty) &gt;= 0"><then>
                                     <set field="childAmountToBill" from="childTotalNotBilled"/>
                                 </then><else>
                                     <!-- NOTE: all of this is the same as the code section above for product type parent order items, except the parentRatio right here -->
-                                    <set field="parentRatio" from="(otherTotalToBill == null ? null : toDecimal(otherTotalToBill)).divide((otherItemTotal == null ? null : toDecimal(otherItemTotal)), 6, BigDecimal.ROUND_HALF_EVEN)"/>
-                                    <set field="childAmountToBill" from="(childTotal * parentRatio).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+                                    <set field="parentRatio" from="toDecimal(otherTotalToBill).divide(otherItemTotal).setScale(6, 'HALF_EVEN')"/>
+                                    <set field="childAmountToBill" from="childTotal.multiply(parentRatio).setScale(2, 'HALF_UP')"/>
                                 </else></if>
                             </else></if>
 
@@ -1481,17 +1483,17 @@ along with this software (see the LICENSE.md file). If not, see
             </iterate>
 
             <!-- set invoice status -->
-            <if condition="statusId &amp;&amp; statusId != 'InvoiceInProcess'"><iterate list="invoiceIdByOrderPartIdMap.values()" entry="invoiceId">
+            <if condition="statusId &amp;&amp; statusId != 'InvoiceInProcess'"><iterate list="Object.values(invoiceIdByOrderPartIdMap)" entry="invoiceId">
                 <service-call name="update#mantle.account.invoice.Invoice" in-map="{invoiceId:invoiceId, statusId:statusId}"/>
             </iterate></if>
             
             <!-- apply order payments to new invoices -->
             <if condition="applyPayments">
-                <iterate list="invoiceIdByOrderPartIdMap.entrySet()" entry="invoiceIdByOrderIdEntry">
-                    <set field="orderAndPartId" from="invoiceIdByOrderIdEntry.key"/>
+                <iterate list="Object.entries(invoiceIdByOrderPartIdMap)" entry="invoiceIdByOrderIdEntry">
+                    <set field="orderAndPartId" from="invoiceIdByOrderIdEntry[0]"/>
                     <set field="orderId" from="orderAndPartId.substring(0, orderAndPartId.indexOf(':'))"/>
                     <set field="orderPartSeqId" from="orderAndPartId.substring(orderAndPartId.indexOf(':') + 1)"/>
-                    <set field="invoiceId" from="invoiceIdByOrderIdEntry.value"/>
+                    <set field="invoiceId" from="invoiceIdByOrderIdEntry[1]"/>
                     <entity-find-one entity-name="mantle.account.invoice.Invoice" value-field="invoice">
                         <field-map field-name="invoiceId"/></entity-find-one>
                     <if condition="invoice.statusId == 'InvoiceInProcess'">
@@ -2243,7 +2245,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <entity-find entity-name="moqui.basic.EnumGroupMember" list="productItemTypeEgms" cache="true">
                 <econdition field-name="enumGroupEnumId" value="EngItemsProduct"/></entity-find>
-            <set field="productItemTypes" from="productItemTypeEgms*.enumId"/>
+            <set field="productItemTypes" from="Array.from(productItemTypeEgms).map((it) => it.enumId)"/>
 
             <entity-find entity-name="mantle.order.OrderItem" list="orderItemList">
                 <econdition field-name="orderId"/>
@@ -2268,7 +2270,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </entity-find>
                 <set field="orderBilledQuantity" from="oibqList?.getAt(0)?.quantity || 0.0"/>
 
-                <set field="quantityNotBilled" from="(orderItem.quantity != null ? orderItem.quantity : 1.0) * (orderItem.selectedAmount || 1.0)"/>
+                <set field="quantityNotBilled" from="toDecimal(orderItem.quantity != null ? orderItem.quantity : 1).multiply(toDecimal(orderItem.selectedAmount ?? 0).isZero() ? 1 : orderItem.selectedAmount)"/>
                 <set field="quantityNotBilled" from="quantityNotBilled - orderBilledQuantity"/>
                 <if condition="quantityNotBilled &lt;= 0.0"><continue/></if>
 
@@ -2299,7 +2301,7 @@ along with this software (see the LICENSE.md file). If not, see
                             <set field="shipmentItemSource.invoiceId" from="invoiceId"/>
                             <set field="shipmentItemSource.invoiceItemSeqId" from="invoiceItemSeqId"/>
                             <entity-update value-field="shipmentItemSource"/>
-                            <set field="quantityNotShipSourced" from="quantityNotShipSourced - shipmentItemSource.quantity"/>
+                            <set field="quantityNotShipSourced" from="quantityNotShipSourced.subtract(shipmentItemSource.quantity ?? 0)"/>
                             <set field="curShipmentId" from="shipmentItemSource.shipmentId"/>
                         </if>
                     </iterate>
@@ -2404,7 +2406,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <entity-find entity-name="moqui.basic.EnumGroupMember" list="productItemTypeEgms" cache="true">
                 <econdition field-name="enumGroupEnumId" value="EngItemsProduct"/></entity-find>
-            <set field="productItemTypes" from="productItemTypeEgms*.enumId"/>
+            <set field="productItemTypes" from="Array.from(productItemTypeEgms).map((it) => it.enumId)"/>
 
             <entity-find entity-name="mantle.account.invoice.InvoiceItem" list="invoiceItemList">
                 <econdition field-name="invoiceId"/></entity-find>
@@ -2428,7 +2430,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <entity-find entity-name="moqui.basic.EnumGroupMember" list="productItemTypeEgms" cache="true">
                 <econdition field-name="enumGroupEnumId" value="EngItemsProduct"/></entity-find>
-            <set field="productItemTypes" from="productItemTypeEgms*.enumId"/>
+            <set field="productItemTypes" from="Array.from(productItemTypeEgms).map((it) => it.enumId)"/>
             <if condition="!(invoiceItem.itemTypeEnumId in productItemTypes)">
                 <return message="Invoice ${invoiceId} item ${invoiceItemSeqId} is not a product item, cannot apply to shipment"/></if>
 
@@ -2542,7 +2544,7 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <set field="orderIdSet" from="new HashSet(orderItemBillingList*.orderId)"/>
 
-            <if condition="orderIdSet">
+            <if condition="orderIdSet.length">
                 <entity-find entity-name="mantle.order.OrderHeader" list="orderHeaderList" distinct="true">
                     <econdition field-name="orderId" operator="in" from="orderIdSet"/>
                     <econdition field-name="productStoreId" operator="is-not-null"/>
@@ -2801,7 +2803,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <service-call name="mantle.account.InvoiceServices.find#InvoiceProductStores" out-map="findStoreOut" out-map-add-to-existing="false"
                         in-map="{invoiceId:invoice.invoiceId, invoice:invoice}"/>
                 <if condition="findStoreOut.productStoreIdSet"><then>
-                    <set field="curProductStoreId" from="findStoreOut.productStoreIdSet.first()"/>
+                    <set field="curProductStoreId" from="findStoreOut.productStoreIdSet[0]"/>
                     <script>addToListInMap(curProductStoreId, invoice, invoicesByStoreId)</script>
                 </then><else>
                     <message type="warning">Not sending past due email for invoice ${invoice.invoiceId}, no Product Store found for email configuration</message>
