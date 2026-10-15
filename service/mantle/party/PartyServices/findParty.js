@@ -12,86 +12,84 @@
  * <http://creativecommons.org/publicdomain/zero/1.0/>.
  */
 
-import org.moqui.context.ExecutionContext
-import org.moqui.entity.EntityCondition
-import org.moqui.entity.EntityFind
-import org.moqui.entity.EntityList
-import org.moqui.entity.EntityValue
-
-// org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger("findParty")
-
-ExecutionContext ec = context.ec
-
+// NOTE: a find builder is used up by each call, so each call is assigned back to ef
 // NOTE: doing a find with a static view-entity because the Entity Facade will only select the fields specified and the
 //     join in the associated member-entities
-EntityFind ef = ec.entity.find("mantle.party.FindPartyView").distinct(true)
 // don't do distinct, SQL quandary with distinct, limited select, and order by with upper needing to be selected; seems to get good results in general without: .distinct(true)
+let ef = ec.entity.find("mantle.party.FindPartyView").distinct(true)
 
-ef.selectField("partyId")
+ef = ef.selectField("partyId")
 
-if (partyId) { ef.condition(ec.entity.conditionFactory.makeCondition("partyId", EntityCondition.LIKE, (leadingWildcard ? "%" : "") + partyId + "%").ignoreCase()) }
-if (pseudoId) { ef.condition(ec.entity.conditionFactory.makeCondition("pseudoId", EntityCondition.LIKE, (leadingWildcard ? "%" : "") + pseudoId + "%").ignoreCase()) }
-if (partyTypeEnumId) { ef.condition("partyTypeEnumId", partyTypeEnumId) }
-if (disabled) { ef.condition("disabled", disabled) }
-if (customerStatusId) { ef.condition("customerStatusId", customerStatusId) }
-if (hasDuplicates) { ef.condition("hasDuplicates", hasDuplicates) }
-if (roleTypeId) { ef.condition("roleTypeId", roleTypeId) }
-if (username) { ef.condition(ec.entity.conditionFactory.makeCondition("username", EntityCondition.LIKE, (leadingWildcard ? "%" : "") + username + "%").ignoreCase()) }
+const cf = ec.entity.conditionFactory
+const wildcard = leadingWildcard ? "%" : ""
+// a LIKE condition on the field with the value and a trailing wildcard, optionally ignoring case
+const like = (field, value, ignoreCase = true) =>
+        cf.makeActionConditionDirect(field, "like", wildcard + value + "%", null, null, ignoreCase)
+
+if (partyId) ef = ef.condition(like("partyId", partyId))
+if (pseudoId) ef = ef.condition(like("pseudoId", pseudoId))
+if (partyTypeEnumId) ef = ef.condition("partyTypeEnumId", partyTypeEnumId)
+if (disabled) ef = ef.condition("disabled", disabled)
+if (customerStatusId) ef = ef.condition("customerStatusId", customerStatusId)
+if (hasDuplicates) ef = ef.condition("hasDuplicates", hasDuplicates)
+if (roleTypeId) ef = ef.condition("roleTypeId", roleTypeId)
+if (username) ef = ef.condition(like("username", username))
 
 if (combinedName) {
     // support splitting by just one space for first/last names
-    String fnSplit = combinedName
-    String lnSplit = combinedName
-    if (combinedName.contains(" ")) {
+    let fnSplit = combinedName
+    let lnSplit = combinedName
+    if (combinedName.includes(" ")) {
         fnSplit = combinedName.substring(0, combinedName.indexOf(" "))
         lnSplit = combinedName.substring(combinedName.indexOf(" ") + 1)
     }
-    cnCondList = [ec.entity.conditionFactory.makeCondition("organizationName", EntityCondition.LIKE, (leadingWildcard ? "%" : "") + combinedName + "%").ignoreCase(),
-            ec.entity.conditionFactory.makeCondition("firstName", EntityCondition.LIKE, (leadingWildcard ? "%" : "") + fnSplit + "%").ignoreCase(),
-            ec.entity.conditionFactory.makeCondition("lastName", EntityCondition.LIKE, (leadingWildcard ? "%" : "") + lnSplit + "%").ignoreCase()]
-    ef.condition(ec.entity.conditionFactory.makeCondition(cnCondList, EntityCondition.OR))
+    const cnCondList = [like("organizationName", combinedName), like("firstName", fnSplit), like("lastName", lnSplit)]
+    ef = ef.condition(cf.makeCondition(cnCondList, "or"))
 }
 
-if (organizationName) { ef.condition(ec.entity.conditionFactory.makeCondition("organizationName", EntityCondition.LIKE, (leadingWildcard ? "%" : "") + organizationName + "%").ignoreCase()) }
-if (firstName) { ef.condition(ec.entity.conditionFactory.makeCondition("firstName", EntityCondition.LIKE, (leadingWildcard ? "%" : "") + firstName + "%").ignoreCase()) }
-if (lastName) { ef.condition(ec.entity.conditionFactory.makeCondition("lastName", EntityCondition.LIKE, (leadingWildcard ? "%" : "") + lastName + "%").ignoreCase()) }
-if (suffix) { ef.condition(ec.entity.conditionFactory.makeCondition("suffix", EntityCondition.LIKE, (leadingWildcard ? "%" : "") + suffix + "%").ignoreCase()) }
+if (organizationName) ef = ef.condition(like("organizationName", organizationName))
+if (firstName) ef = ef.condition(like("firstName", firstName))
+if (lastName) ef = ef.condition(like("lastName", lastName))
+if (suffix) ef = ef.condition(like("suffix", suffix))
 
-if (address1) { ef.condition(ec.entity.conditionFactory.makeCondition("address1", EntityCondition.LIKE, (leadingWildcard ? "%" : "") + address1 + "%").ignoreCase()) }
-if (address2) { ef.condition(ec.entity.conditionFactory.makeCondition("address2", EntityCondition.LIKE, (leadingWildcard ? "%" : "") + address2 + "%").ignoreCase()) }
-if (city) { ef.condition(ec.entity.conditionFactory.makeCondition("city", EntityCondition.LIKE, (leadingWildcard ? "%" : "") + city + "%").ignoreCase()) }
-if (stateProvinceGeoId) { ef.condition("stateProvinceGeoId", stateProvinceGeoId) }
-if (postalCode) { ef.condition(ec.entity.conditionFactory.makeCondition("postalCode", EntityCondition.LIKE, (leadingWildcard ? "%" : "") + postalCode + "%").ignoreCase()) }
+if (address1) ef = ef.condition(like("address1", address1))
+if (address2) ef = ef.condition(like("address2", address2))
+if (city) ef = ef.condition(like("city", city))
+if (stateProvinceGeoId) ef = ef.condition("stateProvinceGeoId", stateProvinceGeoId)
+if (postalCode) ef = ef.condition(like("postalCode", postalCode))
 
-if (countryCode) { ef.condition("countryCode", countryCode) }
-if (areaCode) { ef.condition("areaCode", areaCode) }
-if (contactNumber) { ef.condition(ec.entity.conditionFactory.makeCondition("contactNumber", EntityCondition.LIKE, (leadingWildcard ? "%" : "") + contactNumber + "%")) }
+if (countryCode) ef = ef.condition("countryCode", countryCode)
+if (areaCode) ef = ef.condition("areaCode", areaCode)
+if (contactNumber) ef = ef.condition(like("contactNumber", contactNumber, false))
 
-if (emailAddress) { ef.condition(ec.entity.conditionFactory.makeCondition("emailAddress", EntityCondition.LIKE, (leadingWildcard ? "%" : "") + emailAddress + "%").ignoreCase()) }
+if (emailAddress) ef = ef.condition(like("emailAddress", emailAddress))
 
-if (assetSerialNumber) { ef.condition(ec.entity.conditionFactory.makeCondition("assetSerialNumber", EntityCondition.LIKE, (leadingWildcard ? "%" : "") + assetSerialNumber + "%").ignoreCase()) }
+if (assetSerialNumber) ef = ef.condition(like("assetSerialNumber", assetSerialNumber))
 
 if (orderByField) {
-    if (orderByField.contains("combinedName")) {
-        if (orderByField.contains("-")) ef.orderBy("-organizationName,-firstName,-lastName")
-        else ef.orderBy("organizationName,firstName,lastName")
+    if (orderByField.includes("combinedName")) {
+        if (orderByField.includes("-")) ef = ef.orderBy("-organizationName,-firstName,-lastName")
+        else ef = ef.orderBy("organizationName,firstName,lastName")
     } else {
-        ef.orderBy(orderByField)
+        ef = ef.orderBy(orderByField)
     }
 }
 
-if (!pageNoLimit) { ef.offset(pageIndex as int, pageSize as int); ef.limit(pageSize as int) }
+// a find runs once, so count with a copy made before the limit and offset are set
+const countFind = ef.copy()
 
-// logger.warn("======= find#Party cond: ${ef.getWhereEntityCondition()}")
+const pageIndexInt = Math.trunc(Number(pageIndex))
+const pageSizeInt = Math.trunc(Number(pageSize))
+if (!pageNoLimit) ef = ef.offset(pageIndexInt * pageSizeInt).limit(pageSizeInt)
 
 partyIdList = []
-EntityList el = ef.list()
-for (EntityValue ev in el) partyIdList.add(ev.partyId)
+for (const ev of ef.list()) partyIdList.push(ev.partyId)
 
-partyIdListCount = ef.count()
-partyIdListPageIndex = ef.pageIndex
-partyIdListPageSize = ef.pageSize
-partyIdListPageMaxIndex = ((BigDecimal) (partyIdListCount - 1)).divide(partyIdListPageSize, 0, BigDecimal.ROUND_DOWN) as int
+partyIdListCount = countFind.count()
+// as the find reports them: page 0 of the default size 20 when there is no limit
+partyIdListPageIndex = pageNoLimit ? 0 : pageIndexInt
+partyIdListPageSize = pageNoLimit ? 20 : pageSizeInt
+partyIdListPageMaxIndex = Math.trunc((partyIdListCount - 1) / partyIdListPageSize) + 0
 partyIdListPageRangeLow = partyIdListPageIndex * partyIdListPageSize + 1
 partyIdListPageRangeHigh = (partyIdListPageIndex * partyIdListPageSize) + partyIdListPageSize
 if (partyIdListPageRangeHigh > partyIdListCount) partyIdListPageRangeHigh = partyIdListCount

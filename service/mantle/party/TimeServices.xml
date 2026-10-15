@@ -33,12 +33,12 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="createMissing">
                 <if condition="(childPeriodList?.length > 0)"><then>
                     <!-- add next child periods as needed -->
-                    <set field="lastChildPeriod" from="childPeriodList.get(childPeriodList.size() - 1)"/>
+                    <set field="lastChildPeriod" from="childPeriodList[childPeriodList.length - 1]"/>
                     <while condition="lastChildPeriod.thruDate &lt; parentPeriod.thruDate">
                         <service-call name="mantle.party.TimeServices.getOrCreate#NextTimePeriod" out-map="createNextChildOut"
                                       in-map="{timePeriodId:lastChildPeriod.timePeriodId}" out-map-add-to-existing="false"/>
                         <set field="lastChildPeriod" from="createNextChildOut.nextTimePeriod"/>
-                        <script>childPeriodList.add(createNextChildOut.nextTimePeriod)</script>
+                        <script>childPeriodList.push(createNextChildOut.nextTimePeriod)</script>
                     </while>
                 </then><else>
                     <!-- find the TimePeriodType to use -->
@@ -58,13 +58,13 @@ along with this software (see the LICENSE.md file). If not, see
                         <order-by field-name="-thruDate"/>
                     </entity-find>
                     <if condition="(mostRecentPeriodList?.length > 0)"><then>
-                        <set field="lastChildPeriod" from="mostRecentPeriodList.get(0)"/>
+                        <set field="lastChildPeriod" from="mostRecentPeriodList[0]"/>
                     </then><else>
                         <service-call name="mantle.party.TimeServices.getOrCreate#TimePeriod" out-map="lastChildOut"
                                 in-map="{partyId:parentPeriod.partyId, timePeriodTypeId:childPeriodType.timePeriodTypeId,
                                     fromDate:parentPeriod.fromDate, parentPeriodId:parentPeriod.timePeriodId}"/>
                         <set field="lastChildPeriod" from="lastChildOut.timePeriod"/>
-                        <script>childPeriodList.add(lastChildPeriod)</script>
+                        <script>childPeriodList.push(lastChildPeriod)</script>
                     </else></if>
 
                     <!-- create next periods until we're to/past the thruDate of the current parentPeriod -->
@@ -72,17 +72,17 @@ along with this software (see the LICENSE.md file). If not, see
                         <service-call name="mantle.party.TimeServices.getOrCreate#NextTimePeriod" out-map="createNextChildOut"
                                       in-map="{timePeriodId:lastChildPeriod.timePeriodId}" out-map-add-to-existing="false"/>
                         <set field="lastChildPeriod" from="createNextChildOut.nextTimePeriod"/>
-                        <script>childPeriodList.add(lastChildPeriod)</script>
+                        <script>childPeriodList.push(lastChildPeriod)</script>
                     </while>
                 </else></if>
             </if>
             <iterate list="childPeriodList" entry="childPeriod">
                 <if condition="childPeriod.timePeriodTypeId == timePeriodTypeId"><then>
-                    <script>timePeriodList.add(childPeriod)</script>
+                    <script>timePeriodList.push(childPeriod)</script>
                 </then><else>
                     <service-call name="mantle.party.TimeServices.get#DescendantPeriods" out-map="childGetOut" out-map-add-to-existing="false"
                                   in-map="{parentPeriodId:childPeriod.timePeriodId, timePeriodTypeId:timePeriodTypeId, createMissing:createMissing}"/>
-                    <script>if (childGetOut.timePeriodList) timePeriodList.addAll(childGetOut.timePeriodList)</script>
+                    <script>if (childGetOut.timePeriodList) { for (const tp of childGetOut.timePeriodList) timePeriodList.push(tp) }</script>
                 </else></if>
             </iterate>
         </actions>
@@ -292,7 +292,7 @@ along with this software (see the LICENSE.md file). If not, see
                     // try once to find an existing and return its timePeriodId
                     existingTimePeriods = ec.entity.find("mantle.party.time.TimePeriod").condition("partyId", partyId)
                             .condition("timePeriodTypeId", timePeriodTypeId).condition("fromDate", fromDate).list()
-                    if (existingTimePeriods.size() > 0) {
+                    if (existingTimePeriods.length > 0) {
                         timePeriodId = existingTimePeriods[0].timePeriodId
                     } else {
                         throw e
@@ -317,12 +317,22 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="timePeriodTypeId" ignore-if-empty="true"/>
                 <econdition field-name="partyId" ignore-if-empty="true"/>
             </entity-find>
+            <script><![CDATA[
+                // A date reaches a script as epoch millis text (UTC midnight for a Date field), or is yyyy-MM-dd text
+                function dateOf(value) {
+                    const text = String(value)
+                    if (/^-?\d+$/.test(text)) { const at = new Date(Number(text)); return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate())) }
+                    const [y, m, d] = text.slice(0, 10).split('-').map(Number)
+                    return new Date(Date.UTC(y, m - 1, d))
+                }
+                function textOf(dt) { return dt.toISOString().slice(0, 10); }
+            ]]></script>
             <iterate list="timePeriodList" entry="timePeriod">
                 <entity-find-one entity-name="mantle.party.PartyDetail" value-field="partyDetail">
                     <field-map field-name="partyId" from="timePeriod.partyId"/></entity-find-one>
                 <set field="timePeriodType" from="timePeriod.type"/>
-                <set field="fromLocalDate" from="java.time.LocalDate.parse(timePeriod.fromDate.toString())"/>
-                <set field="thruLocalDate" from="java.time.LocalDate.parse(timePeriod.thruDate.toString())"/>
+                <set field="fromLocalDate" from="textOf(dateOf(timePeriod.fromDate))"/>
+                <set field="thruLocalDate" from="textOf(dateOf(timePeriod.thruDate))"/>
                 <set field="timePeriod.periodName" from="ec.resource.expand('TimePeriodBaseNameTemplate', null, timePeriod, true)"/>
                 <entity-update value-field="timePeriod"/>
             </iterate>
@@ -346,8 +356,19 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="(childTimePeriodList?.length > 0)"><return type="danger" message="Period ${timePeriod.periodName} has child periods, cannot delete"/></if>
 
             <set field="timePeriodType" from="timePeriod.type"/>
-            <set field="fromTimestamp" from="ec.l10n.parseTimestamp(&quot;${fromDate} 00:00:00.000&quot;, '')"/>
-            <set field="thruTimestamp" from="ec.l10n.parseTimestamp(&quot;${thruDate} 23:59:59.999&quot;, '')"/>
+            <script><![CDATA[
+                // A date reaches a script as epoch millis text (UTC midnight for a Date field), or is yyyy-MM-dd text
+                function dateOf(value) {
+                    const text = String(value)
+                    if (/^-?\d+$/.test(text)) { const at = new Date(Number(text)); return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate())) }
+                    const [y, m, d] = text.slice(0, 10).split('-').map(Number)
+                    return new Date(Date.UTC(y, m - 1, d))
+                }
+                function textOf(dt) { return dt.toISOString().slice(0, 10); }
+                function plusDays(dt, n) { return new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate() + n)); }
+            ]]></script>
+            <set field="fromTimestamp" from="ec.l10n.parseTimestamp(textOf(dateOf(timePeriod.fromDate)) + ' 00:00:00.000', 'yyyy-MM-dd HH:mm:ss.SSS')"/>
+            <set field="thruTimestamp" from="ec.l10n.parseTimestamp(textOf(dateOf(timePeriod.thruDate)) + ' 23:59:59.999', 'yyyy-MM-dd HH:mm:ss.SSS')"/>
 
             <if condition="timePeriodType?.periodPurposeEnumId == 'Payroll'">
                 <!-- Check if there are existing Time Entries. If there are, refuse to delete the Time Period. -->
@@ -393,7 +414,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </econditions>
             </entity-find>
             <if condition="(existingPeriodList?.length > 0)"><then>
-                <set field="timePeriod" from="existingPeriodList.get(0)"/>
+                <set field="timePeriod" from="existingPeriodList[0]"/>
                 <set field="timePeriodId" from="timePeriod.timePeriodId"/>
             </then><else>
                 <service-call name="mantle.party.TimeServices.create#TimePeriod" in-map="context" out-map="createTpOut"/>
@@ -486,10 +507,21 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="timePeriod.thruDate == null"><return error="true" message="Time Period ${timePeriodId} has no thruDate"/></if>
 
             <!-- FUTURE: [OrgTimeZoneMarker] instead of using Java system default TimeZone use one configured for the organization (TimePeriod.partyId), default to TimeZone.getDefault() -->
-            <set field="fromTimestamp" from="ec.l10n.parseTimestamp(timePeriod.fromDate.toString() + ' 00:00:00.000', 'yyyy-MM-dd HH:mm:ss.SSS', null, TimeZone.getDefault())"/>
-            <set field="thruTimestamp" from="ec.l10n.parseTimestamp(timePeriod.thruDate.toString() + ' 23:59:59.999', 'yyyy-MM-dd HH:mm:ss.SSS', null, TimeZone.getDefault())"/>
-            <set field="thruTimestampExclusive" from="ec.l10n.parseTimestamp((timePeriod.thruDate + 1).toString() + ' 00:00:00.000', 'yyyy-MM-dd HH:mm:ss.SSS', null, TimeZone.getDefault())"/>
-            <set field="thruTimestampLate" from="ec.l10n.parseTimestamp(timePeriod.thruDate.toString() + ' 20:00:00.000', 'yyyy-MM-dd HH:mm:ss.SSS', null, TimeZone.getDefault())"/>
+            <script><![CDATA[
+                // A date reaches a script as epoch millis text (UTC midnight for a Date field), or is yyyy-MM-dd text
+                function dateOf(value) {
+                    const text = String(value)
+                    if (/^-?\d+$/.test(text)) { const at = new Date(Number(text)); return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate())) }
+                    const [y, m, d] = text.slice(0, 10).split('-').map(Number)
+                    return new Date(Date.UTC(y, m - 1, d))
+                }
+                function textOf(dt) { return dt.toISOString().slice(0, 10); }
+                function plusDays(dt, n) { return new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate() + n)); }
+            ]]></script>
+            <set field="fromTimestamp" from="ec.l10n.parseTimestamp(textOf(dateOf(timePeriod.fromDate)) + ' 00:00:00.000', 'yyyy-MM-dd HH:mm:ss.SSS')"/>
+            <set field="thruTimestamp" from="ec.l10n.parseTimestamp(textOf(dateOf(timePeriod.thruDate)) + ' 23:59:59.999', 'yyyy-MM-dd HH:mm:ss.SSS')"/>
+            <set field="thruTimestampExclusive" from="ec.l10n.parseTimestamp(textOf(plusDays(dateOf(timePeriod.thruDate), 1)) + ' 00:00:00.000', 'yyyy-MM-dd HH:mm:ss.SSS')"/>
+            <set field="thruTimestampLate" from="ec.l10n.parseTimestamp(textOf(dateOf(timePeriod.thruDate)) + ' 20:00:00.000', 'yyyy-MM-dd HH:mm:ss.SSS')"/>
         </actions>
     </service>
     
@@ -502,7 +534,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="timePeriodTypeId" default-value="FiscalMonth"/>
             <parameter name="groups" type="Integer" default="12"/>
             <parameter name="perGroup" type="Integer" default="1"/>
-            <parameter name="thruDate" type="Date" default="new java.sql.Date(System.currentTimeMillis())"/>
+            <parameter name="thruDate" type="Date" default="ec.l10n.format(ec.user.nowTimestamp, 'yyyy-MM-dd')"/>
         </in-parameters>
         <out-parameters>
             <parameter name="timePeriodGroups" type="List" required="true"><parameter name="timePeriodIds" type="List">
@@ -519,7 +551,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="timePeriodGroups" from="[]"/>
             <iterate list="mainPeriods" entry="mainPeriod">
                 <if condition="perGroup &lt;= 1"><then>
-                    <script>timePeriodGroups.add([mainPeriod.timePeriodId])</script>
+                    <script>timePeriodGroups.push([mainPeriod.timePeriodId])</script>
                 </then><else>
                     <entity-find entity-name="mantle.party.time.TimePeriod" list="groupPeriods" limit="perGroup">
                         <econdition field-name="partyId"/><econdition field-name="timePeriodTypeId"/>
@@ -527,7 +559,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <order-by field-name="-fromDate"/>
                     </entity-find>
                     <order-map-list list="groupPeriods"><order-by field-name="fromDate"/></order-map-list>
-                    <script>timePeriodGroups.add(groupPeriods*.timePeriodId)</script>
+                    <script>timePeriodGroups.push(groupPeriods.map((it) => it.timePeriodId))</script>
                 </else></if>
             </iterate>
         </actions>

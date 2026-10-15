@@ -320,7 +320,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="postalContactMechPurposeId"><then>
                 <set field="postalPurposeList" from="[postalContactMechPurposeId]"/>
                 <if condition="alsoIncludePrimaryPurpose &amp;&amp; postalContactMechPurposeId != 'PostalPrimary'">
-                    <script>postalPurposeList.add('PostalPrimary')</script></if>
+                    <script>postalPurposeList.push('PostalPrimary')</script></if>
                 <entity-find entity-name="mantle.party.contact.PartyContactMech" list="postalPcmList">
                     <date-filter/><econdition field-name="partyId"/>
                     <econdition field-name="contactMechPurposeId" operator="in" from="postalPurposeList"/>
@@ -374,14 +374,14 @@ along with this software (see the LICENSE.md file). If not, see
                             postalTrustLevelEnum:postalTrustLevelEnum,
                             telecomContactMechId:postalTelecomContactMechId, telecomContactMech:postalTelecomContactMech, telecomNumber:postalTelecomNumber,
                             emailContactMechId:postalEmailContactMechId, emailContactMech:postalEmailContactMech, emailAddress:postalEmailContactMech?.infoString}"/>
-                    <script>postalAddressList.add(postalAddressInfo)</script>
+                    <script>postalAddressList.push(postalAddressInfo)</script>
                 </iterate>
             </if>
 
             <if condition="telecomContactMechPurposeId"><then>
                 <set field="telecomPurposeList" from="[telecomContactMechPurposeId]"/>
                 <if condition="alsoIncludePrimaryPurpose &amp;&amp; telecomContactMechPurposeId != 'PhonePrimary'">
-                    <script>telecomPurposeList.add('PhonePrimary')</script></if>
+                    <script>telecomPurposeList.push('PhonePrimary')</script></if>
                 <entity-find entity-name="mantle.party.contact.PartyContactMech" list="telecomPcmList">
                     <date-filter/><econdition field-name="partyId"/>
                     <econdition field-name="contactMechPurposeId" operator="in" from="telecomPurposeList"/>
@@ -411,14 +411,14 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="telecomNumberInfo" from="{telecomContactMechId:telecomContactMechId,
                             telecomContactMechPurposeId:telecomPcm.contactMechPurposeId, telecomContactMechPurpose:telecomContactMechPurpose,
                             telecomPartyContactMech:telecomPcm, telecomNumber:telecomNumber}"/>
-                    <script>telecomNumberList.add(telecomNumberInfo)</script>
+                    <script>telecomNumberList.push(telecomNumberInfo)</script>
                 </iterate>
             </if>
 
             <if condition="emailContactMechPurposeId"><then>
                 <set field="emailPurposeList" from="[emailContactMechPurposeId]"/>
                 <if condition="alsoIncludePrimaryPurpose &amp;&amp; emailContactMechPurposeId != 'EmailPrimary'">
-                    <script>emailPurposeList.add('EmailPrimary')</script></if>
+                    <script>emailPurposeList.push('EmailPrimary')</script></if>
                 <entity-find entity-name="mantle.party.contact.PartyContactMech" list="emailPcmList">
                     <date-filter/><econdition field-name="partyId"/>
                     <econdition field-name="contactMechPurposeId" operator="in" from="emailPurposeList"/>
@@ -442,14 +442,14 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="emailAddressInfo" from="{emailContactMechId:emailContactMechId, emailContactMech:emailContactMech,
                             emailContactMechPurposeId:emailPcm.contactMechPurposeId, emailContactMechPurpose:emailContactMechPurpose,
                             emailPartyContactMech:emailPcm, emailAddress:emailContactMech.infoString}"/>
-                    <script>emailAddressList.add(emailAddressInfo)</script>
+                    <script>emailAddressList.push(emailAddressInfo)</script>
                 </iterate>
             </if>
 
             <if condition="webContactMechPurposeId"><then>
                 <set field="webPurposeList" from="[webContactMechPurposeId]"/>
                 <if condition="alsoIncludePrimaryPurpose &amp;&amp; webContactMechPurposeId != 'WebUrlPrimary'">
-                    <script>webPurposeList.add('WebUrlPrimary')</script></if>
+                    <script>webPurposeList.push('WebUrlPrimary')</script></if>
                 <entity-find entity-name="mantle.party.contact.PartyContactMech" list="webPcmList">
                     <date-filter/><econdition field-name="partyId"/>
                     <econdition field-name="contactMechPurposeId" operator="in" from="webPurposeList"/>
@@ -473,7 +473,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="webInfo" from="{webContactMechId:webContactMechId, webContactMech:webContactMech,
                             webContactMechPurposeId:webPcm.contactMechPurposeId, webContactMechPurpose:webContactMechPurpose,
                             webPartyContactMech:webPcm, webAddress:webContactMech.infoString}"/>
-                    <script>webAddressList.add(webInfo)</script>
+                    <script>webAddressList.push(webInfo)</script>
                 </iterate>
             </if>
             <!-- <log level="warn" message="get#PartyContactInfoList finish context=${context.context}"/> -->
@@ -861,19 +861,19 @@ along with this software (see the LICENSE.md file). If not, see
                     </if>
 
                     <entity-make-value entity-name="mantle.party.contact.PartyContactMech" value-field="newPcm"
-                            map="[partyId:partyId, contactMechId:contactMechId, fromDate:ec.user.nowTimestamp]"/>
+                            map="{partyId:partyId, contactMechId:contactMechId, fromDate:ec.user.nowTimestamp}"/>
                     <set field="newPcm.contactMechPurposeId" from="origPcm.contactMechPurposeId"/>
                     <set field="newPcm.extension" from="extension || origPcm.extension"/>
                     <set field="newPcm.comments" from="comments || origPcm.comments"/>
                     <set field="newPcm.allowSolicitation" from="allowSolicitation || origPcm.allowSolicitation"/>
                     <entity-create value-field="newPcm"/>
                 </iterate>
-                <if condition="origPcmList.size() == 0 &amp;&amp; contactMechPurposeId">
+                <if condition="origPcmList.length == 0 &amp;&amp; contactMechPurposeId">
                     <!-- target purpose not in list, so create a new one -->
                     <entity-make-value entity-name="mantle.party.contact.PartyContactMech" value-field="newPcm"
-                            map="[partyId:partyId, contactMechId:contactMechId, fromDate:ec.user.nowTimestamp,
+                            map="{partyId:partyId, contactMechId:contactMechId, fromDate:ec.user.nowTimestamp,
                                 contactMechPurposeId:contactMechPurposeId, extension:extension, comments:comments,
-                                allowSolicitation:allowSolicitation]"/>
+                                allowSolicitation:allowSolicitation}"/>
                     <entity-create value-field="newPcm"/>
                 </if>
             </if>
@@ -908,12 +908,11 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="geoIdSet" type="Set"><parameter name="geoId"/></parameter></out-parameters>
         <actions>
             <entity-find-one entity-name="mantle.party.contact.PostalAddress" value-field="postalAddress"/>
-            <set field="geoIdSet" from="new HashSet()"/>
+            <set field="geoIdSet" from="[]"/>
             <script>
-                if (postalAddress?.countyGeoId) geoIdSet.add(postalAddress.countyGeoId)
-                if (postalAddress?.stateProvinceGeoId) geoIdSet.add(postalAddress.stateProvinceGeoId)
-                if (postalAddress?.countryGeoId) geoIdSet.add(postalAddress.countryGeoId)
-                if (postalAddress?.postalCodeGeoId) geoIdSet.add(postalAddress.postalCodeGeoId)
+                for (const geoId of [postalAddress?.countyGeoId, postalAddress?.stateProvinceGeoId, postalAddress?.countryGeoId, postalAddress?.postalCodeGeoId]) {
+                    if (geoId &amp;&amp; !geoIdSet.includes(geoId)) geoIdSet.push(geoId)
+                }
             </script>
             <!-- TODO: consider expanding this, ie figure out country from state/province... and save on PostalAddress? -->
         </actions>
@@ -937,9 +936,9 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="countryGeoId" ignore-if-empty="true"/>
             </entity-find>
             <if condition="(existingList?.length > 0)"><then>
-                <set field="contactMechId" from="existingList.get(0).contactMechId"/>
+                <set field="contactMechId" from="existingList[0].contactMechId"/>
                 <!-- make sure address has purpose, create new PartyContactMech if needed -->
-                <if condition="contactMechPurposeId &amp;&amp; !existingList?.length*.contactMechPurposeId.contains(contactMechPurposeId)">
+                <if condition="contactMechPurposeId &amp;&amp; !existingList.map((it) =&gt; it.contactMechPurposeId).includes(contactMechPurposeId)">
                     <service-call name="create#mantle.party.contact.PartyContactMech"
                             in-map="{partyId:partyId, contactMechId:contactMechId, fromDate:ec.user.nowTimestamp,
                                 contactMechPurposeId:contactMechPurposeId}"/>
@@ -967,21 +966,21 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions><script><![CDATA[
             // countryCode, areaCode, and extension should contain only digits
-            if (countryCode) countryCode = countryCode.trim().replaceAll(/\D/, "")
-            if (areaCode) areaCode = areaCode.trim().replaceAll(/\D/, "")
-            if (extension) extension = extension.trim().replaceAll(/\D/, "")
+            if (countryCode) countryCode = countryCode.trim().replace(/\D/g, "")
+            if (areaCode) areaCode = areaCode.trim().replace(/\D/g, "")
+            if (extension) extension = extension.trim().replace(/\D/g, "")
             if (contactNumber) {
                 // trim to make sure
                 contactNumber = contactNumber.trim()
                 // if contactNumber contains spaces change them to dashes
-                contactNumber = contactNumber.replaceAll(/\s/, "-")
+                contactNumber = contactNumber.replace(/\s/g, "-")
                 // contactNumber should only contain digits, and '.' or '-'
-                contactNumber = contactNumber.replaceAll(/[^\d\.-]/, "")
-                // if contains dot and dash replace all dot with dash
-                if (contactNumber.contains('.') && contactNumber.contains('-')) contactNumber.replaceAll(/\./, "-")
-                contactNumber = contactNumber.trim().replaceAll("--", "-")
+                contactNumber = contactNumber.replace(/[^\d\.-]/g, "")
+                // NOTE: the Groovy original replaced dots with dashes when both are present but discarded the result, so
+                //     this has no effect and is not ported
+                contactNumber = contactNumber.trim().replace(/--/g, "-")
                 // if no dots or dashes and length is 7 add a dash after 3 digits
-                if (!contactNumber.contains('-') && !contactNumber.contains('.') && contactNumber.length() == 7)
+                if (!contactNumber.includes('-') && !contactNumber.includes('.') && contactNumber.length === 7)
                     contactNumber = contactNumber.substring(0, 3) + '-' + contactNumber.substring(3)
             }
             // validation by country codes, see https://en.wikipedia.org/wiki/List_of_country_calling_codes
@@ -990,11 +989,11 @@ along with this software (see the LICENSE.md file). If not, see
                 // see https://en.wikipedia.org/wiki/North_American_Numbering_Plan
                 isValid = true
                 if (areaCode) {
-                    if (areaCode.length() != 3) {
+                    if (areaCode.length !== 3) {
                         isValid = false
                         ec.message.addMessage(`Area code ${areaCode} not valid for North America, should be 3 digits`, "warning")
                     }
-                    if (areaCode.charAt(0) == '0' as char || areaCode.charAt(0) == '1' as char) {
+                    if (areaCode.charAt(0) === '0' || areaCode.charAt(0) === '1') {
                         isValid = false
                         ec.message.addMessage(`Area code ${areaCode} not valid for North America, should not start with 0 or 1`, "warning")
                     }
@@ -1003,12 +1002,12 @@ along with this software (see the LICENSE.md file). If not, see
                     ec.message.addMessage("No area code specified, for North America must have a 3 digit area code not starting with 0 or 1", "warning")
                 }
                 if (contactNumber) {
-                    String contactNumberOnly = contactNumber.trim().replaceAll(/\D/, "")
-                    if (contactNumberOnly.length() != 7) {
+                    const contactNumberOnly = contactNumber.trim().replace(/\D/g, "")
+                    if (contactNumberOnly.length !== 7) {
                         isValid = false
                         ec.message.addMessage(`Contact number ${contactNumber} not valid for North America, should be 7 digits`, "warning")
                     }
-                    if (contactNumberOnly.charAt(0) == '0' as char || contactNumberOnly.charAt(0) == '1' as char) {
+                    if (contactNumberOnly.charAt(0) === '0' || contactNumberOnly.charAt(0) === '1') {
                         isValid = false
                         ec.message.addMessage(`Contact number ${contactNumber} not valid for North America, should not start with 0 or 1`, "warning")
                     }
@@ -1043,7 +1042,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="trustLevelEnumId" from="isValid != null &amp;&amp; !isValid ? 'CmtlInvalid' : 'CmtlNew'"/>
 
             <entity-make-value entity-name="mantle.party.contact.ContactMech" value-field="contactMech"
-                    map="[contactMechTypeEnumId:'CmtTelecomNumber', trustLevelEnumId:trustLevelEnumId]"/>
+                    map="{contactMechTypeEnumId:'CmtTelecomNumber', trustLevelEnumId:trustLevelEnumId}"/>
             <entity-sequenced-id-primary value-field="contactMech"/>
             <entity-create value-field="contactMech"/>
             <set field="contactMechId" from="contactMech.contactMechId"/>
@@ -1145,7 +1144,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-update value-field="origPcm"/>
 
                 <entity-make-value entity-name="mantle.party.contact.PartyContactMech" value-field="newPcm"
-                        map="[partyId:partyId, contactMechId:newContactMech.contactMechId, fromDate:ec.user.nowTimestamp]"/>
+                        map="{partyId:partyId, contactMechId:newContactMech.contactMechId, fromDate:ec.user.nowTimestamp}"/>
                 <set field="newPcm.contactMechPurposeId" from="origPcm.contactMechPurposeId"/>
                 <set field="newPcm.extension" from="extension || origPcm.extension"/>
                 <set field="newPcm.comments" from="comments || origPcm.comments"/>
@@ -1175,9 +1174,9 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="contactNumber"/>
             </entity-find>
             <if condition="(existingList?.length > 0)"><then>
-                <set field="contactMechId" from="existingList.get(0).contactMechId"/>
+                <set field="contactMechId" from="existingList[0].contactMechId"/>
                 <!-- make sure address has purpose, create new PartyContactMech if needed -->
-                <if condition="contactMechPurposeId &amp;&amp; !existingList?.length*.contactMechPurposeId.contains(contactMechPurposeId)">
+                <if condition="contactMechPurposeId &amp;&amp; !existingList.map((it) =&gt; it.contactMechPurposeId).includes(contactMechPurposeId)">
                     <service-call name="create#mantle.party.contact.PartyContactMech"
                             in-map="{partyId:partyId, contactMechId:contactMechId, fromDate:ec.user.nowTimestamp,
                                 contactMechPurposeId:contactMechPurposeId}"/>
@@ -1220,7 +1219,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <entity-find entity-name="PartyContactMechInfo" list="pcmiList">
                 <date-filter/>
-                <econdition-object field="[partyId:partyId, contactMechPurposeId:'EmailPrimary']"/>
+                <econdition-object field="{partyId:partyId, contactMechPurposeId:'EmailPrimary'}"/>
             </entity-find>
             <if condition="(pcmiList?.length > 0)"><then>
                 <set field="emailAddress" from="pcmiList[0].infoString"/>
@@ -1249,9 +1248,9 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="infoString" from="emailAddress"/>
             </entity-find>
             <if condition="(existingList?.length > 0)"><then>
-                <set field="contactMechId" from="existingList.get(0).contactMechId"/>
+                <set field="contactMechId" from="existingList[0].contactMechId"/>
                 <!-- make sure address has purpose, create new PartyContactMech if needed -->
-                <if condition="contactMechPurposeId &amp;&amp; !existingList?.length*.contactMechPurposeId.contains(contactMechPurposeId)">
+                <if condition="contactMechPurposeId &amp;&amp; !existingList.map((it) =&gt; it.contactMechPurposeId).includes(contactMechPurposeId)">
                     <service-call name="create#mantle.party.contact.PartyContactMech"
                             in-map="{partyId:partyId, contactMechId:contactMechId, fromDate:ec.user.nowTimestamp,
                                 contactMechPurposeId:contactMechPurposeId}"/>
@@ -1301,7 +1300,7 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions>
             <entity-make-value entity-name="mantle.party.contact.ContactMech" value-field="contactMech"
-                    map="[contactMechTypeEnumId:contactMechTypeEnumId, infoString:infoString, trustLevelEnumId:'CmtlNew']"/>
+                    map="{contactMechTypeEnumId:contactMechTypeEnumId, infoString:infoString, trustLevelEnumId:'CmtlNew'}"/>
             <entity-sequenced-id-primary value-field="contactMech"/>
             <entity-create value-field="contactMech"/>
             <set field="contactMechId" from="contactMech.contactMechId"/>
@@ -1380,7 +1379,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-update value-field="origPcm"/>
 
                 <entity-make-value entity-name="mantle.party.contact.PartyContactMech" value-field="newPcm"
-                        map="[partyId:partyId, contactMechId:newContactMech.contactMechId, fromDate:ec.user.nowTimestamp]"/>
+                        map="{partyId:partyId, contactMechId:newContactMech.contactMechId, fromDate:ec.user.nowTimestamp}"/>
                 <set field="newPcm.contactMechPurposeId" from="origPcm.contactMechPurposeId"/>
                 <set field="newPcm.extension" from="extension || origPcm.extension"/>
                 <set field="newPcm.comments" from="comments || origPcm.comments"/>
@@ -1419,13 +1418,15 @@ along with this software (see the LICENSE.md file). If not, see
             <auto-parameters entity-name="mantle.party.contact.PartyContactMech" include="nonpk"/>
             <parameter name="oldContactMechPurposeId"/>
             <parameter name="updateButton"><description>For convenience in forms, name the submit button for update 'updateButton'</description></parameter>
-            <parameter name="expireOld" type="Boolean" default="updateButton as boolean"/>
+            <parameter name="expireOld" type="Boolean" default="!!updateButton"/>
         </in-parameters>
         <actions>
             <if condition="expireOld"><script><![CDATA[
-                def ef = ec.entity.find("mantle.party.contact.PartyContactMech").condition({partyId: partyId, contactMechId: contactMechId})
-                if (oldContactMechPurposeId) ef.condition("contactMechPurposeId", oldContactMechPurposeId)
-                ef.updateAll({thruDate: ec.user.getNowTimestamp()})
+                let ef = ec.entity.find("mantle.party.contact.PartyContactMech").condition({partyId: partyId, contactMechId: contactMechId})
+                if (oldContactMechPurposeId) ef = ef.condition("contactMechPurposeId", oldContactMechPurposeId)
+                // expire each matching record with an update, so entity ECAs run
+                const nowTimestamp = ec.user.nowTimestamp
+                for (const pcm of ef.list()) { pcm.set("thruDate", nowTimestamp); pcm.update() }
             ]]></script></if>
             <!-- to avoid duplicate purposes only add if missing -->
             <entity-find entity-name="mantle.party.contact.PartyContactMech" list="pcmList">
@@ -1445,9 +1446,11 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="contactMechPurposeId"/>
         </in-parameters>
         <actions><script><![CDATA[
-            def ef = ec.entity.find("mantle.party.contact.PartyContactMech").condition({partyId: partyId, contactMechId: contactMechId})
-            if (contactMechPurposeId) ef.condition("contactMechPurposeId", contactMechPurposeId)
-            ef.updateAll({thruDate: ec.user.getNowTimestamp()})
+            let ef = ec.entity.find("mantle.party.contact.PartyContactMech").condition({partyId: partyId, contactMechId: contactMechId})
+            if (contactMechPurposeId) ef = ef.condition("contactMechPurposeId", contactMechPurposeId)
+            // expire each matching record with an update, so entity ECAs run
+            const nowTimestamp = ec.user.nowTimestamp
+            for (const pcm of ef.list()) { pcm.set("thruDate", nowTimestamp); pcm.update() }
         ]]></script></actions>
     </service>
     <service verb="undelete" noun="PartyContactMech">

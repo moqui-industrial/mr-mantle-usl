@@ -14,7 +14,7 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <service verb="find" noun="Party" type="script"
-             location="component://mantle-usl/service/mantle/party/PartyServices/findParty.groovy">
+             location="component://mantle-usl/service/mantle/party/PartyServices/findParty.js">
         <in-parameters>
             <parameter name="partyId"/>
             <parameter name="pseudoId"/>
@@ -169,7 +169,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- NOTE: using entityFilterSetId is a hack that only works for these 'standard' filter sets, would be
                 better to pick apart filterMap to see what's used, but this is specific to activeOrgId and filterOrgIds anyway -->
             <set field="findFilters" from="ec.artifactExecution.getFindFiltersForUser('mantle.party.Party')"/>
-            <if condition="findFilters"><set field="entityFilterSetId" from="findFilters[0].entityFilterSetId"/></if>
+            <if condition="findFilters != null &amp;&amp; findFilters.length &gt; 0"><set field="entityFilterSetId" from="findFilters[0].entityFilterSetId"/></if>
             <!-- <log level="warn" message="Doing party search with activeOrgId ${activeOrgId} filterOrgIds ${filterOrgIds} entityFilterSetId ${entityFilterSetId}"/> -->
             <script><![CDATA[
                 // the org limit is a trusted filter, so it does not change scores and the user query cannot widen it
@@ -207,7 +207,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </econditions>
                 <order-by field-name="^firstName,^lastName,^username"/>
             </entity-find>
-            <script>outList = []; for (def pau in pauList) outList.add({value:pau.partyId, label:ec.resource.expand('UsernameTemplate','',pau)})</script>
+            <script>outList = pauList.map((pau) =&gt; ({value:pau.partyId, label:ec.resource.expand('UsernameTemplate','',pau)}))</script>
         </actions>
     </service>
 
@@ -217,21 +217,24 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="notificationCount" type="Long"/><parameter name="messageCount" type="Long"/>
             <parameter name="eventCount" type="Long"/><parameter name="taskCount" type="Long"/>
         </out-parameters>
-        <actions><script>
-            def curWeekRange = ec.user.getPeriodRange("week", "")
+        <actions><script><![CDATA[
+            const cf = ec.entity.conditionFactory
+            const curWeekRange = ec.user.getPeriodRange("week", "")
             partyId = ec.user.userAccount.partyId
             notificationCount = ec.entity.find("moqui.security.user.NotificationMessageUser").condition("userId", ec.user.userId)
                     .condition("viewedDate", null).count()
-            messageCount = ec.entity.find("mantle.party.communication.CommunicationEvent") .condition("toPartyId", partyId)
-                    .condition("statusId", "CeReceived").condition("communicationEventTypeId", "in", "Email,Message,Comment").count()
+            messageCount = ec.entity.find("mantle.party.communication.CommunicationEvent").condition("toPartyId", partyId)
+                    .condition("statusId", "CeReceived")
+                    .condition(cf.makeCondition("communicationEventTypeId", "in", "Email,Message,Comment")).count()
             eventCount = ec.entity.find("mantle.work.effort.WorkEffortAndParty").condition("partyId", partyId)
-                    .condition("estimatedStartDate", "greater-equals", curWeekRange[0])
-                    .condition("estimatedStartDate", "less-equals", curWeekRange[1])
-                    .condition("workEffortTypeEnumId", "WetEvent").conditionDate("", "", ec.user.nowTimestamp).count()
+                    .condition(cf.makeCondition("estimatedStartDate", "greater-equals", curWeekRange[0]))
+                    .condition(cf.makeCondition("estimatedStartDate", "less-equals", curWeekRange[1]))
+                    .condition("workEffortTypeEnumId", "WetEvent")
+                    .condition(cf.makeConditionDate("fromDate", "thruDate", ec.user.nowTimestamp)).count()
             taskCount = ec.entity.find("mantle.work.effort.WorkEffortAndParty").condition("partyId", partyId)
-                    .condition("statusId", "not-in", "WeClosed,WeCancelled").condition("workEffortTypeEnumId", "WetTask")
-                    .conditionDate("", "", ec.user.nowTimestamp).count()
-        </script></actions>
+                    .condition(cf.makeCondition("statusId", "not-in", "WeClosed,WeCancelled")).condition("workEffortTypeEnumId", "WetTask")
+                    .condition(cf.makeConditionDate("fromDate", "thruDate", ec.user.nowTimestamp)).count()
+        ]]></script></actions>
     </service>
     <service verb="setup" noun="UserOrganizationInfo" authenticate="anonymous-view">
         <description>
@@ -480,7 +483,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- create the Person, split the full name -->
             <set field="firstName" from="userAccount.userFullName || userAccount.username"/>
             <set field="lastName" from="null"/>
-            <if condition="firstName?.contains(' ')">
+            <if condition="firstName?.includes(' ')">
                 <set field="lastName" from="firstName.substring(firstName.lastIndexOf(' ')+1)"/>
                 <set field="firstName" from="firstName.substring(0, firstName.lastIndexOf(' '))"/>
             </if>
@@ -564,9 +567,9 @@ along with this software (see the LICENSE.md file). If not, see
 
             <if condition="userGroupId">
                 <set field="groupValid" from="true"/>
-                <if condition="groupTypeEnumIdList">
+                <if condition="groupTypeEnumIdList != null &amp;&amp; groupTypeEnumIdList.length &gt; 0">
                     <entity-find-one entity-name="moqui.security.UserGroup" value-field="userGroup"/>
-                    <set field="groupValid" from="groupTypeEnumIdList.contains(userGroup.groupTypeEnumId)"/>
+                    <set field="groupValid" from="groupTypeEnumIdList.includes(userGroup.groupTypeEnumId)"/>
                 </if>
                 <if condition="groupValid">
                     <service-call name="create#moqui.security.UserGroupMember"
@@ -841,8 +844,8 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="organization != null">
                 <set field="orgName" from="organization.organizationName"/>
                 <if condition="!firstName &amp;&amp; !lastName">
-                    <set field="firstName" from="orgName.contains(' ') ? orgName.substring(0, orgName.lastIndexOf(' ')) : orgName"/>
-                    <set field="lastName" from="orgName.contains(' ') ? orgName.substring(orgName.lastIndexOf(' ') + 1) : ''"/>
+                    <set field="firstName" from="orgName.includes(' ') ? orgName.substring(0, orgName.lastIndexOf(' ')) : orgName"/>
+                    <set field="lastName" from="orgName.includes(' ') ? orgName.substring(orgName.lastIndexOf(' ') + 1) : ''"/>
                 </if>
                 <entity-delete value-field="organization"/>
             </if>
@@ -872,7 +875,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- find/expire classes of the same type for the party -->
             <entity-find entity-name="mantle.party.PartyClassificationAndAppl" list="pcaaList">
                 <date-filter/><econdition field-name="partyId"/><econdition field-name="classificationTypeEnumId"/></entity-find>
-            <if condition="pcaaList.find({ it.partyClassificationId == partyClassificationId })"><return message="Classification already set on party"/></if>
+            <if condition="pcaaList.find((it) =&gt; it.partyClassificationId == partyClassificationId)"><return message="Classification already set on party"/></if>
             <iterate list="pcaaList" entry="pcaa">
                 <service-call name="update#mantle.party.PartyClassificationAppl" in-map="{partyId:partyId,
                         partyClassificationId:pcaa.partyClassificationId, fromDate:pcaa.fromDate, thruDate:ec.user.nowTimestamp}"/>
@@ -995,7 +998,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="create#mantle.party.PartyBadgeScan" in-map="context"/>
 
             <!-- handle TimeEntry for clock in and clock out -->
-            <if condition="breakMinutes"><set field="breakHours" from="(breakHours || 0) + (breakMinutes / 60)"/></if>
+            <if condition="breakMinutes"><set field="breakHours" from="toDecimal(breakHours ?? 0).add(toDecimal(breakMinutes).divide(60))"/></if>
             <if condition="['PbspClockIn', 'PbspClockOut'].includes(scanPurposeEnumId)">
                 <set field="clientPartyId" from="partyBadge.organizationPartyId"/>
                 <entity-find entity-name="mantle.work.time.TimeEntry" list="openTimeEntryList">
@@ -1003,14 +1006,14 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="thruDate" from="null"/>
                     <order-by field-name="-fromDate"/>
                 </entity-find>
-                <set field="openTimeEntry" from="openTimeEntryList ? openTimeEntryList[0] : null"/>
+                <set field="openTimeEntry" from="openTimeEntryList?.length &gt; 0 ? openTimeEntryList[0] : null"/>
             </if>
             <if condition="scanPurposeEnumId == 'PbspClockIn'"><then>
                 <!-- If scanPurposeEnumId=PbspClockIn call mantle.work.TimeServices.create#TimeEntryClockIn
                     If there is an open TimeEntry call mantle.work.TimeServices.store#TimeEntry first -->
                 <if condition="openTimeEntry">
                     <service-call name="mantle.work.TimeServices.store#TimeEntry"
-                            in-map="openTimeEntry + [thruDate:scanDate, breakHours:breakHours, pieceCount:pieceCount]"/>
+                            in-map="Object.assign({}, openTimeEntry, {thruDate:scanDate, breakHours:breakHours, pieceCount:pieceCount})"/>
                     <set field="closedTimeEntryId" from="openTimeEntry.timeEntryId"/>
                 </if>
 
@@ -1022,7 +1025,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- If scanPurposeEnumId=PbspClockOut call mantle.work.TimeServices.store#TimeEntry -->
                 <if condition="openTimeEntry"><then>
                     <service-call name="mantle.work.TimeServices.store#TimeEntry"
-                            in-map="openTimeEntry + [thruDate:scanDate, breakHours:breakHours, pieceCount:pieceCount]"/>
+                            in-map="Object.assign({}, openTimeEntry, {thruDate:scanDate, breakHours:breakHours, pieceCount:pieceCount})"/>
                     <set field="closedTimeEntryId" from="openTimeEntry.timeEntryId"/>
                     <service-call name="update#mantle.party.PartyBadgeScan"
                             in-map="{partyBadgeId:partyBadgeId, scanDate:scanDate, timeEntryId:closedTimeEntryId}"/>
@@ -1194,7 +1197,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="valEnum == null || valEnum.enumTypeId != partySettingType.enumTypeId">
                     <return error="true" message="Selected value ${valEnum.description||''} is not valid"/></if>
             </then><else-if condition="partySettingType.validRegexp">
-                <if condition="!settingValue.matches(partySettingType.validRegexp)">
+                <if condition="!new RegExp('^(?:' + partySettingType.validRegexp + ')$').test(settingValue)">
                     <return error="true" message="Value ${settingValue} is not valid"/></if>
             </else-if></if>
         </actions>
@@ -1211,13 +1214,26 @@ along with this software (see the LICENSE.md file). If not, see
         </description>
         <implements service="org.moqui.EntityServices.receive#DataFeed"/>
         <actions>
+            <script><![CDATA[
+                // every non-empty value of key in the maps and lists nested in value, without duplicates
+                function findAllFieldsNestedMap(key, value, found) {
+                    if (Array.isArray(value)) {
+                        for (const item of value) findAllFieldsNestedMap(key, item, found)
+                    } else if (value != null && typeof value === 'object') {
+                        for (const [name, item] of Object.entries(value)) {
+                            if (name === key && item != null && item !== '' && !found.includes(item)) found.push(item)
+                            findAllFieldsNestedMap(key, item, found)
+                        }
+                    }
+                }
+            ]]></script>
             <iterate list="documentList" entry="document">
-                <set field="userIdSet" from="new HashSet()"/>
+                <set field="userIdSet" from="[]"/>
                 <script>findAllFieldsNestedMap("userId", document, userIdSet)</script>
                 <script>findAllFieldsNestedMap("fromUserId", document, userIdSet)</script>
                 <script>findAllFieldsNestedMap("toUserId", document, userIdSet)</script>
 
-                <set field="partyIdSet" from="new HashSet()"/>
+                <set field="partyIdSet" from="[]"/>
                 <script>findAllFieldsNestedMap("partyId", document, partyIdSet)</script>
                 <script>findAllFieldsNestedMap("fromPartyId", document, partyIdSet)</script>
                 <script>findAllFieldsNestedMap("toPartyId", document, partyIdSet)</script>
@@ -1225,26 +1241,27 @@ along with this software (see the LICENSE.md file). If not, see
                     <if condition="!partyId"><continue/></if>
                     <entity-find entity-name="moqui.security.UserAccount" list="userAccountList">
                         <econdition field-name="partyId"/></entity-find>
-                    <iterate list="userAccountList" entry="userAccount"><script>userIdSet.add(userAccount.userId)</script></iterate>
+                    <iterate list="userAccountList" entry="userAccount">
+                        <script>if (!userIdSet.includes(userAccount.userId)) userIdSet.push(userAccount.userId)</script></iterate>
                 </iterate>
 
                 <!-- don't do this, send notifications even if no user IDs so that subscribers to all notifications on the topic still get them:
-                <if condition="!userIdSet">
+                <if condition="userIdSet.length == 0">
                     <log level="info" message="Not sending ${document._type} DataDocument notification, no userIds found"/>
                     <continue/>
                 </if>
                 -->
 
                 <script><![CDATA[
-                    def nm = ec.makeNotificationMessage()
-                    nm.topic((String) document._type).message((Map<String, Object>) document)
-                    if (userIdSet) nm.userIds((Set) userIdSet)
-                    def notificationTopic = nm.getNotificationTopic()
+                    const nm = ec.makeNotificationMessage()
+                    nm.topic(String(document._type)).message(document)
+                    if (userIdSet.length > 0) nm.userIds(userIdSet)
+                    const notificationTopic = nm.getNotificationTopic()
                     if (notificationTopic == null && document._type) {
-                        def dataDocument = ec.entity.find("moqui.entity.document.DataDocument").condition("dataDocumentId", document._type).useCache(true).one()
+                        const dataDocument = ec.entity.find("moqui.entity.document.DataDocument").condition("dataDocumentId", document._type).useCache(true).one()
                         if (dataDocument.documentTitle) nm.title(dataDocument.documentTitle)
-                        def dataDocumentLinks = dataDocument.findRelated("links", null, null, true, false)
-                        if (dataDocumentLinks) nm.link(dataDocumentLinks[0].linkUrl)
+                        const dataDocumentLinks = dataDocument.findRelated("links", null, null, true, false)
+                        if (dataDocumentLinks.length > 0) nm.link(dataDocumentLinks[0].linkUrl)
                     }
                     nm.send()
                 ]]></script>

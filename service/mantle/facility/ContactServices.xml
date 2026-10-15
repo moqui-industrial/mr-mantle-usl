@@ -291,7 +291,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
 
                 <entity-make-value entity-name="mantle.facility.FacilityContactMech" value-field="newFcm"
-                        map="[facilityId:facilityId, contactMechId:newContactMech.contactMechId, fromDate:ec.user.nowTimestamp]"/>
+                        map="{facilityId:facilityId, contactMechId:newContactMech.contactMechId, fromDate:ec.user.nowTimestamp}"/>
                 <set field="newFcm.contactMechPurposeId" from="origFcm.contactMechPurposeId"/>
                 <set field="newFcm.extension" from="origFcm.extension"/>
                 <set field="newFcm.comments" from="origFcm.comments"/>
@@ -364,7 +364,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-update value-field="origFcm"/>
 
                 <entity-make-value entity-name="mantle.facility.FacilityContactMech" value-field="newFcm"
-                        map="[facilityId:facilityId, contactMechId:newContactMech.contactMechId, fromDate:ec.user.nowTimestamp]"/>
+                        map="{facilityId:facilityId, contactMechId:newContactMech.contactMechId, fromDate:ec.user.nowTimestamp}"/>
                 <set field="newFcm.contactMechPurposeId" from="origFcm.contactMechPurposeId"/>
                 <set field="newFcm.extension" from="origFcm.extension"/>
                 <set field="newFcm.comments" from="origFcm.comments"/>
@@ -440,7 +440,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-update value-field="origFcm"/>
 
                 <entity-make-value entity-name="mantle.facility.FacilityContactMech" value-field="newFcm"
-                        map="[facilityId:facilityId, contactMechId:newContactMech.contactMechId, fromDate:ec.user.nowTimestamp]"/>
+                        map="{facilityId:facilityId, contactMechId:newContactMech.contactMechId, fromDate:ec.user.nowTimestamp}"/>
                 <set field="newFcm.contactMechPurposeId" from="origFcm.contactMechPurposeId"/>
                 <set field="newFcm.extension" from="origFcm.extension"/>
                 <set field="newFcm.comments" from="origFcm.comments"/>
@@ -460,10 +460,11 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <actions>
             <script><![CDATA[
-                def ef = ec.entity.find("mantle.facility.FacilityContactMech")
-                ef.condition({facilityId:facilityId, contactMechId:contactMechId})
-                if (contactMechPurposeId) ef.condition("contactMechPurposeId", contactMechPurposeId)
-                ef.updateAll({thruDate:ec.user.getNowTimestamp()})
+                let ef = ec.entity.find("mantle.facility.FacilityContactMech").condition({facilityId:facilityId, contactMechId:contactMechId})
+                if (contactMechPurposeId) ef = ef.condition("contactMechPurposeId", contactMechPurposeId)
+                // expire each matching record with an update, so entity ECAs run
+                const nowTimestamp = ec.user.nowTimestamp
+                for (const fcm of ef.list()) { fcm.set("thruDate", nowTimestamp); fcm.update() }
                 ]]></script>
         </actions>
     </service>

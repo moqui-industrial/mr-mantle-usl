@@ -162,12 +162,12 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="productList" from="[]"/>
             <entity-find-one entity-name="mantle.product.Product" value-field="product">
                 <field-map field-name="productId" from="lookupId"/></entity-find-one>
-            <if condition="product != null"><script>productList.add(product)</script></if>
+            <if condition="product != null"><script>productList.push(product)</script></if>
             <entity-find-one entity-name="mantle.product.Product" value-field="productByPseudo">
                 <field-map field-name="pseudoId" from="lookupId"/></entity-find-one>
             <if condition="productByPseudo != null &amp;&amp; productByPseudo.productId != product?.productId">
                 <if condition="product == null"><set field="product" from="productByPseudo"/></if>
-                <script>productList.add(productByPseudo)</script>
+                <script>productList.push(productByPseudo)</script>
             </if>
             <entity-find entity-name="mantle.product.ProductIdentification" list="productIdentList">
                 <econdition field-name="idValue" from="lookupId"/>
@@ -182,7 +182,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <field-map field-name="productId" from="productIdent?.productId"/></entity-find-one>
                 <if condition="productByIdent != null">
                     <if condition="product == null"><set field="product" from="productByIdent"/></if>
-                    <script>productList.add(productByIdent)</script>
+                    <script>productList.push(productByIdent)</script>
                 </if>
             </iterate>
             <if condition="product != null"><set field="productId" from="product.productId"/></if>
