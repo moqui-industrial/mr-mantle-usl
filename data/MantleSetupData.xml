@@ -161,12 +161,6 @@ along with this software (see the LICENSE.md file). If not, see
 
     <!-- ========== Registered Services ========== -->
 
-    <!-- Registered Services: Product Price Modify -->
-    <moqui.service.ServiceRegister serviceRegisterId="ProductPriceKS" serviceTypeEnumId="ProductPriceModify"
-            description="Mantle Price Drools Knowledge Set" serviceName="mantle.product.PriceServices.run#ProductPriceKS"/>
-    <!-- add the ProductPriceKS drools rules -->
-    <mantle.product.ProductPriceModify priceModifyId="ProductPriceKS" serviceRegisterId="ProductPriceKS"/>
-
     <!-- Registered Services: Store Promotion -->
     <moqui.service.ServiceRegister serviceRegisterId="NewCustomerDiscount" serviceTypeEnumId="ProductStorePromotion"
             description="New Customer Discount" serviceName="mantle.product.PromotionServices.apply#NewCustomerDiscount"/>
