@@ -67,8 +67,8 @@ along with this software (see the LICENSE.md file). If not, see
             // TODO: filter by productId
         </script>
         <service-call name="org.moqui.search.SearchServices.search#CountBySource" out-map="globalOut"
-                in-map="[indexName:indexName, sourceMap:searchSourceMap,
-                    documentTypeList:[orderItemDocumentName,prodEstimateDocumentName,assetDocumentName,runConsumeDocumentName,runProduceDocumentName]]"/>
+                in-map="{indexName:indexName, sourceMap:searchSourceMap,
+                    documentTypeList:[orderItemDocumentName,prodEstimateDocumentName,assetDocumentName,runConsumeDocumentName,runProduceDocumentName]}"/>
         <log level="warn" message="========== globalOut.responseString: ${globalOut.searchResponse.toString()}"/>
         -->
         <actions><script><![CDATA[

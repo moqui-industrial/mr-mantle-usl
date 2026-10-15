@@ -530,7 +530,7 @@ along with this software (see the LICENSE.md file). If not, see
 
                 <!-- NOTE: check reservations? for all or only those changed above? maybe better as a separate service since this is heavy/slow logic?
                   - Don't do this, instead if needed call mantle.product.AssetServices.check#FacilityReservations service.
-                <service-call name="mantle.product.AssetServices.check#AssetReservations" in-map="[assetId:asset.assetId]"/> -->
+                <service-call name="mantle.product.AssetServices.check#AssetReservations" in-map="{assetId:asset.assetId}"/> -->
             </iterate>
 
             <message>Checking ${recordsChecked} Asset record totals for Product ${productId||'*'} Facility ${facilityId||'*'}, updated ${recordsUpdated} with incorrect totals</message>
@@ -1848,7 +1848,7 @@ along with this software (see the LICENSE.md file). If not, see
                     </iterate>
                     <!-- NOTE DEJ 20190413 this call is not needed since reserve#AssetForOrderItem is called for each reduced reservation, and it is a dangerous service so best to avoid: -->
                     <!-- now that quantityNotAvailable is updated see if we can reserve those on other assets -->
-                    <!-- <service-call name="mantle.product.AssetServices.checkReserve#ProductAssets" in-map="[productId:asset.productId]"/> -->
+                    <!-- <service-call name="mantle.product.AssetServices.checkReserve#ProductAssets" in-map="{productId:asset.productId}"/> -->
                 </if>
             </if>
         </actions>

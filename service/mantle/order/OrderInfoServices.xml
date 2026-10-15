@@ -1094,8 +1094,8 @@ along with this software (see the LICENSE.md file). If not, see
 
                     <!-- TODO: maybe also do phone numbers, etc
                     <service-call name="mantle.party.DuplicateServices.find#TelecomNumbers" out-map="blacklistTelOut" out-map-add-to-existing="false"
-                            in-map="[partyId:partyId, areaCode:ptn.areaCode, contactNumber:ptn.contactNumber,
-                                trustLevelEnumId:'CmtlGreylisted,CmtlBlacklisted']"/>
+                            in-map="{partyId:partyId, areaCode:ptn.areaCode, contactNumber:ptn.contactNumber,
+                                trustLevelEnumId:'CmtlGreylisted,CmtlBlacklisted'}"/>
                     -->
                 </if>
 

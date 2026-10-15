@@ -355,9 +355,9 @@ General Order Placement and eCommerce Usage
 
                     <!-- use PriceServices.get#OrderProductPrice instead of calling to get price directly, for pricePurposeEnumId override for recurring orders and other future behavior:
                     <service-call name="mantle.product.PriceServices.get#ProductPrice" out-map="priceMap"
-                            in-map="[productId:productId, quantity:quantity, priceUomId:orderHeader.currencyUomId,
+                            in-map="{productId:productId, quantity:quantity, priceUomId:orderHeader.currencyUomId,
                                   productStoreId:orderHeader.productStoreId, customerPartyId:orderPart.customerPartyId,
-                                  vendorPartyId:orderPart.vendorPartyId]"/>
+                                  vendorPartyId:orderPart.vendorPartyId}"/>
                     -->
                     <service-call name="mantle.product.PriceServices.get#OrderProductPrice" out-map="priceMap"
                             in-map="{productId:productId, quantity:quantity, orderId:orderId, orderPartSeqId:orderPartSeqId}"/>
@@ -683,8 +683,8 @@ General Order Placement and eCommerce Usage
             <if condition="unitAmount == null"><then>
                 <!-- use PriceServices.get#OrderProductPrice instead of calling to get price directly, for pricePurposeEnumId override for recurring orders and other future behavior:
                 <service-call name="mantle.product.PriceServices.get#ProductPrice" out-map="priceMap"
-                              in-map="[productId:productId, quantity:quantity, priceUomId:currencyUomId,
-                         productStoreId:productStoreId, customerPartyId:customerPartyId, vendorPartyId:vendorPartyId]"/>
+                              in-map="{productId:productId, quantity:quantity, priceUomId:currencyUomId,
+                         productStoreId:productStoreId, customerPartyId:customerPartyId, vendorPartyId:vendorPartyId}"/>
                 -->
                 <service-call name="mantle.product.PriceServices.get#OrderProductPrice" out-map="priceMap"
                         in-map="{productId:productId, quantity:quantity, orderId:orderId, orderPartSeqId:orderPartSeqId}"/>
