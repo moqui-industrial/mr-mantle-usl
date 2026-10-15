@@ -219,7 +219,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="delete#mantle.request.RequestCommEvent"
                     in-map="{requestId:requestId, communicationEventId:communicationEventId}"/>
             <service-call name="delete#mantle.party.communication.CommunicationEvent"
-                    in-map="communicationEventId:communicationEventId"/>
+                    in-map="{communicationEventId:communicationEventId}"/>
         </actions>
     </service>
 
