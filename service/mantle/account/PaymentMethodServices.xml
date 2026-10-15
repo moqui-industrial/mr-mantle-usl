@@ -60,7 +60,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="expireMonth" from="creditCard?.expireDate ? creditCard.expireDate.substring(0, creditCard.expireDate.indexOf('/')) : null"/>
                 <set field="expireYear" from="creditCard?.expireDate ? creditCard.expireDate.substring(creditCard.expireDate.indexOf('/')+1) : null"/>
                 <set field="cardNumber" from="creditCard?.cardNumber"/>
-                <set field="maskedCardNumber" from="cardNumber ? '*'.padRight(cardNumber.length() - 4, '*') + cardNumber.substring(cardNumber.length() - 4, cardNumber.length()) : ''"/>
+                <set field="maskedCardNumber" from="cardNumber ? '*'.repeat(Math.max(cardNumber.length - 4, 0)) + cardNumber.substring(cardNumber.length - 4, cardNumber.length) : ''"/>
 
                 <!-- TODO: support other payment method types -->
 
@@ -129,7 +129,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="infoMap.expireMonth" from="creditCard?.expireDate ? creditCard.expireDate.substring(0, creditCard.expireDate.indexOf('/')) : null"/>
                 <set field="infoMap.expireYear" from="creditCard?.expireDate ? creditCard.expireDate.substring(creditCard.expireDate.indexOf('/')+1) : null"/>
                 <set field="cardNumber" from="creditCard?.cardNumber"/>
-                <set field="infoMap.maskedCardNumber" from="cardNumber ? '*'.padRight(cardNumber.length() - 4, '*') + cardNumber.substring(cardNumber.length() - 4, cardNumber.length()) : ''"/>
+                <set field="infoMap.maskedCardNumber" from="cardNumber ? '*'.repeat(Math.max(cardNumber.length - 4, 0)) + cardNumber.substring(cardNumber.length - 4, cardNumber.length) : ''"/>
                 <set field="infoMap.isCreditCard" from="paymentMethod.paymentMethodTypeEnumId == 'PmtCreditCard'"/>
 
                 <!-- TODO: support other payment method types -->
@@ -144,7 +144,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="infoMap.emailContactMechId" from="paymentMethod.emailContactMechId"/>
                 <set field="infoMap.emailAddress" from="infoMap.emailContactMech?.infoString"/>
 
-                <script>methodInfoList.add(infoMap)</script>
+                <script>methodInfoList.push(infoMap)</script>
             </iterate>
         </actions>
     </service>
@@ -406,7 +406,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-one entity-name="moqui.basic.Enumeration" value-field="creditCardTypeEnum">
                     <field-map field-name="enumId" from="creditCardTypeEnumId"/>
                 </entity-find-one>
-                <set field="cardNumberDisplay" from="cardNumber ? '*'.padRight(cardNumber.length() - 4, '*') + cardNumber.substring(cardNumber.length() - 4, cardNumber.length()) : ''"/>
+                <set field="cardNumberDisplay" from="cardNumber ? '*'.repeat(Math.max(cardNumber.length - 4, 0)) + cardNumber.substring(cardNumber.length - 4, cardNumber.length) : ''"/>
                 <set field="description" from="(creditCardTypeEnum?.description || 'Credit Card') + ' ' + cardNumberDisplay"/>
             </if>
             <entity-make-value entity-name="mantle.account.method.PaymentMethod" value-field="paymentMethod"/>
@@ -477,7 +477,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="!newPaymentMethod.description">
                     <entity-find-one entity-name="moqui.basic.Enumeration" value-field="creditCardTypeEnum">
                         <field-map field-name="enumId" from="newCreditCard.creditCardTypeEnumId"/></entity-find-one>
-                    <set field="cardNumberDisplay" from="cardNumber ? '*'.padRight(cardNumber.length() - 4, '*') + cardNumber.substring(cardNumber.length() - 4, cardNumber.length()) : ''"/>
+                    <set field="cardNumberDisplay" from="cardNumber ? '*'.repeat(Math.max(cardNumber.length - 4, 0)) + cardNumber.substring(cardNumber.length - 4, cardNumber.length) : ''"/>
                     <set field="newPaymentMethod.description" from="(creditCardTypeEnum?.description || 'Credit Card') + ' ' + cardNumberDisplay"/>
                 </if>
                 <entity-create value-field="newPaymentMethod"/>
@@ -655,7 +655,8 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="contentLocation"/></out-parameters>
         <actions>
             <set field="filename" from="contentFile.getName()"/>
-            <if condition="org.moqui.resource.ResourceReference.isTextFilename(filename)"><then>
+            <!-- the content type, and so text or not, comes from the file name's extension -->
+            <if condition="ec.resource.getLocationReference('dbresource://' + filename).isText()"><then>
                 <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content'"/>
             </then><else>
                 <set field="contentRoot" from="ec.user.getPreference('mantle.content.large.root') || 'dbresource://mantle/content'"/>
@@ -663,10 +664,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="contentLocation" value="${contentRoot}/paymentMethod/${paymentMethodId}/content_${paymentMethodContentId}/${filename}"/>
 
             <set field="docRr" from="ec.resource.getLocationReference(contentLocation)"/>
-            <script>
-                fileStream = contentFile.getInputStream()
-                try { docRr.putStream(fileStream) } finally { fileStream.close() }
-            </script>
+            <script>docRr.putUpload(contentFile)</script>
 
             <if condition="saveContentLocation"><service-call name="update#mantle.account.method.PaymentMethodContent"
                     in-map="{paymentMethodContentId:paymentMethodContentId, contentLocation:contentLocation}"/></if>
@@ -729,9 +727,9 @@ along with this software (see the LICENSE.md file). If not, see
                     <select-field field-name="systemMessageId,statusId"/>
                     <order-by field-name="systemMessageId"/>
                 </entity-find>
-                <set field="sysMesStatusIdList" from="systemMessageList*.statusId"/>
-                <if condition="sysMesStatusIdList.contains('SmsgSending') || sysMesStatusIdList.contains('SmsgSent') || sysMesStatusIdList.contains('SmsgConfirmed')">
-                    <return type="danger" message="File ${paymentMethodFileId} already sent in SystemMessage ${systemMessageList*.systemMessageId}"/>
+                <set field="sysMesStatusIdList" from="Array.from(systemMessageList, (message) =&gt; message.statusId)"/>
+                <if condition="sysMesStatusIdList.includes('SmsgSending') || sysMesStatusIdList.includes('SmsgSent') || sysMesStatusIdList.includes('SmsgConfirmed')">
+                    <return type="danger" message="File ${paymentMethodFileId} already sent in SystemMessage [${Array.from(systemMessageList, (message) =&gt; message.systemMessageId).join(', ')}]"/>
                 </if>
                 <iterate list="systemMessageList" entry="systemMessage">
                     <service-call name="org.moqui.impl.SystemMessageServices.cancel#SystemMessage"
@@ -761,8 +759,8 @@ along with this software (see the LICENSE.md file). If not, see
             </iterate>
 
             <set field="paymentMethodFile.entryCount" from="0"/>
-            <set field="paymentMethodFile.debitAmountTotal" from="0.0"/>
-            <set field="paymentMethodFile.creditAmountTotal" from="0.0"/>
+            <set field="paymentMethodFile.debitAmountTotal" from="toDecimal(0)"/>
+            <set field="paymentMethodFile.creditAmountTotal" from="toDecimal(0)"/>
             <set field="paymentMethodFile.isCancelled" value="Y"/>
             <entity-update value-field="paymentMethodFile"/>
         </actions>
@@ -798,7 +796,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <select-field field-name="systemMessageId"/>
             </entity-find>
             <if condition="(systemMessageList?.length > 0)">
-                <return type="warning" message="File ${paymentMethodFileId} already sent in SystemMessage ${systemMessageList*.systemMessageId}"/>
+                <return type="warning" message="File ${paymentMethodFileId} already sent in SystemMessage [${Array.from(systemMessageList, (message) =&gt; message.systemMessageId).join(', ')}]"/>
             </if>
 
             <!-- get the fileText and queue an outgoing SystemMessage -->
