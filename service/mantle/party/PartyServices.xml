@@ -90,7 +90,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="documentType" from="searchPartyDocType || 'MantleParty'"/>
             <!-- <set field="orderByField" from="orderByField ?: 'combinedName'"/> -->
             <set field="nestedQueryMap" from="{}"/>
-            <set field="nowTimeLong" from="System.currentTimeMillis()"/>
+            <set field="nowTimeLong" from="Date.now()"/>
 
             <!-- auto prefix with '*:' so that highlighting works -->
             <set field="queryString" from="anyField ? elasticQueryAutoWildcard(anyField, true) : ''"/>
@@ -172,13 +172,11 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="findFilters"><set field="entityFilterSetId" from="findFilters[0].entityFilterSetId"/></if>
             <!-- <log level="warn" message="Doing party search with activeOrgId ${activeOrgId} filterOrgIds ${filterOrgIds} entityFilterSetId ${entityFilterSetId}"/> -->
             <script><![CDATA[
-                if (queryString) {
-                    if ('MANTLE_USER_ORG' === entityFilterSetId) {
-                        queryString = (queryString ? queryString + ' AND ' : '' ) + 'ownerPartyId:(' + (filterOrgIds ? filterOrgIds.join(' OR ') + ' OR ' : '') + '_NA_)'
-                    } else if (('MANTLE_ACTIVE_ORG' === entityFilterSetId) && activeOrgId) {
-                        queryString = (queryString ? queryString + ' AND ' : '' ) + 'ownerPartyId:(' + activeOrgId + ' OR _NA_)'
-                    }
-                }
+                // the org limit is a trusted filter, so it does not change scores and the user query cannot widen it
+                let ownerPartyIds = null;
+                if ('MANTLE_USER_ORG' === entityFilterSetId) ownerPartyIds = (filterOrgIds || []).concat(['_NA_']);
+                else if ('MANTLE_ACTIVE_ORG' === entityFilterSetId && activeOrgId) ownerPartyIds = [activeOrgId, '_NA_'];
+                filter = ownerPartyIds != null ? {field: {name: 'ownerPartyId', op: 'in', values: ownerPartyIds}} : null;
             ]]></script>
 
             <set field="orderByFields" from="orderByField ? [orderByField.replace('combinedName', 'combinedName.keyword').replace('username', 'userAccounts.username.keyword')] : null"/>
@@ -190,7 +188,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="queryString">
                 <service-call name="org.moqui.search.SearchServices.search#DataDocuments" out-map="context"
                         in-map="{indexName:indexName, documentType:documentType, queryString:queryString, flattenDocument:false,
-                             orderByFields:orderByFields, highlightFields:highlightFields, nestedQueryMap:nestedQueryMap,
+                             orderByFields:orderByFields, highlightFields:highlightFields, nestedQueryMap:nestedQueryMap, filter:filter,
                              pageIndex:pageIndex, pageSize:pageSize, pageNoLimit:pageNoLimit}"/>
             </if>
         </actions>
@@ -306,8 +304,8 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <set field="userOrgIds" from="[]"/>
             <iterate list="userOrgRelList" entry="userOrgRel">
-                <if condition="!userOrgIds.contains(userOrgRel.toPartyId)">
-                    <script>userOrgIds.add(userOrgRel.toPartyId)</script>
+                <if condition="!userOrgIds.includes(userOrgRel.toPartyId)">
+                    <script>userOrgIds.push(userOrgRel.toPartyId)</script>
                     <!-- look for direct child orgs and allow them too (rollup rel from child to parent) -->
                     <!-- NOTE: consider making this recursive (inline method or other service) to walk down multiple levels -->
                     <entity-find entity-name="mantle.party.PartyRelationship" list="childRelList" cache="true">
@@ -317,10 +315,10 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="fromPartyId" operator="is-not-null"/>
                     </entity-find>
                     <iterate list="childRelList" entry="childRel">
-                        <if condition="!userOrgIds.contains(childRel.fromPartyId)">
+                        <if condition="!userOrgIds.includes(childRel.fromPartyId)">
                             <entity-find-one entity-name="mantle.party.PartyDetail" value-field="childOrg" cache="true">
                                 <field-map field-name="partyId" from="childRel.fromPartyId"/></entity-find-one>
-                            <script>userOrgIds.add(childRel.fromPartyId)</script>
+                            <script>userOrgIds.push(childRel.fromPartyId)</script>
                         </if>
                     </iterate>
                 </if>
@@ -328,9 +326,9 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- active org -->
             <set field="activeOrgId" from="ec.user.getPreference('ACTIVE_ORGANIZATION')"/>
-            <if condition="activeOrgId != null &amp;&amp; activeOrgId.length() == 0"><set field="activeOrgId" from="null"/></if>
+            <if condition="activeOrgId != null &amp;&amp; activeOrgId.length == 0"><set field="activeOrgId" from="null"/></if>
             <!-- if active org is not valid for the user ignore it -->
-            <if condition="activeOrgId &amp;&amp; !userOrgIds.contains(activeOrgId)">
+            <if condition="activeOrgId &amp;&amp; !userOrgIds.includes(activeOrgId)">
                 <set field="activeOrgId" from="null"/>
                 <script>ec.user.setPreference('ACTIVE_ORGANIZATION', null)</script>
             </if>

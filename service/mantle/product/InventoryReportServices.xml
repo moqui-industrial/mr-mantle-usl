@@ -72,91 +72,75 @@ along with this software (see the LICENSE.md file). If not, see
         <log level="warn" message="========== globalOut.responseString: ${globalOut.searchResponse.toString()}"/>
         -->
         <actions><script><![CDATA[
-            import org.moqui.elasticsearch.ElasticSearchUtil
+            // aggregation sums are decimals on Postgres and numbers on OpenSearch; the projection works in numbers
+            const num = (value) => value == null ? 0 : (typeof value === 'number' ? value : toDecimal(value).toNumber())
+            const notIn = (name, values) => ({field: {name: name, op: 'in', values: values, negate: true}})
+            const missingOrBefore = (name, millis) => ({bool: {any: [{field: {name: name, op: 'exists', negate: true}},
+                    {field: {name: name, op: 'range', lte: millis}}]}})
+            const estThruMillis = estThruDate ? Number(estThruDate) : null
+            infoByProductId = {}
 
-            String estThruDateStr = estThruDate ? ((estThruDate.getTime())?.toString()) : null
-            // consolidate the results into a single Map by productId
-            infoByProductId = {} as Map<String, Map>
+            // the sums per product of one document type, set on that product's map in infoByProductId
+            function sumsByProduct(documentType, clauses, sumFields) {
+                clauses = [{field: {name: 'productId', op: 'in', values: productIdList}}].concat(clauses)
+                if (facilityId) clauses.push({field: {name: 'facilityId', op: 'eq', value: facilityId}})
+                const sums = {}
+                for (const [name, field] of Object.entries(sumFields)) sums[name] = {sum: {field: field}}
+                const result = ec.search.aggregate({documentType: documentType, filter: {bool: {all: clauses}},
+                        aggs: {products: {terms: {field: 'productId', size: maxResults}, aggs: sums}}})
+                for (const bucket of result.products.buckets) {
+                    const infoMap = infoByProductId[bucket.key] || (infoByProductId[bucket.key] = {})
+                    for (const name of Object.keys(sumFields)) infoMap[name] = num(bucket[name])
+                }
+            }
+
+            if (!ec.search.isAvailable()) { ec.message.addMessage("Search is not configured, no projected inventory", "danger"); return }
 
             if (getOrderItemData) {
-                List andList = [{terms:{productId: productIdList}},
-                                {bool:{must_not:{terms:{partStatusId: ['OrderCompleted', 'OrderRejected', 'OrderCancelled']}}}}]
-                if (facilityId) andList.add({term: {facilityId: facilityId}})
-                if (estThruDateStr) andList.add({or: [{missing: {field: 'requiredByDate'}},
-                                                      {range: {requiredByDate: {lte: estThruDateStr, format: 'epoch_millis'}}}]})
-
-                ElasticSearchUtil.simpleAggSearch((String) indexName, [(String) orderItemDocumentName], maxResults,
-                        {bool:{filter:andList}}, "productId",
+                const clauses = [notIn('partStatusId', ['OrderCompleted', 'OrderRejected', 'OrderCancelled'])]
+                if (estThruMillis != null) clauses.push(missingOrBefore('requiredByDate', estThruMillis))
+                sumsByProduct(orderItemDocumentName, clauses,
                         {orderQuantitySum:'orderQuantity', quantityReservedSum:'reservations.quantityReserved',
-                              quantityNotAvailableSum:'reservations.quantityNotAvailable', quantityNotIssuedSum:'reservations.quantityNotIssued'},
-                        infoByProductId, ec)
+                         quantityNotAvailableSum:'reservations.quantityNotAvailable', quantityNotIssuedSum:'reservations.quantityNotIssued'})
             }
 
             if (getProdEstimateData) {
-                List andList = [{terms:{productId:productIdList}}, {range:{readyDate:{gte:'now/d', lte:estThruDateStr, format:'epoch_millis'}}}]
-                if (facilityId) andList.add({term:{facilityId:facilityId}})
-
-                ElasticSearchUtil.simpleAggSearch((String) indexName, [(String) prodEstimateDocumentName], maxResults,
-                        {bool:{filter:andList}}, "productId", {prodEstQuantitySum:'prodEstQuantity'},
-                        infoByProductId, ec)
+                // ready from the start of today through estThruDate, if there is one
+                const today = new Date()
+                today.setHours(0, 0, 0, 0)
+                const readyRange = {name: 'readyDate', op: 'range', gte: today.getTime()}
+                if (estThruMillis != null) readyRange.lte = estThruMillis
+                sumsByProduct(prodEstimateDocumentName, [{field: readyRange}], {prodEstQuantitySum:'prodEstQuantity'})
             }
 
             if (getAssetData) {
-                List andList = [{terms:{productId:productIdList}}, {term:{statusId:'AstAvailable'}}]
-                if (facilityId) andList.add({term:{facilityId:facilityId}})
-
-                ElasticSearchUtil.simpleAggSearch((String) indexName, [(String) assetDocumentName], maxResults,
-                        {bool:{filter:andList}}, "productId",
-                        {availableToPromiseTotalSum:'availableToPromiseTotal', quantityOnHandTotalSum:'quantityOnHandTotal'},
-                        infoByProductId, ec)
+                sumsByProduct(assetDocumentName, [{field: {name: 'statusId', op: 'eq', value: 'AstAvailable'}}],
+                        {availableToPromiseTotalSum:'availableToPromiseTotal', quantityOnHandTotalSum:'quantityOnHandTotal'})
             }
 
             if (getRunConsumeData) {
-                List andList = [{terms:{productId:productIdList}}, {bool:{must_not:{terms:{statusId:['WeComplete','WeClosed','WeCancelled']}}}}]
-                if (facilityId) andList.add({term: {facilityId:facilityId}})
-                if (estThruDateStr) andList.add({or: [{missing:{field:'estimatedStartDate'}},
-                                                      {range:{estimatedStartDate:{lte:estThruDateStr, format:'epoch_millis'}}}]})
-
-                ElasticSearchUtil.simpleAggSearch((String) indexName, [(String) runConsumeDocumentName], maxResults,
-                        {bool:{filter:andList}}, "productId",
-                        {estimatedConsumeQuantitySum:'estimatedConsumeQuantity', consumeQuantitySum:'issuances.consumeQuantity'},
-                        infoByProductId, ec)
+                const clauses = [notIn('statusId', ['WeComplete', 'WeClosed', 'WeCancelled'])]
+                if (estThruMillis != null) clauses.push(missingOrBefore('estimatedStartDate', estThruMillis))
+                sumsByProduct(runConsumeDocumentName, clauses,
+                        {estimatedConsumeQuantitySum:'estimatedConsumeQuantity', consumeQuantitySum:'issuances.consumeQuantity'})
             }
 
             if (getRunProduceData) {
-                List andList = [{terms:{productId:productIdList}}, {bool:{must_not:{terms:{statusId:['WeComplete','WeClosed','WeCancelled']}}}}]
-                if (facilityId) andList.add({term:{facilityId:facilityId}})
-                if (estThruDateStr) andList.add({or: [{missing:{field:'estimatedStartDate'}},
-                                                      {range:{estimatedStartDate:{lte:estThruDateStr, format:'epoch_millis'}}}]})
-
-                ElasticSearchUtil.simpleAggSearch((String) indexName, [(String) runProduceDocumentName], maxResults,
-                        {bool:{filter:andList}}, "productId",
-                        {estimatedProduceQuantitySum:'estimatedProduceQuantity', produceQuantitySum:'receipts.produceQuantity'},
-                        infoByProductId, ec)
+                const clauses = [notIn('statusId', ['WeComplete', 'WeClosed', 'WeCancelled'])]
+                if (estThruMillis != null) clauses.push(missingOrBefore('estimatedStartDate', estThruMillis))
+                sumsByProduct(runProduceDocumentName, clauses,
+                        {estimatedProduceQuantitySum:'estimatedProduceQuantity', produceQuantitySum:'receipts.produceQuantity'})
             }
 
-            // set zero defaults, calculate totals
-            for (Map infoMap in infoByProductId.values()) {
-                // default all values to 0
-                if (infoMap.orderQuantitySum == null) infoMap.orderQuantitySum = 0
-                if (infoMap.quantityReservedSum == null) infoMap.quantityReservedSum = 0
-                if (infoMap.quantityNotAvailableSum == null) infoMap.quantityNotAvailableSum = 0
-                if (infoMap.quantityNotIssuedSum == null) infoMap.quantityNotIssuedSum = 0
-
-                if (infoMap.prodEstQuantitySum == null) infoMap.prodEstQuantitySum = 0
-                if (infoMap.availableToPromiseTotalSum == null) infoMap.availableToPromiseTotalSum = 0
-                if (infoMap.quantityOnHandTotalSum == null) infoMap.quantityOnHandTotalSum = 0
-
-                if (infoMap.estimatedConsumeQuantitySum == null) infoMap.estimatedConsumeQuantitySum = 0
-                if (infoMap.consumeQuantitySum == null) infoMap.consumeQuantitySum = 0
-                if (infoMap.estimatedProduceQuantitySum == null) infoMap.estimatedProduceQuantitySum = 0
-                if (infoMap.produceQuantitySum == null) infoMap.produceQuantitySum = 0
+            const sumNames = ['orderQuantitySum', 'quantityReservedSum', 'quantityNotAvailableSum', 'quantityNotIssuedSum',
+                    'prodEstQuantitySum', 'availableToPromiseTotalSum', 'quantityOnHandTotalSum', 'estimatedConsumeQuantitySum',
+                    'consumeQuantitySum', 'estimatedProduceQuantitySum', 'produceQuantitySum']
+            for (const infoMap of Object.values(infoByProductId)) {
+                for (const name of sumNames) if (infoMap[name] == null) infoMap[name] = 0
 
                 infoMap.orderNotReserved = infoMap.orderQuantitySum - infoMap.quantityReservedSum
-                infoMap.estRunConsumeRemaining = infoMap.estimatedConsumeQuantitySum - infoMap.consumeQuantitySum
-                if (infoMap.estRunConsumeRemaining < 0) infoMap.estRunConsumeRemaining = 0
-                infoMap.estRunProduceRemaining = infoMap.estimatedProduceQuantitySum - infoMap.produceQuantitySum
-                if (infoMap.estRunProduceRemaining < 0) infoMap.estRunProduceRemaining = 0
+                infoMap.estRunConsumeRemaining = Math.max(infoMap.estimatedConsumeQuantitySum - infoMap.consumeQuantitySum, 0)
+                infoMap.estRunProduceRemaining = Math.max(infoMap.estimatedProduceQuantitySum - infoMap.produceQuantitySum, 0)
 
                 infoMap.totalProjected = infoMap.availableToPromiseTotalSum - infoMap.orderNotReserved -
                         infoMap.estRunConsumeRemaining + infoMap.estRunProduceRemaining + infoMap.prodEstQuantitySum
