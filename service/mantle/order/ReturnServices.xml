@@ -754,7 +754,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="orderItemSeqId" from="returnItem.orderItemSeqId"/></entity-find>
                     <iterate list="oibList" entry="oib">
                         <set field="invoiceItem" from="oib.invoiceItem"/>
-                        <set field="iiTotal" from="(oib.quantity ?: 0.0) * (invoiceItem.amount ?: 0.0)"/>
+                        <set field="iiTotal" from="(oib.quantity || 0.0) * (invoiceItem.amount || 0.0)"/>
                         <if condition="iiTotal == 0.0"><continue/></if>
                         <set field="adjustAmount" from="amountRemaining &gt; iiTotal ? iiTotal : amountRemaining"/>
 

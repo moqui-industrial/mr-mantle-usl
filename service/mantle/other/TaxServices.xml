@@ -192,7 +192,7 @@ along with this software (see the LICENSE.md file). If not, see
             <iterate list="items" entry="item">
                 <if condition="item.itemTypeEnumId != 'ItemProduct'"><continue/></if>
                 <if condition="!item.unitAmount"><continue/></if>
-                <set field="taxAmount" from="taxRate * (item.quantity ?: 1.0) * item.unitAmount"/>
+                <set field="taxAmount" from="taxRate * (item.quantity || 1.0) * item.unitAmount"/>
                 <script>taxResults.add([itemId:item.itemId, taxAmount:taxAmount, taxRate:taxRate,
                     taxAuthorityId:taxAuthorityId, taxName:'Sales Tax'])</script>
             </iterate>

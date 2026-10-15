@@ -1106,7 +1106,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="orderItem == null"><continue/></if>
                 <set field="orderItemQty" from="toDecimal(orderItem.quantity != null ? orderItem.quantity : 1).multiply(toDecimal(orderItem.selectedAmount ?? 0).isZero() ? 1 : orderItem.selectedAmount)"/>
                 <!-- invoice even if unitAmount is zero, otherwise no record of sales for inventory/etc purposes (sales invoice analysis)
-                <set field="itemAmount" from="(orderItem.unitAmount ?: 0) * (orderItemQty)"/>
+                <set field="itemAmount" from="(orderItem.unitAmount || 0) * (orderItemQty)"/>
                 <if condition="itemAmount == 0"><continue/></if>
                 -->
 
