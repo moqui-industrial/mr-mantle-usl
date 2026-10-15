@@ -117,7 +117,7 @@ General Order Placement and eCommerce Usage
                 <!-- if customer has a CustomerRequireSign setting use that for OrderPart.signatureRequiredEnumId -->
                 <if condition="!signatureRequiredEnumId">
                     <set field="signReqSettingValue" from="ec.service.sync().name('mantle.party.PartyServices.get#PartySettingValue')
-                        .parameter('partySettingTypeId', 'CustomerRequireSign').parameter('partyId', customerPartyId).call()?.get('settingValue')"/>
+                        .parameter('partySettingTypeId', 'CustomerRequireSign').parameter('partyId', customerPartyId).call()?.settingValue"/>
                     <if condition="signReqSettingValue &amp;&amp; signReqSettingValue != 'PsrNone'">
                         <set field="signatureRequiredEnumId" from="signReqSettingValue"/></if>
                 </if>
@@ -139,7 +139,7 @@ General Order Placement and eCommerce Usage
         <actions>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
             <entity-set value-field="orderHeader" include="nonpk" set-if-empty="true"/>
-            <set field="orderHeader.orderRevision" from="orderHeader.orderRevision + 1"/>
+            <set field="orderHeader.orderRevision" from="toDecimal(orderHeader.orderRevision ?? 0).add(1)"/>
             <entity-update value-field="orderHeader"/>
             <!-- <service-call name="update#mantle.order.OrderHeader" in-map="context"/> -->
         </actions>
@@ -2241,12 +2241,11 @@ General Order Placement and eCommerce Usage
                 <return error="true" message="Order ${orderId} has been shipped, cannot make recurring"/></if>
 
             <!-- make sure cron expr is valid -->
-            <script>
-                try { org.moqui.impl.service.ScheduledJobRunner.getExecutionTime((String) recurCronExpression) } catch (Exception e) {
+            <script><![CDATA[
+                try { ec.service.nextCronExecution(String(recurCronExpression)) } catch (e) {
                     ec.message.addError(`Invalid Cron expression '${recurCronExpression}': ${e.message}`)
-                    return
                 }
-            </script>
+            ]]></script>
 
             <!-- update OrderHeader -->
             <service-call name="update#mantle.order.OrderHeader" in-map="context"/>
@@ -2269,12 +2268,11 @@ General Order Placement and eCommerce Usage
             </entity-find>
             <iterate list="orderHeaderList" entry="orderHeader">
                 <!-- check recurCronExpression vs lastOrderedDate to see if we need to run -->
-                <set field="shouldRun" from="org.moqui.impl.service.ScheduledJobRunner.isLastRunBeforeLastSchedule(
-                        orderHeader.recurCronExpression, orderHeader.lastOrderedDate, 'Order ' + orderHeader.orderId, null)"/>
+                <set field="shouldRun" from="ec.service.isLastRunBeforeLastSchedule(orderHeader.recurCronExpression, orderHeader.lastOrderedDate)"/>
 
                 <if condition="shouldRun">
                     <service-call name="mantle.order.OrderServices.create#RecurringOrder"
-                            in-map="{baseOrderId:orderHeader.orderId}" async="distribute"/>
+                            in-map="{baseOrderId:orderHeader.orderId}" async="true"/>
                 </if>
             </iterate>
         </actions>
@@ -2297,8 +2295,7 @@ General Order Placement and eCommerce Usage
                 <return type="danger" message="Order ${baseOrderId} is not in the Approved status"/></if>
 
             <!-- check again to make sure hasn't run since last execution time -->
-            <set field="shouldRun" from="org.moqui.impl.service.ScheduledJobRunner.isLastRunBeforeLastSchedule(
-                    baseOrderHeader.recurCronExpression, baseOrderHeader.lastOrderedDate, 'Order ' + baseOrderHeader.orderId, null)"/>
+            <set field="shouldRun" from="ec.service.isLastRunBeforeLastSchedule(baseOrderHeader.recurCronExpression, baseOrderHeader.lastOrderedDate)"/>
             <if condition="!shouldRun"><return type="warning" message="Order ${baseOrderHeader.orderId} is not yet scheduled to reorder since last order time ${baseOrderHeader.lastOrderedDate}"/></if>
 
             <!-- clone the order -->
@@ -2351,11 +2348,19 @@ General Order Placement and eCommerce Usage
                 <return/>
             </if>
 
-            <if condition="!originalValue || quantity != originalValue.quantity || unitAmount != originalValue.unitAmount ||
-                    selectedAmount != originalValue.selectedAmount || orderPartSeqId != originalValue.orderPartSeqId"><then>
+            <!-- an empty originalValue counts as none; the decimals compare by value, null only equals null -->
+            <script><![CDATA[
+                const decimalChanged = (a, b) => (a == null || b == null) ? (a != null || b != null) : !toDecimal(a).eq(b)
+                const hasOriginal = originalValue != null && Object.keys(originalValue).length > 0
+                globalThis.hasOriginal = hasOriginal
+                globalThis.itemChanged = !hasOriginal || decimalChanged(quantity, originalValue.quantity) ||
+                    decimalChanged(unitAmount, originalValue.unitAmount) || decimalChanged(selectedAmount, originalValue.selectedAmount) ||
+                    orderPartSeqId != originalValue.orderPartSeqId
+            ]]></script>
+            <if condition="itemChanged"><then>
                 <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader" for-update="true"/>
                 <service-call name="mantle.order.OrderServices.update#OrderPartTotal" in-map="context"/>
-                <if condition="originalValue &amp;&amp; orderPartSeqId != originalValue.orderPartSeqId">
+                <if condition="hasOriginal &amp;&amp; orderPartSeqId != originalValue.orderPartSeqId">
                     <service-call name="mantle.order.OrderServices.update#OrderPartTotal"
                             in-map="{orderId:orderId, orderPartSeqId:originalValue.orderPartSeqId}"/>
                 </if>
@@ -2363,7 +2368,7 @@ General Order Placement and eCommerce Usage
                 <if condition="orderHeader.productStoreId &amp;&amp; isPromo != 'Y' &amp;&amp; !(['ItemShipping', 'ItemSalesTax', 'ItemVatTax'].includes(itemTypeEnumId))">
                     <service-call name="mantle.order.OrderServices.handle#OrderMajorChange"
                             in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId}"/>
-                    <if condition="originalValue &amp;&amp; orderPartSeqId != originalValue.orderPartSeqId">
+                    <if condition="hasOriginal &amp;&amp; orderPartSeqId != originalValue.orderPartSeqId">
                         <service-call name="mantle.order.OrderServices.handle#OrderMajorChange"
                                 in-map="{orderId:orderId, orderPartSeqId:originalValue.orderPartSeqId}"/>
                     </if>
@@ -2392,10 +2397,11 @@ General Order Placement and eCommerce Usage
         </in-parameters>
         <actions>
             <!-- generally if partTotal changes only that has changed, so don't consider it any sort of significant change -->
-            <if condition="originalValue &amp;&amp; partTotal != originalValue.partTotal"><return/></if>
+            <set field="hasOriginal" from="originalValue != null &amp;&amp; Object.keys(originalValue).length &gt; 0"/>
+            <if condition="hasOriginal &amp;&amp; ((partTotal == null) !== (originalValue.partTotal == null) || (partTotal != null &amp;&amp; !toDecimal(partTotal).eq(originalValue.partTotal)))"><return/></if>
 
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader" for-update="true"/>
-            <if condition="orderHeader.productStoreId &amp;&amp; (!originalValue || postalContactMechId != originalValue.postalContactMechId ||
+            <if condition="orderHeader.productStoreId &amp;&amp; (!hasOriginal || postalContactMechId != originalValue.postalContactMechId ||
                     carrierPartyId != originalValue.carrierPartyId || shipmentMethodEnumId != originalValue.shipmentMethodEnumId ||
                     customerPartyId != originalValue.customerPartyId || disablePromotions != originalValue.disablePromotions ||
                     disableShippingCalc != originalValue.disableShippingCalc || disableTaxCalc != originalValue.disableTaxCalc)"><then>
@@ -2413,17 +2419,17 @@ General Order Placement and eCommerce Usage
             <parameter name="orderHeader" type="EntityValue"/>
         </in-parameters>
         <actions>
-            <!-- use ec.context.sharedMap for a reentrant semaphore (sort of, not thread safe but all needed to prevent incorrect/infinite recursion) -->
+            <!-- use ec.context.sharedMap (a plain object shared by the whole execution context, NOT YET in the runtime) for a reentrant semaphore (sort of, not thread safe but all needed to prevent incorrect/infinite recursion) -->
             <set field="sharedFlagKey" from="'OrderMajorChange' + orderId + orderPartSeqId"/>
-            <if condition="ec.context.getSharedMap().get(sharedFlagKey)"><return/></if>
+            <if condition="ec.context.sharedMap[sharedFlagKey]"><return/></if>
 
             <if condition="orderHeader == null"><entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader" for-update="true"/></if>
             <if condition="orderHeader.productStoreId">
                 <entity-find-one entity-name="mantle.order.OrderPart" value-field="orderPart" for-update="true"/>
                 <set field="noRecalcStatuses" from="['OrderApproved', 'OrderSent', 'OrderCompleted', 'OrderRejected', 'OrderCancelled']"/>
-                <if condition="orderHeader.statusId in noRecalcStatuses">
+                <if condition="noRecalcStatuses.includes(orderHeader.statusId)">
                     <return type="warning" message="Not updating promotions, shipping, or tax for order ${orderId} in status ${orderHeader.status?.description}"/></if>
-                <if condition="orderPart.statusId in noRecalcStatuses">
+                <if condition="noRecalcStatuses.includes(orderPart.statusId)">
                     <return type="warning" message="Not updating promotions, shipping, or tax for order part ${orderId}:${orderPartSeqId} in status ${orderPart.status?.description}"/></if>
 
                 <!-- make sure no billing done, don't auto update if so -->
@@ -2433,7 +2439,7 @@ General Order Placement and eCommerce Usage
                     <return type="warning" message="Not updating promotions, shipping, or tax for order part ${orderId}:${orderPartSeqId} with ${partBillingCount} OrderItemBilling records"/></if>
 
                 <!-- set flag in context root to avoid recursive triggers -->
-                <script>ec.context.getSharedMap().put(sharedFlagKey, true)</script>
+                <script>ec.context.sharedMap[sharedFlagKey] = true</script>
 
                 <!-- Apply Promotions -->
                 <if condition="!('Y' === orderPart.disablePromotions)">
@@ -2500,7 +2506,7 @@ General Order Placement and eCommerce Usage
                             in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId}"/>
                 </if>
 
-                <script>ec.context.getSharedMap().remove(sharedFlagKey)</script>
+                <script>delete ec.context.sharedMap[sharedFlagKey]</script>
 
                 <service-call name="mantle.order.OrderServices.increment#OrderRevision" in-map="context"/>
             </if>
@@ -2515,10 +2521,10 @@ General Order Placement and eCommerce Usage
         </in-parameters>
         <actions>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader" for-update="true"/>
-            <set field="totalSum" from="0.0" type="BigDecimal"/>
+            <set field="totalSum" from="toDecimal(0)"/>
             <entity-find entity-name="mantle.order.OrderPart" list="orderPartList"><econdition field-name="orderId"/></entity-find>
             <iterate list="orderPartList" entry="orderPart">
-                <set field="totalSum" from="totalSum + (orderPart.partTotal || 0)"/>
+                <set field="totalSum" from="totalSum.add(orderPart.partTotal ?? 0)"/>
             </iterate>
             <set field="orderHeader.grandTotal" from="totalSum"/>
             <entity-update value-field="orderHeader"/>
@@ -2531,16 +2537,16 @@ General Order Placement and eCommerce Usage
             <parameter name="originalValue" type="Map"/>
         </in-parameters>
         <actions>
-            <set field="totalSum" from="0.0" type="BigDecimal"/>
+            <set field="totalSum" from="toDecimal(0)"/>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
             <entity-find entity-name="mantle.order.OrderItem" list="orderItemList">
                 <econdition field-name="orderId"/><econdition field-name="orderPartSeqId"/></entity-find>
             <iterate list="orderItemList" entry="orderItem">
                 <service-call name="mantle.order.OrderServices.get#OrderItemTotal" out-map="itemTotalOut" in-map="{orderItem:orderItem}"/>
-                <set field="totalSum" from="totalSum + itemTotalOut.itemTotal"/>
+                <set field="totalSum" from="totalSum.add(itemTotalOut.itemTotal ?? 0)"/>
             </iterate>
 
-            <set field="totalSum" from="ec.l10n.roundCurrency((totalSum == null ? null : toDecimal(totalSum)), orderHeader? orderHeader.currencyUomId : 'USD')"/>
+            <set field="totalSum" from="ec.l10n.roundCurrency(totalSum, orderHeader != null ? orderHeader.currencyUomId : 'USD')"/>
 
             <entity-find-one entity-name="mantle.order.OrderPart" value-field="orderPart" for-update="true"/>
             <set field="orderPart.partTotal" from="totalSum"/>
@@ -2552,21 +2558,21 @@ General Order Placement and eCommerce Usage
                 <econdition field-name="statusId" operator="in" value="PmntProposed,PmntPromised"/>
                 <select-field field-name="paymentId"/>
             </entity-find>
-            <if condition="paymentList.size() == 1">
+            <if condition="paymentList.length == 1">
                 <service-call name="update#mantle.account.payment.Payment"
-                        in-map="{paymentId:paymentList.get(0).paymentId, amount:totalSum}"/>
-                <!-- <log level="warn" message="Set order part ${orderId}:${orderPartSeqId} total to ${orderPart.partTotal} and payment ${paymentList.get(0).paymentId} amount to ${totalSum}"/> -->
+                        in-map="{paymentId:paymentList[0].paymentId, amount:totalSum}"/>
+                <!-- <log level="warn" message="Set order part ${orderId}:${orderPartSeqId} total to ${orderPart.partTotal} and payment ${paymentList[0].paymentId} amount to ${totalSum}"/> -->
             </if>
-            <if condition="paymentList.size() == 0">
+            <if condition="paymentList.length == 0">
                 <!-- NOTE: also update Payment records in Declined status since Payment services allow retry of auth from Declined -->
                 <entity-find entity-name="mantle.account.payment.Payment" list="declinedPaymentList">
                     <econdition field-name="orderId"/><econdition field-name="orderPartSeqId"/>
                     <econdition field-name="statusId" operator="in" value="PmntDeclined"/>
                     <select-field field-name="paymentId"/>
                 </entity-find>
-                <if condition="declinedPaymentList.size() == 1">
+                <if condition="declinedPaymentList.length == 1">
                     <service-call name="update#mantle.account.payment.Payment"
-                            in-map="{paymentId:declinedPaymentList.get(0).paymentId, amount:totalSum}"/>
+                            in-map="{paymentId:declinedPaymentList[0].paymentId, amount:totalSum}"/>
                 </if>
             </if>
 
@@ -2584,7 +2590,7 @@ General Order Placement and eCommerce Usage
                 <field-map field-name="orderId"/></entity-find-one>
             <!-- TODO: not using <select-field field-name="orderId,orderRevision"/> because of issue in EntityValue where a bunch of stuff gets set to null -->
             <if condition="orderHeader != null">
-                <set field="orderHeader.orderRevision" from="(orderHeader.orderRevision || 1) + 1"/>
+                <set field="orderHeader.orderRevision" from="toDecimal(orderHeader.orderRevision || 1).add(1)"/>
                 <entity-update value-field="orderHeader"/>
             </if>
         </actions>
@@ -2632,7 +2638,7 @@ General Order Placement and eCommerce Usage
         <out-parameters><parameter name="contentLocation"/></out-parameters>
         <actions>
             <set field="filename" from="contentFile.getName()"/>
-            <if condition="org.moqui.resource.ResourceReference.isTextFilename(filename)"><then>
+            <if condition="ec.resource.isTextFilename(filename)"><then>
                 <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content'"/>
             </then><else>
                 <set field="contentRoot" from="ec.user.getPreference('mantle.content.large.root') || 'dbresource://mantle/content'"/>
@@ -2641,7 +2647,7 @@ General Order Placement and eCommerce Usage
 
             <set field="docRr" from="ec.resource.getLocationReference(contentLocation)"/>
             <script>
-                fileStream = contentFile.getInputStream()
+                const fileStream = contentFile.getInputStream()
                 try { docRr.putStream(fileStream) } finally { fileStream.close() }
             </script>
 
@@ -2677,14 +2683,14 @@ General Order Placement and eCommerce Usage
                 <econdition field-name="contactMechPurposeId" operator="in" value="PostalShippingDest,PostalGeneral"/>
                 <order-by field-name="-contactMechPurposeId,-fromDate"/><!-- prefer PostalShippingDest over PostalGeneral, get most recent -->
             </entity-find>
-            <set field="shippingPostalContactMechId" from="postalList?.first?.contactMechId"/>
+            <set field="shippingPostalContactMechId" from="postalList[0]?.contactMechId"/>
 
             <entity-find entity-name="mantle.facility.FacilityContactMech" list="phoneList" cache="true">
                 <date-filter/><econdition field-name="facilityId" from="request.facilityId"/>
                 <econdition field-name="contactMechPurposeId" operator="in" value="PhoneShippingDest,PhonePrimary"/>
                 <order-by field-name="-contactMechPurposeId,-fromDate"/><!-- prefer PhoneShippingDest over PhonePrimary, get most recent -->
             </entity-find>
-            <set field="shippingTelecomContactMechId" from="phoneList?.first?.contactMechId"/>
+            <set field="shippingTelecomContactMechId" from="phoneList[0]?.contactMechId"/>
 
             <entity-find entity-name="mantle.request.RequestItem" list="allRequestItemList">
                 <econdition field-name="requestId"/></entity-find>
@@ -2694,7 +2700,7 @@ General Order Placement and eCommerce Usage
             <iterate list="allRequestItemList" entry="requestItem">
                 <if condition="!requestItem.supplierPartyId">
                     <return error="true" message="No Supplier set on item ${requestItem.requestItemSeqId} for Request ${requestId}"/></if>
-                <script>addToListInMap(requestItem.supplierPartyId, requestItem, requestItemListBySupplier)</script>
+                <script>(requestItemListBySupplier[requestItem.supplierPartyId] ??= []).push(requestItem)</script>
             </iterate>
 
             <iterate list="requestItemListBySupplier" entry="requestItemList" key="supplierPartyId">
@@ -2710,7 +2716,8 @@ General Order Placement and eCommerce Usage
                     <service-call name="create#mantle.request.RequestItemOrder"
                             in-map="{requestId:requestItem.requestId, requestItemSeqId:requestItem.requestItemSeqId,
                                 orderId:orderOut.orderId, orderItemSeqId:addOut.orderItemSeqId, quantity:requestItem.quantity}"/>
-                    <if condition="!earliestRequiredByDate || (requestItem.requiredByDate &amp;&amp; requestItem.requiredByDate &lt; earliestRequiredByDate)">
+                    <!-- timestamps reach scripts as epoch millis text -->
+                    <if condition="!earliestRequiredByDate || (requestItem.requiredByDate &amp;&amp; Number(requestItem.requiredByDate) &lt; Number(earliestRequiredByDate))">
                         <set field="earliestRequiredByDate" from="requestItem.requiredByDate"/></if>
                 </iterate>
                 <if condition="earliestRequiredByDate">
