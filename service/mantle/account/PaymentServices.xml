@@ -185,7 +185,7 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions>
             <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment"/>
-            <set field="paymentTotal" from="payment.amount || 0.0"/>
+            <set field="paymentTotal" from="toDecimal(payment.amount != null ? payment.amount : 0)"/>
 
             <!-- PaymentApplication by paymentId (expect either invoiceId to toPaymentId to be populated) -->
             <!-- PaymentApplication by toPaymentId (expect paymentId to be populated) -->
@@ -195,11 +195,11 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="toPaymentId" from="paymentId"/>
                 </econditions>
             </entity-find>
-            <set field="appliedTotal" from="0.0"/>
+            <set field="appliedTotal" from="toDecimal(0)"/>
             <iterate list="paymentApplicationList" entry="paymentApplication">
-                <set field="appliedTotal" from="appliedTotal + paymentApplication.amountApplied"/></iterate>
+                <set field="appliedTotal" from="appliedTotal.add(paymentApplication.amountApplied != null ? paymentApplication.amountApplied : 0)"/></iterate>
 
-            <set field="unappliedTotal" from="paymentTotal - appliedTotal"/>
+            <set field="unappliedTotal" from="paymentTotal.subtract(appliedTotal)"/>
         </actions>
     </service>
     <service verb="update" noun="PaymentTotals">

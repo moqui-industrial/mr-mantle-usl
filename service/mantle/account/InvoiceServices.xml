@@ -254,16 +254,16 @@ along with this software (see the LICENSE.md file). If not, see
                 fields needed but is compatible with the TransactionCache -->
             <entity-find entity-name="mantle.account.invoice.InvoiceItem" list="invoiceItemList">
                 <econdition field-name="invoiceId"/></entity-find>
-            <set field="invoiceTotal" from="0.0"/>
+            <set field="invoiceTotal" from="toDecimal(0)"/>
             <iterate list="invoiceItemList" entry="invoiceItem">
                 <!-- NOTE: also a sales/VAT tax calculation concern on item vs invoice level, but using 2 digits so consistent across order, invoice, GL TX entry
                     (tax should generally be calculated to 3 digits on the item level then summed and rounded to 2 digits to get a tax total) -->
                 <!-- NOTE: CurrencyRoundingMarker scale here may vary by currency, make configurable -->
-                <set field="invoiceTotal" from="invoiceTotal + ((invoiceItem.quantity != null ? invoiceItem.quantity : 1.0) * (invoiceItem.amount || 0.0)).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+                <set field="invoiceTotal" from="invoiceTotal.add(toDecimal(invoiceItem.quantity != null ? invoiceItem.quantity : 1).multiply(invoiceItem.amount != null ? invoiceItem.amount : 0).setScale(2, 'HALF_UP'))"/>
             </iterate>
             <!-- round total to 2 decimal places -->
             <!-- NOTE: CurrencyRoundingMarker scale here may vary by currency, make configurable -->
-            <set field="invoiceTotal" from="(invoiceTotal == null ? null : toDecimal(invoiceTotal)).setScale(2, BigDecimal.ROUND_HALF_UP)"/>
+            <set field="invoiceTotal" from="invoiceTotal.setScale(2, 'HALF_UP')"/>
 
             <!-- PaymentApplication by invoiceId (expect either paymentId to toInvoiceId to be populated) -->
             <!-- PaymentApplication by toInvoiceId (expect invoiceId to be populated) -->
@@ -273,11 +273,11 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="toInvoiceId" from="invoiceId"/>
                 </econditions>
             </entity-find>
-            <set field="appliedPaymentsTotal" from="0.0"/>
+            <set field="appliedPaymentsTotal" from="toDecimal(0)"/>
             <iterate list="paymentApplicationList" entry="paymentApplication">
-                <set field="appliedPaymentsTotal" from="appliedPaymentsTotal + (paymentApplication.amountApplied || 0.0)"/></iterate>
+                <set field="appliedPaymentsTotal" from="appliedPaymentsTotal.add(paymentApplication.amountApplied != null ? paymentApplication.amountApplied : 0)"/></iterate>
 
-            <set field="unpaidTotal" from="invoiceTotal - appliedPaymentsTotal"/>
+            <set field="unpaidTotal" from="invoiceTotal.subtract(appliedPaymentsTotal)"/>
         </actions>
     </service>
     <service verb="update" noun="InvoiceTotals">
@@ -294,7 +294,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- If Invoice Finalized or Approved and total is zero set to Payment Received or Sent -->
             <if condition="invoice.statusId == 'InvoiceFinalized' || invoice.statusId == 'InvoiceApproved'">
-                <if condition="totalOut.unpaidTotal == 0.0">
+                <if condition="totalOut.unpaidTotal != null &amp;&amp; totalOut.unpaidTotal.isZero()">
                     <service-call name="update#mantle.account.invoice.Invoice"
                             in-map="{invoiceId:invoiceId, statusId:(invoice.statusId == 'InvoiceFinalized' ? 'InvoicePmtRecvd' : 'InvoicePmtSent')}"/>
                 </if>
@@ -758,29 +758,35 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-one entity-name="mantle.account.invoice.SettlementTerm" value-field="settlementTerm">
                     <field-map field-name="settlementTermId" from="invoice.settlementTermId"/></entity-find-one>
                 <script><![CDATA[
-                    def dueDateDt = java.time.ZonedDateTime.ofInstant(java.time.Instant.ofEpochMilli(invoiceDate.time), java.time.ZoneId.systemDefault())
-
+                    // dates are epoch millis in scripts; the due date is computed in the server's zone as Java's systemDefault
+                    const dueDateDt = new Date(Number(invoiceDate))
+                    const termValue = settlementTerm.termValue == null ? null : Math.trunc(toDecimal(settlementTerm.termValue).toNumber())
+                    const setDayOfMonth = () => {
+                        // the term's day of the month, at most the month's last day
+                        const maxDays = new Date(dueDateDt.getFullYear(), dueDateDt.getMonth() + 1, 0).getDate()
+                        dueDateDt.setDate(Math.min(termValue || 1, maxDays))
+                    }
                     switch (settlementTerm.termTypeEnumId) {
                         case 'TtFinPaymentDayNextMonth':
-                            dueDateDt = dueDateDt.plusMonths(1)
-                            // fall through intentionally
+                            dueDateDt.setDate(1)
+                            dueDateDt.setMonth(dueDateDt.getMonth() + 1)
+                            setDayOfMonth()
+                            break
                         case 'TtFinPaymentDayCurMonth':
-                            int dayOfMonth = (settlementTerm.termValue == null ? null : Math.trunc(toDecimal(settlementTerm.termValue).toNumber())) || 1
-                            int maxDays = dueDateDt.range(java.time.temporal.ChronoField.DAY_OF_MONTH).getMaximum()
-                            if (dayOfMonth > maxDays) dayOfMonth = maxDays
-                            dueDateDt = dueDateDt.withDayOfMonth(dayOfMonth)
+                            setDayOfMonth()
                             break
                         default:
-                            dueDateDt = dueDateDt.plusDays((settlementTerm.termValue == null ? null : Math.trunc(toDecimal(settlementTerm.termValue).toNumber())) || 0)
+                            dueDateDt.setDate(dueDateDt.getDate() + (termValue || 0))
                     }
-                    dueDate = java.sql.Timestamp.from(dueDateDt.toInstant())
                     // could happen for TtFinPaymentDayCurMonth with a day less than today
-                    if (dueDate < invoiceDate) {
-                        dueDateDt = dueDateDt.plusMonths(1)
-                        dueDate = java.sql.Timestamp.from(dueDateDt.toInstant())
+                    if (dueDateDt.getTime() < Number(invoiceDate)) {
+                        dueDateDt.setDate(1)
+                        dueDateDt.setMonth(dueDateDt.getMonth() + 1)
+                        setDayOfMonth()
                     }
+                    const dueDate = dueDateDt.getTime()
 
-                    if (origDueDate == null || origDueDate != dueDate) {
+                    if (origDueDate == null || Number(origDueDate) !== dueDate) {
                         invoice.dueDate = dueDate
                         invoice.update()
                     }
