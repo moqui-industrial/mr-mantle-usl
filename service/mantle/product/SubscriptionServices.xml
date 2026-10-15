@@ -89,13 +89,13 @@ along with this software (see the LICENSE.md file). If not, see
                                         productId:orderItem.productId,
                                         subscriptionResourceId:productSubscriptionResource.subscriptionResourceId,
                                         fromDate:productSubscriptionResource.fromDate}"/>
-                            <script>fulfilledOrderItemList.add(orderItem)</script>
+                            <script>fulfilledOrderItemList.push(orderItem)</script>
                         </if>
                     </iterate>
                 </if>
             </iterate>
 
-            <if condition="fulfilledOrderItemList">
+            <if condition="fulfilledOrderItemList.length > 0">
                 <!-- create invoice for items in fulfilledOrderItemList -->
                 <service-call name="mantle.account.InvoiceServices.create#EntireOrderPartInvoice" out-map="context"
                         in-map="Object.assign({}, context, {statusId:'InvoiceFinalized', partialOrderItemList:fulfilledOrderItemList})"/>
@@ -141,17 +141,30 @@ along with this software (see the LICENSE.md file). If not, see
                 <order-by field-name="-thruDate"/>
             </entity-find>
             <if condition="fromDate == null">
-                <set field="fromDate" from="existingSubscriptionList?.first?.thruDate || ec.user.nowTimestamp"/></if>
+                <set field="fromDate" from="existingSubscriptionList?.[0]?.thruDate || ec.user.nowTimestamp"/></if>
             <if condition="!resourceInstanceId &amp;&amp; (existingSubscriptionList?.length > 0)">
                 <set field="resourceInstanceId" from="existingSubscriptionList[0].resourceInstanceId"/></if>
 
             <!-- determine thruDate (fromDate + psr.availableTime given psr.availableTimeUomId) -->
             <script>
-            int thruOffset = (orderItem.quantity || 1) * (psr.availableTime || 1)
-            thruDateCal = ec.user.getNowCalendar()
-            thruDateCal.setTimeInMillis(fromDate.getTime())
-            thruDateCal.add(getCalendarFieldFromUomId(psr.availableTimeUomId || 'TF_mon'), thruOffset)
-            thruDate = new java.sql.Timestamp(thruDateCal.getTimeInMillis())
+            const thruOffset = toDecimal(orderItem.quantity || 1).multiply(psr.availableTime || 1).toNumber()
+            // Calendar.add on the from date, in UTC: month and year steps clamp the day as java.time does
+            const fromMillis = Number.isNaN(Number(fromDate)) ? new Date(fromDate).getTime() : Number(fromDate)
+            const fromDt = new Date(fromMillis)
+            const addMonths = (n) => {
+                const first = new Date(Date.UTC(fromDt.getUTCFullYear(), fromDt.getUTCMonth() + n, 1))
+                const lastDay = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate()
+                return Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), Math.min(fromDt.getUTCDate(), lastDay),
+                        fromDt.getUTCHours(), fromDt.getUTCMinutes(), fromDt.getUTCSeconds(), fromDt.getUTCMilliseconds())
+            }
+            const unitMillis = {TF_ms:1, TF_s:1000, TF_min:60000, TF_hr:3600000, TF_day:86400000, TF_wk:604800000}
+            const availableUomId = psr.availableTimeUomId || 'TF_mon'
+            let thruMillis
+            if (availableUomId === 'TF_mon') thruMillis = addMonths(Math.trunc(thruOffset))
+            else if (availableUomId === 'TF_yr') thruMillis = addMonths(12 * Math.trunc(thruOffset))
+            else if (unitMillis[availableUomId] != null) thruMillis = fromMillis + Math.trunc(thruOffset) * unitMillis[availableUomId]
+            else throw new Error('No equivalent calendar field found for UOM ID ' + availableUomId)
+            thruDate = String(thruMillis)
             </script>
 
             <log level="info" message="Creating Subscription for customer [${customerPartyId}], resource [${subscriptionResourceId}], order item [${ec.resource.expand('OrderItemNameTemplate','')}], fromDate: ${fromDate}, thruDate: ${thruDate}"/>

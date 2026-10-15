@@ -61,7 +61,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <entity-find entity-name="mantle.shipment.carrier.CarrierShipmentMethod" list="csmList" cache="true">
                             <econdition field-name="carrierPartyId" from="pssg.carrierPartyId"/>
                             <order-by field-name="sequenceNum"/></entity-find>
-                        <script>shipOptionList.addAll(csmList)</script>
+                        <script>for (const csm of csmList) shipOptionList.push(csm)</script>
                     </iterate>
                 </if>
                 <!-- get rates -->
@@ -74,18 +74,18 @@ along with this software (see the LICENSE.md file). If not, see
                     <!-- make sure there is a return value for each in carrierShipmentMethodList -->
                     <set field="newShipOptionList" from="[]"/>
                     <set field="shippingRateInfoList" from="ratesBulkOut.shippingRateInfoList"/>
-                    <if condition="shippingRateInfoList">
+                    <if condition="shippingRateInfoList?.length > 0">
                         <iterate list="shipOptionList" entry="shipOption">
-                            <set field="shippingRateInfo" from="shippingRateInfoList.find({ it.carrierPartyId == shipOption.carrierPartyId &amp;&amp; it.shipmentMethodEnumId == shipOption.shipmentMethodEnumId })"/>
-                            <if condition="shippingRateInfo != null"><then><script>newShipOptionList.add(shippingRateInfo)</script></then>
-                                <else><script>newShipOptionList.add(shipOption)</script></else></if>
+                            <set field="shippingRateInfo" from="shippingRateInfoList.find((it) => it.carrierPartyId === shipOption.carrierPartyId &amp;&amp; it.shipmentMethodEnumId === shipOption.shipmentMethodEnumId) ?? null"/>
+                            <if condition="shippingRateInfo != null"><then><script>newShipOptionList.push(shippingRateInfo)</script></then>
+                                <else><script>newShipOptionList.push(shipOption)</script></else></if>
                         </iterate>
                         <set field="shipOptionList" from="newShipOptionList"/>
                     </if>
                 </if>
                 <!-- make output list -->
                 <iterate list="shipOptionList" entry="shipOption">
-                    <set field="shippingOption" from="new HashMap(shipOption)"/>
+                    <set field="shippingOption" from="Object.assign({}, shipOption)"/>
                     <entity-find-one entity-name="mantle.shipment.carrier.CarrierShipmentMethod" value-field="carrierShipmentMethod">
                         <field-map field-name="carrierPartyId" from="shipOption.carrierPartyId"/>
                         <field-map field-name="shipmentMethodEnumId" from="shipOption.shipmentMethodEnumId"/>
@@ -100,15 +100,15 @@ along with this software (see the LICENSE.md file). If not, see
                         <field-map field-name="enumId" from="shipOption.shipmentMethodEnumId"/></entity-find-one>
                     <set field="shippingOption.carrierName" from="carrierDetail.pseudoId"/><!-- ec.resource.expand('PartyNameTemplate','',carrierDetail) -->
                     <set field="shippingOption.shipmentMethodDescription" from="shipmentMethodEnum.description"/>
-                    <script>shippingOptions.add(shippingOption)</script>
+                    <script>shippingOptions.push(shippingOption)</script>
                 </iterate>
             </if>
             <!-- default to all ShipmentMethod records with _NA_ as the carrier -->
-            <if condition="!shippingOptions">
+            <if condition="shippingOptions.length === 0">
                 <entity-find entity-name="moqui.basic.Enumeration" list="methodEnumList">
                     <econdition field-name="enumTypeId" value="ShipmentMethod"/><order-by field-name="sequenceNum,description"/></entity-find>
                 <iterate list="methodEnumList" entry="methodEnum">
-                    <script>shippingOptions.add({carrierPartyId:'_NA_', carrierName:'',
+                    <script>shippingOptions.push({carrierPartyId:'_NA_', carrierName:'',
                             shipmentMethodEnumId:methodEnum.enumId, shipmentMethodDescription:methodEnum.description})</script>
                 </iterate>
             </if>
@@ -124,7 +124,7 @@ along with this software (see the LICENSE.md file). If not, see
                             in-map="[orderId:orderId, createOrderItem:false, carrierPartyId:shipOption.carrierPartyId,
                                     shipmentMethodEnumId:shipOption.shipmentMethodEnumId, postalContactMechId:postalContactMechId]"/>
                 </if>
-                <script>shippingOptions.add([carrierPartyId:shipOption.carrierPartyId,
+                <script>shippingOptions.push([carrierPartyId:shipOption.carrierPartyId,
                             carrierName:ec.resource.expand('PartyNameTemplate','',carrierDetail),
                             shippingTotal:shippingOut?.shippingTotal, shipmentMethodEnumId:shipOption.shipmentMethodEnumId,
                             shipmentMethodDescription:shipmentMethodEnum.description])</script>

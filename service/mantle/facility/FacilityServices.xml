@@ -36,10 +36,23 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.facility.ContactServices.get#FacilityContactInfo" out-map="contactFaxOut"
                     in-map="{facilityId:facilityId, telecomContactMechPurposeId:'PhoneFax'}"/>
             <script>
-                context.putAll(facility)
-                Map contactInfoMap = flattenNestedMap(contactInfo)
-                contactInfoMap.remove('description')
-                context.putAll(contactInfoMap)
+                ec.context.putAll(Object.assign({}, facility))
+                // flatten the nested contact info maps into one map: a nested value is added only if its name is not already set
+                const flattenNestedMap = (theMap) => {
+                    const flat = {}
+                    const nested = []
+                    for (const [key, value] of Object.entries(theMap ?? {})) {
+                        if (value != null &amp;&amp; typeof value === 'object' &amp;&amp; !Array.isArray(value) &amp;&amp; value.constructor === Object) nested.push(value)
+                        else flat[key] = value
+                    }
+                    for (const child of nested) {
+                        for (const [key, value] of Object.entries(flattenNestedMap(child))) if (!(key in flat)) flat[key] = value
+                    }
+                    return flat
+                }
+                const contactInfoMap = flattenNestedMap(contactInfo)
+                delete contactInfoMap.description
+                ec.context.putAll(contactInfoMap)
             </script>
             <set field="emailAddress" from="contactInfo.emailAddress"/>
         </actions>
@@ -59,13 +72,12 @@ along with this software (see the LICENSE.md file). If not, see
                     <entity-find-one entity-name="mantle.facility.Facility" value-field="fac" cache="true">
                         <field-map field-name="facilityId" from="productStore?.inventoryFacilityId"/></entity-find-one>
                     <if condition="fac != null">
-                        <script>resultList.add({facilityId:fac.facilityId, label:ec.resource.expand('FacilityNameTemplate', '', fac)})</script>
+                        <script>resultList.push({facilityId:fac.facilityId, label:ec.resource.expand('FacilityNameTemplate', '', fac)})</script>
                     </if>
                 </if>
             </if>
             <if condition="ownerPartyId">
-                <set field="ownerPartyIdSet" from="new HashSet()"/>
-                <script>ownerPartyIdSet.add(ownerPartyId)</script>
+                <set field="ownerPartyIdSet" from="[ownerPartyId]"/>
                 <!-- look for parent org(s) if any, include facilities from parent org too -->
                 <entity-find entity-name="mantle.party.PartyRelationship" list="parentRelList" cache="true">
                     <date-filter/>
@@ -73,7 +85,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="fromPartyId" from="ownerPartyId"/>
                     <econdition field-name="toPartyId" operator="is-not-null"/>
                 </entity-find>
-                <script>if (parentRelList) ownerPartyIdSet.addAll(parentRelList*.toPartyId)</script>
+                <script>for (const rel of parentRelList) { if (!ownerPartyIdSet.includes(rel.toPartyId)) ownerPartyIdSet.push(rel.toPartyId) }</script>
 
                 <entity-find entity-name="mantle.facility.Facility" list="facList" cache="true">
                     <econdition field-name="ownerPartyId" operator="in" from="ownerPartyIdSet"/>
@@ -82,7 +94,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </entity-find>
             </if>
             <script>
-                for (def fac in facList) resultList.add({facilityId:fac.facilityId, label:ec.resource.expand('FacilityNameTemplate', '', fac)})
+                if (typeof facList !== 'undefined' && facList) for (const fac of facList) resultList.push({facilityId:fac.facilityId, label:ec.resource.expand('FacilityNameTemplate', '', fac)})
             </script>
         </actions>
     </service>

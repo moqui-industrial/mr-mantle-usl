@@ -40,14 +40,14 @@ NOTE: these services are deprecated along with the multi-tenant functionality in
             <set field="tenantId" from="subscription.subscriberPartyId"/>
 
             <set field="curHost" from="ec.web?.getHostName(false) || 'localhost'"/>
-            <set field="hostName" from="tenantId + '.' + (curHost.contains('.') ? curHost.substring(0, curHost.indexOf('.')) : curHost)"/>
+            <set field="hostName" from="tenantId + '.' + (curHost.includes('.') ? curHost.substring(0, curHost.indexOf('.')) : curHost)"/>
             <set field="tenantMap" from="{tenantId:tenantId, hostName:hostName, tenantName:sua.userFullName}"/>
-            <set field="randomPassword" from="getRandomString(10) + 'a1!'"/>
+            <set field="randomPassword" from="ec.user.randomString(10) + 'a1!'"/>
             <set field="userMap" from="{username:sua.username, userFullName:sua.userFullName,
                     newPassword:randomPassword, newPasswordVerify:randomPassword,
                     emailAddress:sua.emailAddress, currencyUomId:sua.currencyUomId, locale:sua.locale, timeZone:sua.timeZone}"/>
 
-            <service-call name="org.moqui.impl.TenantServices.provision#TenantDatabase" in-map="tenantMap + userMap + [waitForSetup:true]"/>
+            <service-call name="org.moqui.impl.TenantServices.provision#TenantDatabase" in-map="Object.assign({}, tenantMap, userMap, {waitForSetup:true})"/>
 
             <log level="warn" message="TenantSubscriptionServices.init#Tenant after provision#TenantDatabase cur tenant ${ec.tenantId}, tx cache active ${ec.transaction.isTransactionCacheActive()}, tx ${ec.transaction.getTransactionManager().getTransaction()}"/>
             <set field="subscription.resourceInstanceId" from="tenantId"/>

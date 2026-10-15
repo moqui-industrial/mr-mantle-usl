@@ -58,15 +58,30 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- get most recent price records first, get highest qualifying (<=quantity) minQuantity records first -->
                 <order-by field-name="-fromDate,-minQuantity"/>
             </entity-find>
-            <if condition="currentPriceListAll.size() == 0"><return/></if>
+            <if condition="currentPriceListAll.length === 0"><return/></if>
 
-            <!-- filter by minQuantity after to maximize cache hits, simplify clearing -->
-            <set field="currentPriceList" from="currentPriceListAll.findAll({ Map it -&gt; ((BigDecimal) it.minQuantity) &lt;= ((BigDecimal) quantity) })"/>
-
-            <!-- use the maximal match, priority customer, vendor, then store (each if applicable/specified) -->
-            <!-- <log level="warn" message="Price by type ${priceTypeEnumId} list ${currentPriceListAll}"/> -->
-            <set field="productPrice" from="findMaximalMatch(currentPriceList,
-                    {customerPartyId:customerPartyId, vendorPartyId:vendorPartyId, productStoreId:productStoreId})"/>
+            <!-- filter by minQuantity after to maximize cache hits, simplify clearing; then use the maximal match,
+                 priority customer, vendor, then store (each if applicable/specified): a record field that is set must
+                 equal the given value, a null record field matches anything, and the record matching the most given
+                 fields wins (the first of those, so the most recent fromDate) -->
+            <script><![CDATA[
+            const matchMap = {customerPartyId:customerPartyId, vendorPartyId:vendorPartyId, productStoreId:productStoreId}
+            productPrice = null
+            let maxMatches = -1
+            for (const pp of currentPriceListAll) {
+                if (toDecimal(pp.minQuantity ?? 0).compare(quantity) > 0) continue
+                let matches = 0
+                let mismatch = false
+                for (const [key, value] of Object.entries(matchMap)) {
+                    const recValue = pp[key]
+                    if (recValue == null) continue
+                    if (recValue === value) matches++
+                    else { mismatch = true; break }
+                }
+                if (mismatch) continue
+                if (matches > maxMatches) { productPrice = pp; maxMatches = matches }
+            }
+            ]]></script>
             <set field="productPriceId" from="productPrice?.productPriceId"/>
             <set field="price" from="productPrice?.price"/>
         </actions>
@@ -102,7 +117,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="listProductPriceId" from="listOut.productPriceId"/>
             <set field="listPrice" from="listOut.price"/>
 
-            <if condition="!price || !listPrice">
+            <if condition="price == null || toDecimal(price).isZero() || listPrice == null || toDecimal(listPrice).isZero()">
                 <!-- see if this is a variant of a virtual product, if so get price from virtual -->
                 <entity-find entity-name="mantle.product.ProductAssoc" list="varAssocList">
                     <date-filter/>
@@ -111,13 +126,13 @@ along with this software (see the LICENSE.md file). If not, see
                 </entity-find>
                 <if condition="(varAssocList?.length > 0)">
                     <set field="virtualProductId" from="varAssocList[0].productId"/>
-                    <if condition="!price">
+                    <if condition="price == null || toDecimal(price).isZero()">
                         <service-call name="mantle.product.PriceServices.get#ProductPriceByType" out-map="currentOut" out-map-add-to-existing="false"
                                 in-map="Object.assign({}, context, {productId:virtualProductId, priceTypeEnumId:'PptCurrent'})"/>
                         <set field="productPriceId" from="currentOut.productPriceId"/>
                         <set field="price" from="currentOut.price"/>
                     </if>
-                    <if condition="!listPrice">
+                    <if condition="listPrice == null || toDecimal(listPrice).isZero()">
                         <service-call name="mantle.product.PriceServices.get#ProductPriceByType" out-map="listOut" out-map-add-to-existing="false"
                                 in-map="Object.assign({}, context, {productId:virtualProductId, priceTypeEnumId:'PptList'})"/>
                         <set field="listProductPriceId" from="listOut.productPriceId"/>
@@ -127,8 +142,8 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
 
             <!-- if no price default to listPrice or ZERO -->
-            <if condition="defaultToListPrice &amp;&amp; !price">
-                <set field="price" from="listPrice || BigDecimal.ZERO"/></if>
+            <if condition="defaultToListPrice &amp;&amp; (price == null || toDecimal(price).isZero())">
+                <set field="price" from="(listPrice == null || toDecimal(listPrice).isZero()) ? toDecimal(0) : listPrice"/></if>
 
 
             <!-- <log level="warn" message="========== BEFORE rules productId=${productId}, price=${price}, listPrice=${listPrice}"/> -->
@@ -136,17 +151,16 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find entity-name="mantle.product.ProductPriceModify" list="priceModifyList" cache="true">
                 <order-by field-name="sequenceNum"/></entity-find>
             <script><![CDATA[
-            for (priceModify in priceModifyList) { try {
-                Map parmMap = new HashMap(context)
-                List modParameterList = priceModify.parameters
-                for (modParameter in modParameterList) parmMap.put(modParameter.parameterName, modParameter.parameterValue)
+            for (const priceModify of priceModifyList) { try {
+                const parmMap = Object.assign({}, context)
+                for (const modParameter of priceModify.parameters) parmMap[modParameter.parameterName] = modParameter.parameterValue
 
-                Map serviceRegister = priceModify.serviceRegister
-                Map result = ec.service.sync().name(serviceRegister.serviceName).parameters(parmMap).disableAuthz().call()
+                const serviceRegister = priceModify.serviceRegister
+                const result = ec.service.sync().name(serviceRegister.serviceName).parameters(parmMap).disableAuthz().call()
                 // ec.logger.warn(`Ran price service ${serviceRegister.serviceName} result: ${result}`)
                 if (!ec.message.hasError()) ec.context.putAll(result)
-            } catch (Throwable t) {
-                ec.logger.log(300, `Error calling price modify ${priceModify.priceModifyId}`, t)
+            } catch (t) {
+                ec.logger.warn(`Error calling price modify ${priceModify.priceModifyId}: ${t}`)
             } }
             ]]></script>
 
@@ -201,7 +215,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.product.PriceServices.get#ProductPrice" in-map="context" out-map="context"/>
 
             <!-- if no Recurring price try again with Purchase purpose -->
-            <if condition="!price &amp;&amp; pricePurposeEnumId == 'PppRecurring'">
+            <if condition="(price == null || toDecimal(price).isZero()) &amp;&amp; pricePurposeEnumId === 'PppRecurring'">
                 <set field="pricePurposeEnumId" value="PppPurchase"/>
                 <set field="defaultToListPrice" from="true"/>
                 <service-call name="mantle.product.PriceServices.get#ProductPrice" in-map="context" out-map="context"/>

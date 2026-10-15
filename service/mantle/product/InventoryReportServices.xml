@@ -167,43 +167,35 @@ along with this software (see the LICENSE.md file). If not, see
             https://www.elastic.co/guide/en/elasticsearch/reference/current/search-aggregations-metrics.html
         -->
         <actions><script><![CDATA[
-            import org.elasticsearch.action.search.SearchResponse
-            import org.elasticsearch.script.Script
-            import org.elasticsearch.script.ScriptType
-            import org.elasticsearch.search.aggregations.AggregationBuilder
-            import org.elasticsearch.search.aggregations.AggregationBuilders
-            import org.moqui.elasticsearch.ElasticSearchUtil
+            // aggregation metrics are decimals on Postgres and numbers on OpenSearch; the summaries work in numbers
+            const num = (value) => value == null ? 0 : (typeof value === 'number' ? value : toDecimal(value).toNumber())
+            infoByProductId = {}
+            if (!ec.search.isAvailable()) { ec.message.addMessage("Search is not configured, no price history", "danger"); return }
 
-            String fromDateStr = fromDate ? ((fromDate.getTime())?.toString()) : null
-            String thruDateStr = (thruDate.getTime())?.toString()
+            const clauses = [{field: {name: 'productId', op: 'in', values: productIdList}},
+                    {field: {name: 'partStatusId', op: 'in', values: ['OrderRejected', 'OrderCancelled'], negate: true}}]
+            if (facilityId) clauses.push({field: {name: 'facilityId', op: 'eq', value: facilityId}})
+            // alternative to allow placedDate to be null: an any of placedDate missing or in range
+            const placedRange = {name: 'placedDate', op: 'range', lte: Number(thruDate)}
+            if (fromDate) placedRange.gte = Number(fromDate)
+            clauses.push({field: placedRange})
 
-            List andList = [{terms: {productId: productIdList}}, {bool: {must_not: {terms: {partStatusId: ['OrderRejected', 'OrderCancelled']}}}}]
-            if (facilityId) andList.add({term: {facilityId: facilityId}})
-            // alternative to allow placedDate to be null: if (fromDateStr) andList.add([or: [[missing:[field:'placedDate']], [range:['placedDate':[gte:fromDateStr]]]]])
-            if (fromDateStr) andList.add({range: {'placedDate': {gte: fromDateStr, format: 'epoch_millis'}}})
-            andList.add({range: {'placedDate': {lte: thruDateStr, format: 'epoch_millis'}}})
-
-            AggregationBuilder aggBuilder = AggregationBuilders.terms("products").field("productId").size(maxResults)
-                    .subAggregation(AggregationBuilders.sum("orderQuantitySum").field("orderQuantity"))
-                    .subAggregation(AggregationBuilders.min("unitAmountMin").field("unitAmount"))
-                    .subAggregation(AggregationBuilders.max("unitAmountMax").field("unitAmount"))
-                    .subAggregation(AggregationBuilders.sum("weightedAmountSum").field("orderItemTotal"))
-
-            SearchResponse searchResponse = ElasticSearchUtil.aggregationSearch((String) indexName, [(String) orderItemDocumentName],
-                    maxResults, {bool: {filter: andList}}, aggBuilder, ec)
+            const result = ec.search.aggregate({documentType: orderItemDocumentName, filter: {bool: {all: clauses}},
+                    aggs: {products: {terms: {field: 'productId', size: maxResults}, aggs: {
+                        orderQuantitySum: {sum: {field: 'orderQuantity'}},
+                        unitAmountMin: {min: {field: 'unitAmount'}},
+                        unitAmountMax: {max: {field: 'unitAmount'}},
+                        weightedAmountSum: {sum: {field: 'orderItemTotal'}}}}}})
 
             // consolidate the results into a single Map by productId
-            infoByProductId = {}
-            for (def bucket in searchResponse.getAggregations().get('products').getBuckets()) {
-                String productId = bucket.getKey()
-                BigDecimal orderQuantitySum = bucket.getAggregations().get('orderQuantitySum').getValue()
-                BigDecimal weightedAmountSum = bucket.getAggregations().get('weightedAmountSum').getValue()
-                BigDecimal weightedAmountAvg = (weightedAmountSum / orderQuantitySum).setScale(2, BigDecimal.ROUND_HALF_UP)
-                addToMapInMap(productId, 'orderQuantitySum', orderQuantitySum, infoByProductId)
-                addToMapInMap(productId, 'unitAmountMin', bucket.getAggregations().get('unitAmountMin').getValue(), infoByProductId)
-                addToMapInMap(productId, 'unitAmountMax', bucket.getAggregations().get('unitAmountMax').getValue(), infoByProductId)
-                addToMapInMap(productId, 'weightedAmountSum', weightedAmountSum, infoByProductId)
-                addToMapInMap(productId, 'weightedAmountAvg', weightedAmountAvg, infoByProductId)
+            for (const bucket of result.products.buckets) {
+                const orderQuantitySum = num(bucket.orderQuantitySum)
+                const weightedAmountSum = num(bucket.weightedAmountSum)
+                // rounded to 2 places, half up; zero when there is no quantity
+                const weightedAmountAvg = orderQuantitySum === 0 ? 0 : Math.round((weightedAmountSum / orderQuantitySum) * 100) / 100
+                infoByProductId[bucket.key] = {orderQuantitySum: orderQuantitySum, unitAmountMin: num(bucket.unitAmountMin),
+                        unitAmountMax: num(bucket.unitAmountMax), weightedAmountSum: weightedAmountSum,
+                        weightedAmountAvg: weightedAmountAvg}
             }
         ]]></script></actions>
     </service>

@@ -53,7 +53,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="productMeterId" from="productMaintenance.intervalProductMeterId"/>
                     <order-by field-name="-meterValue"/>
                 </entity-find>
-                <set field="lastAssetMeter" from="assetMeterList?.getAt(0)"/>
+                <set field="lastAssetMeter" from="assetMeterList?.[0]"/>
                 <if condition="lastAssetMeter">
                     <set field="lastReadingDate" from="lastAssetMeter.readingDate"/>
                     <set field="lastMeterValue" from="lastAssetMeter.meterValue"/>
@@ -65,14 +65,14 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="assetId"/><econdition field-name="productMaintenanceId"/>
                 <order-by field-name="-maintenanceDate"/>
             </entity-find>
-            <set field="lastAssetMaintenance" from="assetMaintenanceList?.getAt(0)"/>
+            <set field="lastAssetMaintenance" from="assetMaintenanceList?.[0]"/>
             <if condition="lastAssetMaintenance">
                 <set field="lastMaintenanceDate" from="lastAssetMaintenance.maintenanceDate"/>
                 <set field="lastMaintenanceInterval" from="lastAssetMaintenance.intervalQuantity"/>
             </if>
 
-            <set field="nextMaintenanceInterval" from="(lastMaintenanceInterval || 0) + productMaintenance.intervalQuantity"/>
-            <set field="remainingInterval" from="nextMaintenanceInterval - (lastMeterValue || 0)"/>
+            <set field="nextMaintenanceInterval" from="toDecimal(lastMaintenanceInterval ?? 0).add(productMaintenance.intervalQuantity ?? 0)"/>
+            <set field="remainingInterval" from="toDecimal(nextMaintenanceInterval).subtract(lastMeterValue ?? 0)"/>
         </actions>
     </service>
 
