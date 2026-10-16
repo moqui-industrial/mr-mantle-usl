@@ -101,6 +101,16 @@ feature("add a shipment to a load with a chosen bin number, and refuse a load th
     },
 })
 
+feature("the pick info of a load covers its shipments, locations and products", {
+    when() { return { info: call("mantle.shipment.ShipmentInfoServices.get#ShipmentLoadPickInfo", { workEffortId: loadId }) } },
+    then({ info }) {
+        info.workEffort.workEffortId == loadId
+        info.shipmentList.length >= 3
+        info.shipmentPickPackInfoList.length == info.shipmentList.length
+        info.productInfoList.some(p => p.productId == productId)
+    },
+})
+
 feature("shipment status drives the shipment load status", {
     when() {
         const before = call("mantle.work.ShipmentWorkServices.set#ShipmentLoadStatusFromShipments", { workEffortId: loadId })

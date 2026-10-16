@@ -129,3 +129,43 @@ feature("statement print info", {
         info.financialAccountTransList.length >= 1
     },
 })
+
+feature("pay from a financial account through the local gateway: authorize, release, authorize again, capture and refund", {
+    when() {
+        call("mantle.account.FinancialAccountServices.deposit#FinancialAccount", { finAccountId, amount: 500 })
+        const before = account(finAccountId)
+        const newPayment = (amount) => call("mantle.account.PaymentServices.create#Payment", { fromPartyId: ownerId, toPartyId: orgId, amount, amountUomId: "USD",
+                paymentInstrumentEnumId: "PiFinancialAccount", finAccountId, statusId: "PmntPromised", effectiveDate: effectiveTime - 3600000 }).paymentId
+        const paymentId = newPayment(40)
+        const authorized = call("mantle.account.PaymentServices.authorize#SinglePayment", { paymentId })
+        const afterAuth = ec.entity.find("mantle.account.payment.Payment").condition("paymentId", paymentId).one()
+        const released = call("mantle.account.PaymentServices.release#SinglePayment", { paymentId })
+        const afterRelease = ec.entity.find("mantle.account.payment.Payment").condition("paymentId", paymentId).one()
+        call("mantle.account.PaymentServices.authorize#SinglePayment", { paymentId })
+        const captured = call("mantle.account.PaymentServices.capture#SinglePayment", { paymentId })
+        const afterCapture = ec.entity.find("mantle.account.payment.Payment").condition("paymentId", paymentId).one()
+        const balanceAfterCapture = call("mantle.account.FinancialAccountServices.calculate#FinancialAccountTotals", { finAccountId })
+        const refund = call("mantle.account.PaymentServices.refund#SinglePayment", { paymentId, amount: 15 })
+        const noAccount = (() => {
+            const loose = call("mantle.account.PaymentServices.create#Payment", { fromPartyId: ownerId, toPartyId: orgId, amount: 5, amountUomId: "USD",
+                    paymentInstrumentEnumId: "PiFinancialAccount", statusId: "PmntPromised", effectiveDate: effectiveTime - 3600000 }).paymentId
+            return errorOf("mantle.account.FinancialAccountServices.authorize#FinancialAccountPayment", { paymentId: loose, paymentGatewayConfigId: "FinancialAccountLocal" })
+        })()
+        const notAuthorized = errorOf("mantle.account.FinancialAccountServices.release#FinancialAccountPayment", { paymentId: newPayment(3), paymentGatewayConfigId: "FinancialAccountLocal" })
+        return { before, authorized, afterAuth, released, afterRelease, captured, afterCapture, balanceAfterCapture, refund, noAccount, notAuthorized }
+    },
+    then({ before, authorized, afterAuth, released, afterRelease, captured, afterCapture, refund, noAccount, notAuthorized }) {
+        authorized.paymentGatewayResponse.resultSuccess == "Y"
+        afterAuth.statusId == "PmntAuthorized"
+        afterAuth.finAccountAuthId != null
+        released.paymentGatewayResponse == null || released.paymentGatewayResponseId != null
+        afterRelease.statusId == "PmntPromised"
+        afterRelease.finAccountAuthId == null
+        captured.paymentGatewayResponse.resultSuccess == "Y"
+        afterCapture.statusId == "PmntDelivered"
+        afterCapture.finAccountTransId != null
+        refund.refundPaymentId != null
+        noAccount.includes("No Financial Account associated")
+        notAuthorized.includes("No authorization associated")
+    },
+})
