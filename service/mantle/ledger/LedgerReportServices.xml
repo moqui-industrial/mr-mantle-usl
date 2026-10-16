@@ -610,7 +610,6 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="totalPostedByTimePeriod" from="{}"/>
             <set field="totalPostedNoClosingByTimePeriod" from="{}"/>
             <script>
-                const addDec = (key, value, map) => { if (value != null) map[key] = map[key] == null ? toDecimal(value) : toDecimal(map[key]).add(value) }
                 for (const timePeriodId of timePeriodIdList) {
                     addDec(timePeriodId, balanceByTimePeriod[timePeriodId], totalBalanceByTimePeriod)
                     addDec(timePeriodId, childBalanceByTimePeriod[timePeriodId], totalBalanceByTimePeriod)
