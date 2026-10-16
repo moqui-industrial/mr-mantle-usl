@@ -250,7 +250,7 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <script>iidtListByPeriod.push(mainIidtList)</script>
             <iterate list="subTimePeriodList" entry="subTimePeriod">
-                <service-call name="mantle.party.TimeServices.get#TimePeriodInfo" in-map="{subTimePeriod:subTimePeriod}" out-map="subPeriodInfo"/>
+                <service-call name="mantle.party.TimeServices.get#TimePeriodInfo" in-map="{timePeriod:subTimePeriod}" out-map="subPeriodInfo"/>
                 <entity-find entity-name="mantle.account.invoice.InvoiceItemDetailTotal" list="subIidtList">
                     <econdition field-name="organizationPartyId" from="timePeriod.partyId"/>
                     <econdition field-name="glAccountId" operator="in" from="glAccountIds"/>
