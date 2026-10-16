@@ -433,7 +433,9 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="submitter == null"><return error="true" message="Submitter is required."/></if>
 
             <!-- Agents are optional, and are defined per employer, but this only uses one -->
-            <service-call name="mantle.other.TaxServices.get#PayerTaxInfo" in-map="{partyId:agentPartyId}" out-map="agent"/>
+            <set field="agent" from="null"/>
+            <if condition="agentPartyId">
+                <service-call name="mantle.other.TaxServices.get#PayerTaxInfo" in-map="{partyId:agentPartyId}" out-map="agent"/></if>
 
             <!-- get employmentList and timePeriod -->
             <service-call name="mantle.humanres.PayrollServices.get#TimePeriodEmployments"

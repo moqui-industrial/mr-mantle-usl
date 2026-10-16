@@ -3,7 +3,7 @@
 const effectiveTime = Date.now()
 const year = new Date(effectiveTime).getUTCFullYear()
 const day = (y, m, d) => Date.UTC(y, m - 1, d)
-let orgId, employeeId, relId, monthId, socSecId, employerId, dedId, garnishId
+let yearId, orgId, employeeId, relId, monthId, socSecId, employerId, dedId, garnishId
 
 spec({
     stepwise: true,
@@ -152,5 +152,66 @@ feature("workers comp rates and garnishment details", {
         wcGone == null
         n(garnish.flatAmount) == -600
         refused.includes("negative")
+    },
+})
+
+feature("employment and wage-and-tax info for the tax year", {
+    when() {
+        call("create#mantle.party.PartyIdentification", { partyId: orgId, partyIdTypeEnumId: "PtidFein", idValue: "98-7654321" })
+        call("create#mantle.party.PartyIdentification", { partyId: employeeId, partyIdTypeEnumId: "PtidSsn", idValue: "123-45-6789" })
+        call("mantle.party.ContactServices.store#PartyContactInfo", { partyId: orgId, postalContactMechPurposeId: "PostalTax", address1: "1 Payer Way", city: "Orem",
+                stateProvinceGeoId: "USA_UT", postalCode: "84057", countryGeoId: "USA", telecomContactMechPurposeId: "PhoneTax", countryCode: "1", areaCode: "801", contactNumber: "555-0400" })
+        yearId = call("mantle.ledger.LedgerServices.get#OrganizationFiscalTimePeriods", { organizationPartyId: orgId, filterDate: ec.user.nowTimestamp,
+                timePeriodTypeId: "FiscalYear" }).timePeriodList[0].timePeriodId
+        const info = call("mantle.humanres.PayrollDocumentServices.get#EmploymentInfo", { timePeriodId: yearId, partyRelationshipId: relId })
+        const wage = call("mantle.humanres.PayrollDocumentServices.get#EmploymentWageAndTaxInfo", { timePeriodId: yearId, partyRelationshipId: relId })
+        return { info, wage }
+    },
+    then({ info, wage }) {
+        info.employeeFirstName == "Tess"
+        info.employeeSsn == "123-45-6789"
+        info.employerName == "Payroll Tax Org"
+        info.employerEin == "98-7654321"
+        info.employerAddressString.includes("1 Payer Way")
+        info.employerPhoneString == "1-801-555-0400"
+        wage.hasAnyPay
+        n(wage.taxablePayAmount) >= 0
+        n(wage.socialTaxablePayAmount) == 5000
+        // the test adjustments name the federal authority; the social tax withheld is the employee share
+        n(wage.wageAndTaxInfoByTaxAuthorityId["UsaIrs"].socialTaxWithheldAmount) == 310
+        wage.federalTaxAuthorityIdList.includes("UsaIrs")
+    },
+})
+
+feature("W-2 form data, wage and tax records for the year, and the EFW2 file", {
+    when() {
+        const form = call("mantle.humanres.PayrollDocumentServices.get#UsaIrsW2FormData", { timePeriodId: yearId, partyRelationshipId: relId })
+        const created = call("mantle.humanres.PayrollDocumentServices.create#PeriodWageAndTaxRecords", { timePeriodId: yearId })
+        const statements = Array.from(ec.entity.find("mantle.other.tax.TaxStatement").condition("timePeriodId", yearId).list())
+        const period = ec.entity.find("mantle.party.time.TimePeriod").condition("timePeriodId", yearId).one()
+        return { form, created, statements, period }
+    },
+    then({ form, statements, period }) {
+        form.formId == "UsaIrsW2"
+        form.formMap.w2_b == "98-7654321"
+        form.formMap.w2_a == "123-45-6789"
+        statements.length == 1
+        statements[0].partyId == employeeId
+        statements[0].formResponseId != null
+        period.isClosed == "Y"
+    },
+})
+
+// generate#Efw2File is unfinished upstream: it builds the RA, RE, RW and RS records but never the RT, RU, RV and RF totals,
+// and never sets its fileText output, so this checks it runs through the employee and employer lookups for the closed year.
+feature("generate an EFW2 file for the closed year runs, and is refused without employments", {
+    when() {
+        const out = call("mantle.humanres.PayrollDocumentServices.generate#Efw2File", { timePeriodId: yearId, submitterPartyId: orgId })
+        const noPeriod = errorOf("mantle.humanres.PayrollDocumentServices.generate#Efw2File", { timePeriodId: "NO_SUCH_PERIOD", submitterPartyId: orgId })
+        return { out, noPeriod }
+    },
+    then({ out, noPeriod }) {
+        out != null
+        noPeriod != null
     },
 })
