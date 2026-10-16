@@ -10,11 +10,17 @@ moqui test mantle-usl --db snapshot                    # load once, restore the 
 moqui test mantle-usl --spec OrderToCashBasicFlow      # one spec and the specs its dependsOn names
 moqui test mantle-usl --spec OrderToCashBasicFlow --feature "ship Sales Order"
 moqui test mantle-usl --junit build/test-results       # JUnit XML for CI
+moqui test mantle-usl --coverage                       # list the services no spec called, per service file
+moqui test mantle-usl --coverage-report cov.txt        # the same with call counts, in a file
 moqui test mantle-usl --keep --log-level info          # keep the scratch runtime, more on the console
 ```
 
 The console shows a line per feature and the failures in full at the end; everything is logged to `runtime/log/moqui.log`.
 The design is in the mr-moqui repository, `plans/TestHarness.md`.
+
+Besides the ports of the Spock specs, there are specs without a Groovy original (HumanResServices, PayrollServices, BankFileServices,
+FinancialReports and others) that run the services the flows never reach; `plans/MantleFlowTests.md` in the mr-moqui repository lists them.
+A spec that needs its own books creates an organization and calls `init#PartyAccountingConfiguration` with `sourcePartyId: "DefaultSettings"`.
 
 ## A spec file
 
