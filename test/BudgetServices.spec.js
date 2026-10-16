@@ -124,3 +124,23 @@ feature("the budget expense reports list the expense accounts with budget and ac
         detail.detailInfoList != null
     },
 })
+
+feature("store a BudgetItemDetail, change it, and delete it by storing no amount", {
+    when() {
+        const seq = call("mantle.other.BudgetServices.store#BudgetItem", { budgetId, glAccountId: expenseAccountIds[1], amount: 400 }).budgetItemSeqId
+        const stored = call("mantle.other.BudgetServices.store#BudgetItemDetail", { budgetId, budgetItemSeqId: seq, amount: 25, description: "first" })
+        const detailId = stored.budgetItemDetailId
+        const read = ec.entity.find("mantle.other.budget.BudgetItemDetail").condition("budgetItemDetailId", detailId).one()
+        call("mantle.other.BudgetServices.store#BudgetItemDetail", { budgetId, budgetItemSeqId: seq, budgetItemDetailId: detailId, amount: 30 })
+        const updated = ec.entity.find("mantle.other.budget.BudgetItemDetail").condition("budgetItemDetailId", detailId).one()
+        call("mantle.other.BudgetServices.store#BudgetItemDetail", { budgetId, budgetItemSeqId: seq, budgetItemDetailId: detailId })
+        const gone = ec.entity.find("mantle.other.budget.BudgetItemDetail").condition("budgetItemDetailId", detailId).one()
+        return { detailId, read, updated, gone }
+    },
+    then({ detailId, read, updated, gone }) {
+        detailId != null
+        n(read.amount) == 25
+        n(updated.amount) == 30
+        gone == null
+    },
+})
