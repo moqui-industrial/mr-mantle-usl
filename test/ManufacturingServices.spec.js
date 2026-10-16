@@ -111,3 +111,24 @@ feature("unissue a component and the assembly components, then cancel the run", 
     },
     then({ status }) { status == "WeCancelled" },
 })
+
+feature("break down a produced assembly, reducing what the run produced", {
+    when() {
+        secondRunId = call("mantle.work.ManufacturingServices.create#ProductionRun", { workEffortName: "Run 2", facilityId, originFacilityId: facilityId,
+                produceProductId: "DEMO_1_1", produceEstimatedQuantity: 3, estimatedStartDate: effectiveTime }).workEffortId
+        const assetId = call("mantle.product.AssetServices.receive#Asset", { productId: "DEMO_1_1", quantity: 3, facilityId, ownerPartyId, assetTypeEnumId: "AstTpInventory",
+                workEffortId: secondRunId, receivedDate: effectiveTime }).assetId
+        const tooMany = errorOf("mantle.work.ManufacturingServices.breakDown#Assembly", { assetId, workEffortId: secondRunId, quantityToBreakDown: 10 })
+        const out = call("mantle.work.ManufacturingServices.breakDown#Assembly", { assetId, workEffortId: secondRunId, quantityToBreakDown: 2 })
+        const receipts = Array.from(ec.entity.find("mantle.product.receipt.AssetReceipt").condition("assetId", assetId).condition("workEffortId", secondRunId).list())
+        const asset = ec.entity.find("mantle.product.asset.Asset").condition("assetId", assetId).one()
+        return { tooMany, out, receipts, asset }
+    },
+    then({ tooMany, out, receipts, asset }) {
+        tooMany.includes("is more than Asset")
+        n(out.quantityBrokenDown) == 2
+        receipts.length >= 1
+        n(receipts.reduce((sum, r) => sum + n(r.quantityAccepted), 0)) == 1
+        n(asset.quantityOnHandTotal) == 1
+    },
+})
