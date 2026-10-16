@@ -602,9 +602,9 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="fromTimestamp" from="periodInfo.fromTimestamp"/>
             <set field="thruTimestamp" from="periodInfo.thruTimestamp"/>
 
-            <if condition="employment.fromDate != null &amp;&amp; employment.fromDate &gt; thruTimestamp">
+            <if condition="employment.fromDate != null &amp;&amp; Number(employment.fromDate) &gt; Number(thruTimestamp)">
                 <return message="Employee ${ec.resource.expand('PartyNameTemplate', '', fromDetail)} is not yet employed"/></if>
-            <if condition="employment.thruDate != null &amp;&amp; employment.thruDate &lt; fromTimestamp">
+            <if condition="employment.thruDate != null &amp;&amp; Number(employment.thruDate) &lt; Number(fromTimestamp)">
                 <return message="Employee ${ec.resource.expand('PartyNameTemplate', '', fromDetail)} is no longer employed"/></if>
 
             <if condition="salaryFlag == 'Y'"><then>

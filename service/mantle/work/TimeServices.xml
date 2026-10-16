@@ -404,10 +404,10 @@ along with this software (see the LICENSE.md file). If not, see
                 <field-map field-name="workEffortId" from="rootWorkEffortId"/>
             </entity-find-one>
             <if condition="rootWorkEffort">
-                <if condition="rootWorkEffort.estimatedStartDate &gt; actualStartDate">
+                <if condition="Number(rootWorkEffort.estimatedStartDate) &gt; Number(actualStartDate)">
                     <return error="true" message="Task start date outside of project's start date."/>
                 </if>
-                <if condition="rootWorkEffort.estimatedCompletionDate &amp;&amp; actualStartDate &amp;&amp; rootWorkEffort.estimatedCompletionDate &lt; actualStartDate">
+                <if condition="rootWorkEffort.estimatedCompletionDate &amp;&amp; actualStartDate &amp;&amp; Number(rootWorkEffort.estimatedCompletionDate) &lt; Number(actualStartDate)">
                     <return error="true" message="Task end date out side of project's end date."/>
                 </if>
             </if>
@@ -444,10 +444,10 @@ along with this software (see the LICENSE.md file). If not, see
 
             <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="workEffort"/>
 
-            <if condition="workEffort.estimatedStartDate &gt; fromDate">
+            <if condition="Number(workEffort.estimatedStartDate) &gt; Number(fromDate)">
                 <return error="true" message="Task start date outside of project's start date."/>
             </if>
-            <if condition="workEffort.estimatedCompletionDate &amp;&amp; fromDate &amp;&amp; workEffort.estimatedCompletionDate &lt; fromDate">
+            <if condition="workEffort.estimatedCompletionDate &amp;&amp; fromDate &amp;&amp; Number(workEffort.estimatedCompletionDate) &lt; Number(fromDate)">
                 <return error="true" message="Task end date out side of project's end date."/>
             </if>
 
@@ -464,8 +464,8 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="!workTypeEnumId">
                 <set field="workTypeEnumId" from="workEffortParty?.workTypeEnumId || workEffort.workTypeEnumId"/></if>
             <if condition="!fromDate"><set field="fromDate" from="workEffort.actualStartDate || workEffort.estimatedStartDate"/></if>
-            <if condition="!hours &amp;&amp; hours != 0"><set field="hours" from="workEffort.actualWorkDuration"/></if>
-            <if condition="!breakHours &amp;&amp; hours != 0"><set field="breakHours" from="workEffort.actualBreakDuration"/></if>
+            <if condition="hours == null"><set field="hours" from="workEffort.actualWorkDuration"/></if>
+            <if condition="(breakHours == null || toDecimal(breakHours).isZero()) &amp;&amp; (hours == null || !toDecimal(hours).isZero())"><set field="breakHours" from="workEffort.actualBreakDuration"/></if>
             <if condition="!clientPartyId">
                 <entity-find entity-name="mantle.work.effort.WorkEffortParty" list="clientWepList">
                     <econdition field-name="workEffortId"/>

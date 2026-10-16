@@ -242,7 +242,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <!-- compile set of productId values -->
             <set field="productIdSet" from="[]"/>
-            <if condition="productIds"><script>for (const id of productIds) if (!productIdSet.includes(id)) productIdSet.push(id)</script></if>
+            <if condition="productIds?.length"><script>for (const id of productIds) if (!productIdSet.includes(id)) productIdSet.push(id)</script></if>
             <if condition="productCategoryIds?.length">
                 <entity-find entity-name="mantle.product.category.ProductCategoryMember" list="pcmList" distinct="true">
                     <date-filter/>
@@ -273,7 +273,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- compile set of facilityId values -->
             <set field="facilityIdSet" from="[]"/>
-            <if condition="facilityIds"><script>for (const id of facilityIds) if (!facilityIdSet.includes(id)) facilityIdSet.push(id)</script></if>
+            <if condition="facilityIds?.length"><script>for (const id of facilityIds) if (!facilityIdSet.includes(id)) facilityIdSet.push(id)</script></if>
 
             <!-- ProductStore based values -->
             <if condition="productStoreId">
@@ -838,7 +838,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- check/lock explicit assetIds -->
             <set field="explicitAssetIdList" from="[]"/>
             <if condition="assetId"><script>explicitAssetIdList.push(assetId)</script></if>
-            <if condition="assetIdList"><script>for (const id of assetIdList) explicitAssetIdList.push(id)</script></if>
+            <if condition="assetIdList?.length"><script>for (const id of assetIdList) explicitAssetIdList.push(id)</script></if>
             <if condition="explicitAssetIdList.length">
                 <entity-find entity-name="mantle.product.asset.Asset" list="explicitAssetList">
                     <econdition field-name="assetId" operator="in" from="explicitAssetIdList"/>

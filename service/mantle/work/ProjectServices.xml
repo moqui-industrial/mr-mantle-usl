@@ -71,7 +71,7 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="workEffortId"/></out-parameters>
         <actions>
             <if condition="estimatedStartDate != null &amp;&amp; estimatedCompletionDate != null &amp;&amp;
-                           estimatedCompletionDate &lt; estimatedStartDate">
+                           Number(estimatedCompletionDate) &lt; Number(estimatedStartDate)">
                 <return error="true" message="Project date range is not valid."/>
             </if>
             <service-call name="create#mantle.work.effort.WorkEffort" out-map="context" in-map="context"/>
@@ -130,14 +130,14 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="rootWorkEffortId" from="workEffortId"/>
             </entity-find>
             <if condition="estimatedStartDate != null &amp;&amp; estimatedCompletionDate != null &amp;&amp;
-                           estimatedCompletionDate &lt; estimatedStartDate">
+                           Number(estimatedCompletionDate) &lt; Number(estimatedStartDate)">
                 <return error="true" message="Project date range is not valid."/>
             </if>
             <iterate list="tasksList" entry="task">
-                <if condition="estimatedStartDate &amp;&amp; task.actualStartDate &amp;&amp; estimatedStartDate &gt; task.actualStartDate">
+                <if condition="estimatedStartDate &amp;&amp; task.actualStartDate &amp;&amp; Number(estimatedStartDate) &gt; Number(task.actualStartDate)">
                     <return error="true" message="Project's new start date puts one or more tasks out of date range."/>
                 </if>
-                <if condition="estimatedCompletionDate &amp;&amp; task.actualStartDate &amp;&amp; estimatedCompletionDate &lt; task.actualStartDate">
+                <if condition="estimatedCompletionDate &amp;&amp; task.actualStartDate &amp;&amp; Number(estimatedCompletionDate) &lt; Number(task.actualStartDate)">
                     <return error="true" message="Project's new end date puts one or more tasks out of date range."/>
                 </if>
             </iterate>
@@ -146,10 +146,10 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="workEffortId"/>
                 </entity-find>
                 <iterate list="timeEntryList" entry="timeEntry">
-                    <if condition="estimatedStartDate &amp;&amp; timeEntry.fromDate &amp;&amp; estimatedStartDate &gt; timeEntry.fromDate">
+                    <if condition="estimatedStartDate &amp;&amp; timeEntry.fromDate &amp;&amp; Number(estimatedStartDate) &gt; Number(timeEntry.fromDate)">
                         <return error="true" message="Project's new start date puts one or more time entries out of date range."/>
                     </if>
-                    <if condition="estimatedCompletionDate &amp;&amp; timeEntry.fromDate &amp;&amp; estimatedCompletionDate &lt; timeEntry.fromDate">
+                    <if condition="estimatedCompletionDate &amp;&amp; timeEntry.fromDate &amp;&amp; Number(estimatedCompletionDate) &lt; Number(timeEntry.fromDate)">
                         <return error="true" message="Project's new end date puts one or more time entries out of date range."/>
                     </if>
                 </iterate>

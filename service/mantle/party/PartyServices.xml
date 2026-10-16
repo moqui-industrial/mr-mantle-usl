@@ -982,12 +982,12 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="organizationPartyId" from="partyBadge.organizationPartyId"/>
 
             <!-- check valid dates -->
-            <if condition="partyBadge.fromDate &amp;&amp; partyBadge.fromDate &gt; ec.user.nowTimestamp">
+            <if condition="partyBadge.fromDate &amp;&amp; Number(partyBadge.fromDate) &gt; Number(ec.user.nowTimestamp)">
                 <set field="scanResultEnumId" value="PbsrNotYetValid"/>
                 <service-call name="create#mantle.party.PartyBadgeScan" in-map="context" transaction="force-new"/>
                 <return error="true" message="Badge not yet valid"/>
             </if>
-            <if condition="partyBadge.thruDate &amp;&amp; partyBadge.thruDate &lt; ec.user.nowTimestamp">
+            <if condition="partyBadge.thruDate &amp;&amp; Number(partyBadge.thruDate) &lt; Number(ec.user.nowTimestamp)">
                 <set field="scanResultEnumId" value="PbsrExpired"/>
                 <service-call name="create#mantle.party.PartyBadgeScan" in-map="context" transaction="force-new"/>
                 <return error="true" message="Badge expired"/>

@@ -36,7 +36,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="(childPeriodList?.length > 0)"><then>
                     <!-- add next child periods as needed -->
                     <set field="lastChildPeriod" from="childPeriodList[childPeriodList.length - 1]"/>
-                    <while condition="lastChildPeriod.thruDate &lt; parentPeriod.thruDate">
+                    <while condition="Number(lastChildPeriod.thruDate) &lt; Number(parentPeriod.thruDate)">
                         <service-call name="mantle.party.TimeServices.getOrCreate#NextTimePeriod" out-map="createNextChildOut"
                                       in-map="{timePeriodId:lastChildPeriod.timePeriodId}" out-map-add-to-existing="false"/>
                         <set field="lastChildPeriod" from="createNextChildOut.nextTimePeriod"/>
@@ -70,7 +70,7 @@ along with this software (see the LICENSE.md file). If not, see
                     </else></if>
 
                     <!-- create next periods until we're to/past the thruDate of the current parentPeriod -->
-                    <while condition="lastChildPeriod.thruDate &lt; parentPeriod.thruDate">
+                    <while condition="Number(lastChildPeriod.thruDate) &lt; Number(parentPeriod.thruDate)">
                         <service-call name="mantle.party.TimeServices.getOrCreate#NextTimePeriod" out-map="createNextChildOut"
                                       in-map="{timePeriodId:lastChildPeriod.timePeriodId}" out-map-add-to-existing="false"/>
                         <set field="lastChildPeriod" from="createNextChildOut.nextTimePeriod"/>

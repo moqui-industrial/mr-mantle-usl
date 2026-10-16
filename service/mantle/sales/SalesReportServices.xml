@@ -74,11 +74,11 @@ along with this software (see the LICENSE.md file). If not, see
                     {field: {name: 'partStatusId', op: 'in', values: placedStatuses}},
                     {field: {name: 'statusId', op: 'in', values: placedStatuses}}
             ]
-            if (vendorPartyIds) filterList.push({field: {name: 'vendorPartyId', op: 'in', values: vendorPartyIds}})
-            if (customerPartyIds) filterList.push({field: {name: 'customerPartyId', op: 'in', values: customerPartyIds}})
-            if (productStoreIds) filterList.push({field: {name: 'productStoreId', op: 'in', values: productStoreIds}})
-            if (customerClassificationIds) filterList.push({field: {name: 'customerClassId', op: 'in', values: customerClassificationIds}})
-            if (productIds) filterList.push({field: {name: 'productId', op: 'in', values: productIds}})
+            if (vendorPartyIds?.length) filterList.push({field: {name: 'vendorPartyId', op: 'in', values: vendorPartyIds}})
+            if (customerPartyIds?.length) filterList.push({field: {name: 'customerPartyId', op: 'in', values: customerPartyIds}})
+            if (productStoreIds?.length) filterList.push({field: {name: 'productStoreId', op: 'in', values: productStoreIds}})
+            if (customerClassificationIds?.length) filterList.push({field: {name: 'customerClassId', op: 'in', values: customerClassificationIds}})
+            if (productIds?.length) filterList.push({field: {name: 'productId', op: 'in', values: productIds}})
 
             const histoMap = {field:dateField, calendar_interval:('1' + interval), format:dateFormat, order:{_key:'desc'}}
             if (offset) histoMap.offset = offset
@@ -231,11 +231,11 @@ along with this software (see the LICENSE.md file). If not, see
                     {field: {name: dateField, op: 'range', gte: fromDate.getTime(), lt: thruMillis}},
                     {field: {name: 'statusId', op: 'in', values: ['InvoiceFinalized', 'InvoiceSent', 'InvoiceAcked', 'InvoicePmtRecvd']}}
             ]
-            if (fromPartyIds) filterList.push({field: {name: 'fromPartyId', op: 'in', values: fromPartyIds}})
-            if (toPartyIds) filterList.push({field: {name: 'toPartyId', op: 'in', values: toPartyIds}})
-            if (productStoreIds) filterList.push({field: {name: 'productStoreId', op: 'in', values: productStoreIds}})
-            if (customerClassificationIds) filterList.push({field: {name: 'customerClassId', op: 'in', values: customerClassificationIds}})
-            if (productIds) filterList.push({field: {name: 'productId', op: 'in', values: productIds}})
+            if (fromPartyIds?.length) filterList.push({field: {name: 'fromPartyId', op: 'in', values: fromPartyIds}})
+            if (toPartyIds?.length) filterList.push({field: {name: 'toPartyId', op: 'in', values: toPartyIds}})
+            if (productStoreIds?.length) filterList.push({field: {name: 'productStoreId', op: 'in', values: productStoreIds}})
+            if (customerClassificationIds?.length) filterList.push({field: {name: 'customerClassId', op: 'in', values: customerClassificationIds}})
+            if (productIds?.length) filterList.push({field: {name: 'productId', op: 'in', values: productIds}})
             const filter = {bool:{all:filterList}}
 
             if (!ec.search.isAvailable()) { ec.message.addMessage("Search is not configured, no sales invoice summary", "danger"); return }
