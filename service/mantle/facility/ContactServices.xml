@@ -298,7 +298,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-create value-field="newFcm"/>
             </iterate>
 
-            <set field="result.contactMechId" from="newContactMech.contactMechId"/>
+            <set field="contactMechId" from="newContactMech.contactMechId"/>
         </actions>
     </service>
 
@@ -371,7 +371,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-create value-field="newFcm"/>
             </iterate>
 
-            <set field="result.contactMechId" from="newContactMech.contactMechId"/>
+            <set field="contactMechId" from="newContactMech.contactMechId"/>
         </actions>
     </service>
 
@@ -447,7 +447,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-create value-field="newFcm"/>
             </iterate>
 
-            <set field="result.contactMechId" from="newContactMech.contactMechId"/>
+            <set field="contactMechId" from="newContactMech.contactMechId"/>
         </actions>
     </service>
 
