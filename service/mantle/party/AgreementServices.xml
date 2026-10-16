@@ -54,7 +54,7 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="contentLocation"/></out-parameters>
         <actions>
             <set field="filename" from="contentFile.getName()"/>
-            <if condition="org.moqui.resource.ResourceReference.isTextFilename(filename)"><then>
+            <if condition="ResourceReference.isTextFilename(filename)"><then>
                 <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content'"/>
             </then><else>
                 <set field="contentRoot" from="ec.user.getPreference('mantle.content.large.root') || 'dbresource://mantle/content'"/>
@@ -63,7 +63,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <set field="docRr" from="ec.resource.getLocationReference(contentLocation)"/>
             <script>
-                fileStream = contentFile.getInputStream()
+                const fileStream = contentFile.getInputStream()
                 try { docRr.putStream(fileStream) } finally { fileStream.close() }
             </script>
 

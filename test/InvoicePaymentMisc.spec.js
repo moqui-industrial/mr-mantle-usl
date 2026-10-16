@@ -209,6 +209,11 @@ feature("invoice content text", {
     when() {
         const contentId = call("mantle.account.InvoiceServices.create#InvoiceContent", { invoiceId, invoiceContentTypeEnumId: "IvctOther", description: "note" }).invoiceContentId
         call("mantle.account.InvoiceServices.update#InvoiceContent", { invoiceContentId: contentId, description: "note edited" })
+        // with a file: saved to the content location, then replaced by an update
+        const fileContentId = call("mantle.account.InvoiceServices.create#InvoiceContent", { invoiceId, invoiceContentTypeEnumId: "IvctOther", contentFile: uploadedFile("terms.txt", "net 30") }).invoiceContentId
+        call("mantle.account.InvoiceServices.update#InvoiceContent", { invoiceContentId: fileContentId, contentFile: uploadedFile("terms2.txt", "net 45") })
+        const savedContent = ec.entity.find("mantle.account.invoice.InvoiceContent").condition("invoiceContentId", fileContentId).one()
+        if (!savedContent.contentLocation.includes("terms")) throw new Error("content location not saved: " + savedContent.contentLocation)
         const location = call("mantle.account.InvoiceServices.get#InvoiceContentLocation", { invoiceId, contentTypeEnumIdList: ["IvctOther"] })
         return { contentId, location }
     },

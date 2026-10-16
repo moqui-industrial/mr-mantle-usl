@@ -130,6 +130,8 @@ feature("work effort start and end, and its content", {
         const startEnd = call("mantle.work.WorkEffortServices.get#WorkEffortStartEnd", { workEffortId: "WPS-1" })
         const contentId = call("mantle.work.WorkEffortServices.create#WorkEffortContent", { workEffortId: "WPS-1", workEffortContentTypeEnumId: "WecAttachment", description: "note" }).workEffortContentId
         call("mantle.work.WorkEffortServices.update#WorkEffortContent", { workEffortContentId: contentId, description: "note edited" })
+        const weFileId = call("mantle.work.WorkEffortServices.create#WorkEffortContent", { workEffortId: "WPS-1", workEffortContentTypeEnumId: "WecAttachment", contentFile: uploadedFile("we.txt", "task file") }).workEffortContentId
+        call("mantle.work.WorkEffortServices.update#WorkEffortContent", { workEffortContentId: weFileId, contentFile: uploadedFile("we2.txt", "task file 2") })
         const loc = call("mantle.work.WorkEffortServices.get#WorkEffortContentLocation", { workEffortId: "WPS-1", contentTypeEnumIdList: ["WecAttachment"] })
         return { startEnd, contentId, loc }
     },

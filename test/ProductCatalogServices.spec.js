@@ -134,6 +134,10 @@ feature("product content from text", {
         const catContentId = call("mantle.product.ProductServices.create#ProductCategoryContent", { productCategoryId: categoryId,
                 productCategoryContentTypeEnumId: "PcctDescription", contentText: "All shirts" }).productCategoryContentId
         call("mantle.product.ProductServices.update#ProductCategoryContent", { productCategoryContentId: catContentId, contentText: "All the shirts" })
+        const prodFileId = call("mantle.product.ProductServices.create#ProductContent", { productId: baseId, productContentTypeEnumId: "PcntImageLarge", contentFile: uploadedFile("p.txt", "big image") }).productContentId
+        call("mantle.product.ProductServices.update#ProductContent", { productContentId: prodFileId, contentFile: uploadedFile("p2.txt", "big image 2") })
+        const catFileId = call("mantle.product.ProductServices.create#ProductCategoryContent", { productCategoryId: categoryId, productCategoryContentTypeEnumId: "PcctDescription", contentFile: uploadedFile("c.txt", "cat file") }).productCategoryContentId
+        call("mantle.product.ProductServices.update#ProductCategoryContent", { productCategoryContentId: catFileId, contentFile: uploadedFile("c2.txt", "cat file 2") })
         return { content, catContentId }
     },
     then({ content, catContentId }) {

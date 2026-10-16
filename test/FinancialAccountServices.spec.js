@@ -169,3 +169,26 @@ feature("pay from a financial account through the local gateway: authorize, rele
         notAuthorized.includes("No authorization associated")
     },
 })
+
+feature("an invoice item for a financial account makes its deposit or withdrawal once", {
+    when() {
+        const invoiceId = call("mantle.account.InvoiceServices.create#Invoice", { fromPartyId: orgId, toPartyId: ownerId, invoiceTypeEnumId: "InvoiceSales",
+                invoiceDate: effectiveTime - 3600000, currencyUomId: "USD" }).invoiceId
+        const itemSeqId = call("mantle.account.InvoiceServices.create#InvoiceItem", { invoiceId, itemTypeEnumId: "ItemProduct", finAccountId, quantity: 1, amount: 30,
+                description: "credit purchase" }).invoiceItemSeqId
+        const before = account(finAccountId)
+        const first = call("mantle.account.FinancialAccountServices.checkCreate#InvoiceItemTrans", { invoiceId, invoiceItemSeqId: itemSeqId })
+        const item = ec.entity.find("mantle.account.invoice.InvoiceItem").condition("invoiceId", invoiceId).condition("invoiceItemSeqId", itemSeqId).one()
+        const second = call("mantle.account.FinancialAccountServices.checkCreate#InvoiceItemTrans", { invoiceId, invoiceItemSeqId: itemSeqId })
+        const wrongParty = call("mantle.account.InvoiceServices.create#Invoice", { fromPartyId: "ORG_ZIZI_RETAIL", toPartyId: "JoeDist", invoiceTypeEnumId: "InvoiceSales", invoiceDate: effectiveTime - 3600000, currencyUomId: "USD" }).invoiceId
+        const wrongSeq = call("mantle.account.InvoiceServices.create#InvoiceItem", { invoiceId: wrongParty, itemTypeEnumId: "ItemProduct", finAccountId, quantity: 1, amount: 5, description: "wrong" }).invoiceItemSeqId
+        const refused = errorOf("mantle.account.FinancialAccountServices.checkCreate#InvoiceItemTrans", { invoiceId: wrongParty, invoiceItemSeqId: wrongSeq })
+        return { before, first, item, second, refused }
+    },
+    then({ first, item, second, refused }) {
+        first.finAccountTransId != null
+        item.finAccountTransId == first.finAccountTransId
+        second.finAccountTransId == first.finAccountTransId
+        refused.includes("is not a party to invoice")
+    },
+})

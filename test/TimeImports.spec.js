@@ -150,3 +150,19 @@ feature("invoice a worker's time entries for a vendor, and the stub work effort 
         posted != null
     },
 })
+
+feature("time files are uploaded: the summary and the detail", {
+    when() {
+        const before = entriesOf(workerA).length
+        call("mantle.work.TimeServices.upload#TimeSummaryFile", { clientPartyId: clientId, effectiveDate: day(2026, 11, 21) + 17 * 3600000,
+                timeFile: uploadedFile("summary.csv", `${workerA},,12,,,,,\n`, "text/csv") })
+        call("mantle.work.TimeServices.upload#TimeDetailFile", { clientPartyId: clientId, defaultDate: day(2026, 11, 22) + 12 * 3600000,
+                timeFile: uploadedFile("detail.csv", `${workerA},,Standard,,,3.5,\n`, "text/csv") })
+        return { before, after: entriesOf(workerA) }
+    },
+    then({ before, after }) {
+        after.length == before + 2
+        after.some(e => n(e.hours) == 12)
+        after.some(e => n(e.hours) == 3.5)
+    },
+})

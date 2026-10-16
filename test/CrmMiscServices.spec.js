@@ -50,6 +50,8 @@ feature("messages, replies and finding communication events", {
         const contentId = call("mantle.party.CommunicationServices.create#CommunicationEventContent", { communicationEventId: messageId, communicationContentTypeEnumId: "CecOther", description: "att" }).communicationEventContentId
         call("mantle.party.CommunicationServices.update#CommunicationEventContent", { communicationEventContentId: contentId, description: "att edited" })
         call("mantle.party.CommunicationServices.get#CommunicationEventContentLocation", { communicationEventId: messageId, contentTypeEnumIdList: ["CecOther"] })
+        const commFileId = call("mantle.party.CommunicationServices.create#CommunicationEventContent", { communicationEventId: messageId, communicationContentTypeEnumId: "CecOther", contentFile: uploadedFile("mail.txt", "attachment") }).communicationEventContentId
+        call("mantle.party.CommunicationServices.update#CommunicationEventContent", { communicationEventContentId: commFileId, contentFile: uploadedFile("mail2.txt", "attachment 2") })
         return { reply, found, contentId, parent: cev(reply.communicationEventId) }
     },
     then({ reply, found, contentId, parent }) {
@@ -77,6 +79,8 @@ feature("requests: create, update, comment, replace a party, and a contact reque
         const contentId = call("mantle.request.RequestServices.create#RequestContent", { requestId, requestContentTypeEnumId: "RqctAttachment", description: "file" }).requestContentId
         call("mantle.request.RequestServices.update#RequestContent", { requestContentId: contentId, description: "file edited" })
         call("mantle.request.RequestServices.get#RequestContentLocation", { requestId, contentTypeEnumIdList: ["RqctAttachment"] })
+        const reqFileId = call("mantle.request.RequestServices.create#RequestContent", { requestId, requestContentTypeEnumId: "RqctAttachment", contentFile: uploadedFile("req.txt", "details") }).requestContentId
+        call("mantle.request.RequestServices.update#RequestContent", { requestContentId: reqFileId, contentFile: uploadedFile("req2.txt", "details 2") })
         const contact = call("mantle.request.RequestServices.create#ContactRequest", { requestName: "Contact us", description: "Question", firstName: "Web", lastName: "Visitor", emailAddress: "visitor@example.com" })
         return { request: ec.entity.find("mantle.request.Request").condition("requestId", requestId).one(), comments: comments.length, edited, left, parties, contentId, contact }
     },
@@ -133,6 +137,11 @@ feature("equipment and maintenance", {
         if (!ec.entity.find("moqui.basic.Enumeration").condition("enumId", "AmctOther").one()) call("create#moqui.basic.Enumeration", { enumId: "AmctOther", description: "Other", enumTypeId: "AssetMaintContentType" })
         const maintContent = call("mantle.product.EquipmentServices.create#AssetMaintenanceContent", { assetMaintenanceId: maint.assetMaintenanceId, contentTypeEnumId: "AmctOther", description: "photo" })
         call("mantle.product.EquipmentServices.update#AssetMaintenanceContent", { assetMaintenanceId: maint.assetMaintenanceId, contentDate: maintContent.contentDate, description: "photo edited" })
+        // the content is keyed by its date, so the second one comes a moment later
+        ec.user.setEffectiveTime(effectiveTime + 5000)
+        const maintFile = call("mantle.product.EquipmentServices.create#AssetMaintenanceContent", { assetMaintenanceId: maint.assetMaintenanceId, contentTypeEnumId: "AmctOther", contentFile: uploadedFile("maint.txt", "log") })
+        call("mantle.product.EquipmentServices.update#AssetMaintenanceContent", { assetMaintenanceId: maint.assetMaintenanceId, contentDate: maintFile.contentDate, contentFile: uploadedFile("maint2.txt", "log 2") })
+        ec.user.setEffectiveTime(effectiveTime)
         const after = call("mantle.product.EquipmentServices.get#AssetMaintenanceNeeded", { assetId: equipmentId, productMaintenanceId })
         return { before, maint, after }
     },

@@ -49,7 +49,6 @@ NOTE: these services are deprecated along with the multi-tenant functionality in
 
             <service-call name="org.moqui.impl.TenantServices.provision#TenantDatabase" in-map="Object.assign({}, tenantMap, userMap, {waitForSetup:true})"/>
 
-            <log level="warn" message="TenantSubscriptionServices.init#Tenant after provision#TenantDatabase cur tenant ${ec.tenantId}, tx cache active ${ec.transaction.isTransactionCacheActive()}, tx ${ec.transaction.getTransactionManager().getTransaction()}"/>
             <set field="subscription.resourceInstanceId" from="tenantId"/>
             <entity-update value-field="subscription"/>
             <!-- <log message="========== Init tenant ID ${provisionResult.tenantId}"/> -->

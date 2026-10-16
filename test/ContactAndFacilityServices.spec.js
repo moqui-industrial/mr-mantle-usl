@@ -235,3 +235,16 @@ feature("update the other contact info of a facility by purpose", {
         open[0].contactMechId == second.contactMechId
     },
 })
+
+feature("a facility certification document is stored and its record updated", {
+    when() {
+        const certId = call("create#mantle.facility.FacilityCertification", { facilityId, otherCertId: "CERT-1" }).facilityCertificationId
+        call("mantle.facility.FacilityServices.update#FacilityCertification", { facilityCertificationId: certId, auditScore: "95", documentFile: uploadedFile("cert.txt", "certified") })
+        const cert = ec.entity.find("mantle.facility.FacilityCertification").condition("facilityCertificationId", certId).one()
+        return { cert }
+    },
+    then({ cert }) {
+        cert.auditScore == "95"
+        cert.documentLocation.includes("cert.txt")
+    },
+})

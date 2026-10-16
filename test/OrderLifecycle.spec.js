@@ -105,6 +105,8 @@ feature("order content text and the 50/50 payment split", {
     when() {
         const contentId = call("mantle.order.OrderServices.create#OrderContent", { orderId, orderContentTypeEnumId: "OctOther", description: "po note" }).orderContentId
         call("mantle.order.OrderServices.update#OrderContent", { orderContentId: contentId, description: "po note edited" })
+        const orderFileId = call("mantle.order.OrderServices.create#OrderContent", { orderId, orderContentTypeEnumId: "OctOther", contentFile: uploadedFile("po.txt", "purchase order") }).orderContentId
+        call("mantle.order.OrderServices.update#OrderContent", { orderContentId: orderFileId, contentFile: uploadedFile("po2.txt", "purchase order 2") })
         call("mantle.order.OrderServices.create#OrderPayments50Split", { orderId, orderPartSeqId: partSeqId, fromPartyId: customerPartyId, toPartyId: vendorPartyId, amount: 100, paymentInstrumentEnumId: "PiCompanyCheck",
                 dueDate: effectiveTime + 30 * 86400000 })
         const payments = Array.from(ec.entity.find("mantle.account.payment.Payment").condition("orderId", orderId).list())
@@ -190,9 +192,11 @@ feature("recurring orders", {
         const copy = call("mantle.order.OrderServices.create#RecurringOrder", { baseOrderId: r.orderId })
         call("mantle.order.OrderServices.create#RecurringOrders", {})
         const base = header(r.orderId)
-        return { bad, recur, copy, base }
+        const display = call("mantle.order.OrderInfoServices.get#OrderDisplayInfo", { orderId: r.orderId })
+        return { bad, recur, copy, base, display }
     },
-    then({ bad, recur, copy, base }) {
+    then({ bad, recur, copy, base, display }) {
+        display.recurCronDescription.length > 0
         bad.includes("Invalid Cron expression")
         recur.recurCronExpression == "0 0 6 1 * ?"
         copy.orderId != null

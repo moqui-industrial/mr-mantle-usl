@@ -181,7 +181,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <order-by field-name="entryDate"/>
             </entity-find>
             <if condition="orderHeader.recurCronExpression">
-                <set field="recurCronDescription" from="org.moqui.impl.service.ScheduledJobRunner.getCronDescription(orderHeader.recurCronExpression, ec.user.getLocale(), true)"/>
+                <set field="recurCronDescription" from="ec.service.getCronDescription(orderHeader.recurCronExpression, ec.user.getLocale(), true)"/>
             </if>
 
             <entity-find entity-name="moqui.basic.EnumGroupMember" list="productItemTypeEgms" cache="true">

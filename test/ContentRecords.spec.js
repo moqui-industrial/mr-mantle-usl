@@ -32,12 +32,17 @@ feature("a payment's content records", {
         call("mantle.account.PaymentServices.update#PaymentContent", { paymentContentId: contentId, description: "receipt edited" })
         const content = ec.entity.find("mantle.account.payment.PaymentContent").condition("paymentContentId", contentId).one()
         const location = call("mantle.account.PaymentServices.get#PaymentContentLocation", { paymentId, contentTypeEnumIdList: [type] })
+        const fileId = call("mantle.account.PaymentServices.create#PaymentContent", { paymentId, contentTypeEnumId: type, contentFile: uploadedFile("pay.txt", "proof") }).paymentContentId
+        call("mantle.account.PaymentServices.update#PaymentContent", { paymentContentId: fileId, contentFile: uploadedFile("pay2.txt", "proof 2") })
         return { content, location, contentId }
     },
     then({ content, location, contentId }) {
         contentId != null
         content.description == "receipt edited"
         content.paymentId == paymentId
+        // the entity's defaults: the effective time and the signed-in user
+        String(content.contentDate) == String(effectiveTime)
+        content.userId != null
         location.paymentContent.paymentContentId == contentId
     },
 })
@@ -49,6 +54,8 @@ feature("an agreement's content records", {
         const type = enumOf("AgreementContentType")
         const contentId = call("mantle.party.AgreementServices.create#AgreementContent", { agreementId, contentTypeEnumId: type, description: "terms" }).agreementContentId
         call("mantle.party.AgreementServices.update#AgreementContent", { agreementContentId: contentId, description: "terms edited" })
+        const fileId = call("mantle.party.AgreementServices.create#AgreementContent", { agreementId, contentTypeEnumId: type, contentFile: uploadedFile("agr.txt", "signed") }).agreementContentId
+        call("mantle.party.AgreementServices.update#AgreementContent", { agreementContentId: fileId, contentFile: uploadedFile("agr2.txt", "signed 2") })
         return { content: ec.entity.find("mantle.party.agreement.AgreementContent").condition("agreementContentId", contentId).one() }
     },
     then({ content }) {
@@ -62,6 +69,8 @@ feature("a party's content records", {
         const type = enumOf("PartyContentType")
         const contentId = call("mantle.party.PartyServices.create#PartyContent", { partyId: personId, partyContentTypeEnumId: type, description: "photo" }).partyContentId
         call("mantle.party.PartyServices.update#PartyContent", { partyContentId: contentId, description: "photo edited" })
+        const fileId = call("mantle.party.PartyServices.create#PartyContent", { partyId: personId, partyContentTypeEnumId: type, contentFile: uploadedFile("face.txt", "face") }).partyContentId
+        call("mantle.party.PartyServices.update#PartyContent", { partyContentId: fileId, contentFile: uploadedFile("face2.txt", "face 2") })
         const content = ec.entity.find("mantle.party.PartyContent").condition("partyContentId", contentId).one()
         const location = call("mantle.party.PartyServices.get#PartyContentLocation", { partyId: personId, partyContentTypeEnumIdList: [type] })
         return { content, location }

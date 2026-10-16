@@ -218,3 +218,24 @@ feature("statements arrive as system messages and are consumed through the payme
         afterBai == afterOfx + 1
     },
 })
+
+feature("statement files are uploaded: OFX and BAI 2 files and their missing-file errors", {
+    when() {
+        const before = ec.entity.find("mantle.account.method.PaymentMethodTrans").condition("paymentMethodId", bankId).count()
+        call("mantle.account.OfxServices.upload#OfxVersion1", { paymentMethodId: bankId, ofxFile: uploadedFile("stmt.ofx", ofx.replace("OFX1", "OFXUP1").replace("OFX2", "OFXUP2").replace("OFX3", "OFXUP3")) })
+        const afterOfx = ec.entity.find("mantle.account.method.PaymentMethodTrans").condition("paymentMethodId", bankId).count()
+        const bai = ["01,SENDER,RECEIVER,260314,1200,1,80,,2/", `02,${routing},ORIG,1,260314,2359,USD,2/`, `03,${account},USD,015,100000,,,045,100000,,/`,
+                "16,108,5000,S,2500,2500,Deposit memo,UP-REF", "49,205000,4/", "98,205000,1,6/", "99,205000,1,8/"].join("\n")
+        call("mantle.account.BaiServices.upload#BaiVersion2", { paymentMethodId: bankId, baiFile: uploadedFile("stmt.bai", bai) })
+        const afterBai = ec.entity.find("mantle.account.method.PaymentMethodTrans").condition("paymentMethodId", bankId).count()
+        const noOfx = errorOf("mantle.account.OfxServices.upload#OfxVersion1", { paymentMethodId: bankId })
+        const noBai = errorOf("mantle.account.BaiServices.upload#BaiVersion2", { paymentMethodId: bankId })
+        return { before, afterOfx, afterBai, noOfx, noBai }
+    },
+    then({ before, afterOfx, afterBai, noOfx, noBai }) {
+        afterOfx == before + 3
+        afterBai == afterOfx + 1
+        noOfx != null
+        noBai != null
+    },
+})

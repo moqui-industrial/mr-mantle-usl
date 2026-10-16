@@ -102,6 +102,8 @@ feature("pack the rest, ship, and add content", {
         call("create#moqui.basic.Enumeration", { enumId: "ShcntTestBol", enumTypeId: "ShipmentContentType", description: "Bill of lading" })
         const contentId = call("mantle.shipment.ShipmentServices.create#ShipmentContent", { shipmentId, shipmentContentTypeEnumId: "ShcntTestBol", description: "bol" }).shipmentContentId
         call("mantle.shipment.ShipmentServices.update#ShipmentContent", { shipmentContentId: contentId, description: "bol edited" })
+        const shFileId = call("mantle.shipment.ShipmentServices.create#ShipmentContent", { shipmentId, shipmentContentTypeEnumId: "ShcntTestBol", contentFile: uploadedFile("bol.txt", "bol text") }).shipmentContentId
+        call("mantle.shipment.ShipmentServices.update#ShipmentContent", { shipmentContentId: shFileId, contentFile: uploadedFile("bol2.txt", "bol text 2") })
         return { shipped, contentId }
     },
     then({ shipped, contentId }) {
