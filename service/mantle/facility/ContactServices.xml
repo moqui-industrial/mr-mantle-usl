@@ -237,7 +237,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-one entity-name="moqui.basic.GeoPoint" value-field="origGeoPoint"/>
                 <set field="newGeoPoint" from="origGeoPoint.cloneValue()"/>
                 <entity-set value-field="newGeoPoint" include="nonpk"/>
-                <if condition="newGeoPoint != origGeoPoint">
+                <if condition="!newGeoPoint.equals(origGeoPoint)">
                     <set field="newGeoPoint.geoPointId" from="null"/>
                     <entity-sequenced-id-primary value-field="newGeoPoint"/>
                     <entity-create value-field="newGeoPoint"/>
@@ -253,7 +253,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <set field="newPostalAddress" from="origPostalAddress.cloneValue()"/>
             <entity-set value-field="newPostalAddress" include="nonpk" set-if-empty="true"/>
-            <if condition="newPostalAddress == origPostalAddress">
+            <if condition="newPostalAddress.equals(origPostalAddress)">
                 <log message="No fields were different for Postal Address with ID [${contactMechId}], not updating."/>
                 <return/>
             </if>
@@ -328,7 +328,7 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.party.contact.TelecomNumber" value-field="origTelecomNumber"/>
             <script>newTelecomNumber = origTelecomNumber.cloneValue()</script>
             <entity-set value-field="newTelecomNumber" include="nonpk"/>
-            <if condition="newTelecomNumber == origTelecomNumber">
+            <if condition="newTelecomNumber.equals(origTelecomNumber)">
                 <log message="No fields were different for Telecom Number with ID [${contactMechId}], not updating."/>
                 <return/>
             </if>
@@ -419,7 +419,7 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.party.contact.ContactMech" value-field="origContactMech"/>
             <script>newContactMech = origContactMech.cloneValue()</script>
             <set field="newContactMech.infoString" from="infoString"/>
-            <if condition="newContactMech == origContactMech">
+            <if condition="newContactMech.equals(origContactMech)">
                 <log message="No fields were different for Postal Address with ID [${contactMechId}], not updating."/>
                 <return/>
             </if>

@@ -219,3 +219,19 @@ feature("Facility contact info services", {
         gone.telecomContactMechId == null
     },
 })
+
+feature("update the other contact info of a facility by purpose", {
+    when() {
+        const first = call("mantle.facility.ContactServices.update#FacilityContactOther", { facilityId, infoString: "dock-line", contactMechPurposeId: "EmailPrimary" })
+        const second = call("mantle.facility.ContactServices.update#FacilityContactOther", { facilityId, infoString: "dock-line-2", contactMechPurposeId: "EmailPrimary" })
+        const open = Array.from(ec.entity.find("mantle.facility.FacilityContactMech").condition("facilityId", facilityId).condition("contactMechPurposeId", "EmailPrimary").condition("thruDate", null).list())
+        return { first, second, open }
+    },
+    then({ first, second, open }) {
+        first.contactMechId != null
+        second.contactMechId != first.contactMechId
+        // the older association was expired
+        open.length == 1
+        open[0].contactMechId == second.contactMechId
+    },
+})

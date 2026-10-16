@@ -451,7 +451,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="newPaymentMethod" from="origPaymentMethod.cloneValue()"/>
             <entity-set value-field="newPaymentMethod" include="nonpk"/>
 
-            <if condition="newCreditCard == origCreditCard &amp;&amp; newPaymentMethod == origPaymentMethod">
+            <if condition="newCreditCard.equals(origCreditCard) &amp;&amp; newPaymentMethod.equals(origPaymentMethod)">
                 <log message="No fields were different for Credit Card with ID ${paymentMethodId}, not updating"/>
                 <return/>
             </if>
@@ -526,7 +526,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="newPaymentMethod" from="origPaymentMethod.cloneValue()"/>
             <entity-set value-field="newPaymentMethod" include="nonpk"/>
 
-            <if condition="newBankAccount == origBankAccount &amp;&amp; newPaymentMethod == origPaymentMethod">
+            <if condition="newBankAccount.equals(origBankAccount) &amp;&amp; newPaymentMethod.equals(origPaymentMethod)">
                 <log message="No fields were different for Bank Account with ID ${paymentMethodId}, not updating"/>
                 <return/>
             </if>

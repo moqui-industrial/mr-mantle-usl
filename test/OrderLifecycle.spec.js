@@ -199,3 +199,13 @@ feature("recurring orders", {
         header(copy.orderId).parentOrderId != null
     },
 })
+
+feature("propose an order", {
+    when() {
+        const created = newOrder()
+        call("mantle.order.OrderServices.add#OrderProductQuantity", { orderId: created.orderId, orderPartSeqId: created.partSeqId, productId: "DEMO_1_1", quantity: 1, unitAmount: 9, requireInventory: false })
+        call("mantle.order.OrderServices.propose#Order", { orderId: created.orderId })
+        return { status: header(created.orderId).statusId }
+    },
+    then({ status }) { status == "OrderProposed" },
+})
