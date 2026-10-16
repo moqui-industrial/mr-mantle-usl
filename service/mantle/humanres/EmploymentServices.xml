@@ -150,7 +150,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="relatedEmpls" from="employment.findRelatedFk(['mantle.party.PartyRelationship'])"/>
                 <!-- TODO: Ignore 'mantle.party.PartyRelationship' below and do a deleteWithCascade since party settings probalby shouldn't stop deletion -->
                 <set field="relatedPtyRels" from="ptyRel.findRelatedFk(['mantle.humanres.employment.Employment'])"/>
-                <iterate list="relatedEmpls.concat(relatedPtyRels)" entry="relatedValue">
+                <iterate list="Array.from(relatedEmpls).concat(Array.from(relatedPtyRels))" entry="relatedValue">
                     <message error="true">Found ${relatedValue.getEntityNamePretty()}. Cannot delete employment.</message>
                 </iterate>
                 <check-errors/>
@@ -176,7 +176,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="!payGradeId">
                 <entity-find-related-one value-field="employment" relationship-name="mantle.humanres.position.EmplPosition"
                         to-value-field="emplPosition"/>
-                <set field="payGradeId" from="emplPosition.payGradeId"/>
+                <set field="payGradeId" from="emplPosition?.payGradeId"/>
             </if>
             <if condition="payGradeId">
                 <entity-find entity-name="mantle.humanres.rate.PayGradeSalary" list="payGradeSalaryList">
@@ -321,7 +321,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="partyId" from="organizationPartyId"/><econdition field-name="timePeriodTypeId" value="PayrollYear"/></entity-find>
             <if condition="!nextYearList?.length">
                 <script>nextYearThru = nextThru(yearThru, 12)</script>
-                <set field="nextYearPeriodName" value="${organization.organizationName} ${yearOf(nextYearFrom)}"/>
+                <set field="nextYearPeriodName" from="`${organization.organizationName} ${yearOf(nextYearFrom)}`"/>
                 <service-call name="create#mantle.party.time.TimePeriod" out-map="createTpOut"
                         in-map="{previousPeriodId:yearPeriodId, timePeriodTypeId:'PayrollYear', partyId:organizationPartyId,
                             beginningBalance:0, endingBalance:0, periodNum:yearOf(nextYearFrom),
@@ -345,7 +345,7 @@ along with this software (see the LICENSE.md file). If not, see
                     nextQuarterThru = nextThru(quarterThru, 3)
                     nextQuarterNumber = Math.trunc(dateOf(nextQuarterFrom).getUTCMonth() / 3)
                 </script>
-                <set field="nextQuarterPeriodName" value="${organization.organizationName} ${yearOf(nextQuarterFrom)}Q${nextQuarterNumber + 1}"/>
+                <set field="nextQuarterPeriodName" from="`${organization.organizationName} ${yearOf(nextQuarterFrom)}Q${nextQuarterNumber + 1}`"/>
                 <service-call name="create#mantle.party.time.TimePeriod" out-map="createTpOut"
                         in-map="{parentPeriodId:parentPeriodId, previousPeriodId:quarterPeriodId,
                             timePeriodTypeId:'PayrollQuarter', partyId:organizationPartyId, beginningBalance:0,
@@ -369,7 +369,7 @@ along with this software (see the LICENSE.md file). If not, see
                     nextMonthNumber = dateOf(nextMonthFrom).getUTCMonth()
                     nextMonthThru = nextThru(monthThru, 1)
                 </script>
-                <set field="nextMonthPeriodName" value="${organization.organizationName} ${yearOf(nextMonthFrom)}-${nextMonthNumber + 1}"/>
+                <set field="nextMonthPeriodName" from="`${organization.organizationName} ${yearOf(nextMonthFrom)}-${nextMonthNumber + 1}`"/>
                 <service-call name="create#mantle.party.time.TimePeriod" out-map="createTpOut"
                         in-map="{parentPeriodId:parentPeriodId, previousPeriodId:monthPeriodId,
                             timePeriodTypeId:'PayrollMonth', partyId:organizationPartyId, beginningBalance:0,
