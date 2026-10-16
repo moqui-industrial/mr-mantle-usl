@@ -18,8 +18,11 @@ moqui test mantle-usl --keep --log-level info          # keep the scratch runtim
 The console shows a line per feature and the failures in full at the end; everything is logged to `runtime/log/moqui.log`.
 The design is in the mr-moqui repository, `plans/TestHarness.md`.
 
-Besides the ports of the Spock specs, there are specs without a Groovy original (HumanResServices, PayrollServices, BankFileServices,
-FinancialReports and others) that run the services the flows never reach; `plans/MantleFlowTests.md` in the mr-moqui repository lists them.
+Besides the ports of the Spock specs, there are thirty-two specs without a Groovy original (HumanResServices, PayrollServices, PayrollAdjustments,
+BankFileServices, FinancialReports, ShipmentLoads, PaymentGateway and others) that run the services the flows never reach, 680 of the 762
+(`moqui test mantle-usl --coverage` lists the rest); `plans/MantleFlowTests.md` in the mr-moqui repository lists them. A spec that
+calls a data-dependent service on a product the flows also use (DEMO_1_1, DEMO_2_1, DEMO_3_1) can see their inventory and reservations when
+it runs after them, so the newer specs receive their own stock or use DEMO_1_2.
 A spec that needs its own books creates an organization and calls `init#PartyAccountingConfiguration` with `sourcePartyId: "DefaultSettings"`.
 
 ## A spec file
