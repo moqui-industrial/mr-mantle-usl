@@ -123,3 +123,30 @@ feature("a bulk entry before the project start or for a disabled party is refuse
         disabled.includes("is not active")
     },
 })
+
+feature("invoice a worker's time entries for a vendor, and the stub work effort cost posting runs", {
+    when() {
+        // a worker with only this entry: the imported ones have no vendor rate
+        const workerC = call("mantle.party.PartyServices.create#Person", { firstName: "Cora", lastName: "Contractor" }).partyId
+        call("mantle.work.TimeServices.store#TimeEntry", { partyId: workerC, vendorPartyId: vendorId, clientPartyId: clientId, hours: 4,
+                fromDate: day(2026, 11, 20) + 9 * 3600000, thruDate: day(2026, 11, 20) + 13 * 3600000, rateTypeEnumId: "RatpStandard", vendorHourRate: 30 })
+        const out = call("mantle.account.InvoiceServices.create#WorkerInvoiceItems", { workerPartyId: workerC, vendorPartyId: vendorId, thruDate: day(2026, 12, 1) })
+        // the service declares no out-parameters, so the invoice is found by its parties
+        const invoice = Array.from(ec.entity.find("mantle.account.invoice.Invoice").condition("fromPartyId", workerC).condition("toPartyId", vendorId).list())[0]
+        const items = invoice ? Array.from(ec.entity.find("mantle.account.invoice.InvoiceItem").condition("invoiceId", invoice.invoiceId).list()) : []
+        const entry = Array.from(ec.entity.find("mantle.work.time.TimeEntry").condition("partyId", workerC).list())[0]
+        // posting a work effort's cost is a TODO upstream, so it only has to run
+        const posted = call("mantle.ledger.OtherAutoPostServices.post#WorkEffortCost", { workEffortId: bulkEffortId })
+        return { out, invoice, items, posted, entry }
+    },
+    then({ invoice, items, posted, entry }) {
+        invoice != null
+        invoice.fromPartyId != null
+        invoice.toPartyId == vendorId
+        items.length == 1
+        n(items[0].amount) == 30
+        n(items[0].quantity) == 4
+        entry.vendorInvoiceId == invoice.invoiceId
+        posted != null
+    },
+})
