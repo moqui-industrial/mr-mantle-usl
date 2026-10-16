@@ -158,3 +158,18 @@ feature("address validation with no validating gateway, and the bulk count", {
         n(bulk.validateCount) == 0
     },
 })
+
+feature("printing labels needs a printer, and a package with no label is reported, not printed", {
+    when() {
+        const noPrinter = errorOf("mantle.shipment.ShipmentServices.print#ShipmentLabels", { shipmentId })
+        const out = call("mantle.shipment.ShipmentServices.print#ShipmentLabels", { shipmentId, networkPrinterId: "TEST_PRINTER", makeDefaultPrinter: true })
+        const returned = call("mantle.shipment.ShipmentServices.print#ShipmentLabels", { shipmentId, networkPrinterId: "TEST_PRINTER", returnLabels: true })
+        return { noPrinter, out, returned, defaultPrinter: ec.user.getPreference("Shipment.networkPrinterId.default") }
+    },
+    then({ noPrinter, out, returned, defaultPrinter }) {
+        noPrinter.includes("No networkPrinterId specified")
+        !out.printJobIdList?.length
+        !returned.printJobIdList?.length
+        defaultPrinter == "TEST_PRINTER"
+    },
+})
