@@ -155,3 +155,72 @@ feature("adjust an asset quantity directly and move an asset", {
         adHoc.assetId != null
     },
 })
+
+feature("set the physical inventory date, which moves its asset details", {
+    when() {
+        const inventory = Array.from(ec.entity.find("mantle.product.asset.PhysicalInventory").orderBy("-physicalInventoryDate").list())[0]
+        const newDate = effectiveTime - 3 * 86400000
+        call("mantle.product.AssetServices.update#PhysicalInventoryDate", { physicalInventoryId: inventory.physicalInventoryId, physicalInventoryDate: newDate, comments: "dated back" })
+        const after = ec.entity.find("mantle.product.asset.PhysicalInventory").condition("physicalInventoryId", inventory.physicalInventoryId).one()
+        const details = Array.from(ec.entity.find("mantle.product.asset.AssetDetail").condition("physicalInventoryId", inventory.physicalInventoryId).list())
+        return { after, details, newDate }
+    },
+    then({ after, details, newDate }) {
+        String(after.physicalInventoryDate) == String(newDate)
+        after.comments == "dated back"
+        details.every(d => String(d.effectiveDate) == String(newDate))
+    },
+})
+
+feature("assign a party to an asset by role, replacing the earlier one", {
+    when() {
+        const target = call("mantle.product.AssetServices.receive#Asset", { productId, quantity: 1, facilityId, ownerPartyId, assetTypeEnumId: "AstTpInventory", receivedDate: effectiveTime }).assetId
+        const open = () => Array.from(ec.entity.find("mantle.product.asset.AssetPartyAssignment").condition("assetId", target).condition("roleTypeId", "Customer").condition("thruDate", null).list())
+        call("mantle.product.AssetServices.replace#AssetPartyAssignment", { assetId: target, roleTypeId: "Customer", newPartyId: "JoeDist" })
+        const first = open()
+        call("mantle.product.AssetServices.replace#AssetPartyAssignment", { assetId: target, roleTypeId: "Customer", newPartyId: "JoeDist" })
+        const same = open()
+        call("mantle.product.AssetServices.replace#AssetPartyAssignment", { assetId: target, roleTypeId: "Customer", newPartyId: "ORG_ZIZI_RETAIL" })
+        const replaced = open()
+        return { first, same, replaced }
+    },
+    then({ first, same, replaced }) {
+        first.length == 1
+        same.length == 1
+        replaced.length == 1
+        replaced[0].partyId == "ORG_ZIZI_RETAIL"
+    },
+})
+
+feature("move a product between locations only after verifying the from location", {
+    when() {
+        const container = call("create#mantle.product.asset.Container", { facilityId, serialNumber: "MV-" + effectiveTime }).containerId
+        const refused = call("mantle.product.AssetServices.moveVerify#Product", { productId, quantity: 1, facilityId, verifyLocationSeqId: "WRONG", toScanLocation: container })
+        const moved = call("mantle.product.AssetServices.moveVerify#Product", { productId, quantity: 1, facilityId, toScanLocation: container })
+        return { refused, moved, inContainer: Array.from(ec.entity.find("mantle.product.asset.Asset").condition("containerId", container).list()).length }
+    },
+    then({ inContainer }) {
+        inContainer >= 1
+    },
+})
+
+feature("issue any available asset for a shipment item source", {
+    when() {
+        const created = call("mantle.order.OrderServices.create#Order", { vendorPartyId: ownerPartyId, customerPartyId: "JoeDist", facilityId })
+        call("mantle.order.OrderServices.add#OrderProductQuantity", { orderId: created.orderId, orderPartSeqId: created.orderPartSeqId, productId, quantity: 2, unitAmount: 8, requireInventory: false })
+        call("mantle.order.OrderServices.set#OrderBillingShippingInfo", { orderId: created.orderId, orderPartSeqId: created.orderPartSeqId, shippingPostalContactMechId: "JoeDistAddr", carrierPartyId: "_NA_", shipmentMethodEnumId: "ShMthGround" })
+        call("mantle.order.OrderServices.place#Order", { orderId: created.orderId, requireInventory: false })
+        call("mantle.order.OrderServices.approve#Order", { orderId: created.orderId })
+        const ship = call("mantle.shipment.ShipmentServices.create#OrderPartShipment", { orderId: created.orderId, orderPartSeqId: created.orderPartSeqId })
+        const sis = Array.from(ec.entity.find("mantle.shipment.ShipmentItemSource").condition("shipmentId", ship.shipmentId).list())[0]
+        const missing = errorOf("mantle.product.AssetServices.issue#AnyAssetForShipmentItemSource", { shipmentItemSourceId: "NO_SUCH_SIS", quantity: 1 })
+        const out = call("mantle.product.AssetServices.issue#AnyAssetForShipmentItemSource", { shipmentItemSourceId: sis.shipmentItemSourceId, quantity: 1 })
+        const issuances = Array.from(ec.entity.find("mantle.product.issuance.AssetIssuance").condition("shipmentItemSourceId", sis.shipmentItemSourceId).list())
+        return { missing, out, issuances }
+    },
+    then({ missing, out, issuances }) {
+        missing.includes("Could not find ShipmentItemSource")
+        n(out.quantityRemaining) == 0
+        issuances.length >= 1
+    },
+})
