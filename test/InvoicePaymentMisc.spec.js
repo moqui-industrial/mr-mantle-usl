@@ -245,3 +245,21 @@ feature("past due emails: nothing is sent without a billing address, an old unpa
         covering != null
     },
 })
+
+feature("repost a delivered payment and its applications", {
+    when() {
+        const delivered = payment(paymentId)
+        const before = Array.from(ec.entity.find("mantle.ledger.transaction.AcctgTrans").condition("paymentId", paymentId).list()).length
+        call("mantle.ledger.PaymentAutoPostServices.repost#PaymentAndApplications", { paymentId })
+        const after = Array.from(ec.entity.find("mantle.ledger.transaction.AcctgTrans").condition("paymentId", paymentId).list())
+        const missing = errorOf("mantle.ledger.PaymentAutoPostServices.repost#PaymentAndApplications", { paymentId: "NO_SUCH_PAYMENT" })
+        return { delivered, before, after, missing }
+    },
+    then({ before, after, missing }) {
+        // the transactions are deleted and posted again, so there are still some and they are posted
+        after.length >= 1
+        before >= 1
+        after.every(t => t.isPosted == "Y")
+        missing.includes("Could not find Payment")
+    },
+})

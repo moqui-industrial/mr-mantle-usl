@@ -224,3 +224,18 @@ feature("issue any available asset for a shipment item source", {
         issuances.length >= 1
     },
 })
+
+feature("revert the accounting of an issuance on cancel", {
+    when() {
+        const issuances = Array.from(ec.entity.find("mantle.product.issuance.AssetIssuance").condition("orderId", orderId).list())
+        const withTrans = issuances.filter(i => ec.entity.find("mantle.ledger.transaction.AcctgTrans").condition("assetIssuanceId", i.assetIssuanceId).count() > 0)
+        const first = withTrans.length ? call("mantle.ledger.AssetAutoPostServices.revert#AssetIssuanceOnCancel", { assetIssuanceId: withTrans[0].assetIssuanceId }) : null
+        const left = withTrans.length ? ec.entity.find("mantle.ledger.transaction.AcctgTrans").condition("assetIssuanceId", withTrans[0].assetIssuanceId).count() : 0
+        const none = call("mantle.ledger.AssetAutoPostServices.revert#AssetIssuanceOnCancel", { assetIssuanceId: "NO_SUCH_ISSUANCE" })
+        return { count: withTrans.length, first, left, none }
+    },
+    then({ count, left }) {
+        // the issuance transaction is deleted when there was one
+        count == 0 || left == 0
+    },
+})

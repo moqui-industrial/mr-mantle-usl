@@ -162,3 +162,19 @@ feature("create purchase orders from a request, one for each supplier", {
         noFacility.includes("has no Facility set")
     },
 })
+
+feature("comment on a wiki page", {
+    when() {
+        const pageId = call("create#moqui.resource.wiki.WikiPage", { wikiSpaceId: "ZZW_RETAIL", pagePath: "crm-misc-comment-page" }).wikiPageId
+        call("mantle.party.CommunicationServices.add#WikiPageComment", { wikiPageId: pageId, subject: "Nice page", body: "Thanks" })
+        const links = Array.from(ec.entity.find("mantle.party.communication.WikiPageCommunicationEvent").condition("wikiPageId", pageId).list())
+        const event = ec.entity.find("mantle.party.communication.CommunicationEvent").condition("communicationEventId", links[0].communicationEventId).one()
+        return { links, event }
+    },
+    then({ links, event }) {
+        links.length == 1
+        event.subject == "Nice page"
+        event.communicationEventTypeId == "Comment"
+        event.statusId == "CeSent"
+    },
+})
