@@ -215,3 +215,21 @@ feature("generate an EFW2 file for the closed year runs, and is refused without 
         noPeriod != null
     },
 })
+
+feature("1099-MISC form data for the same employment and a payroll invoice made by hand", {
+    when() {
+        const form = call("mantle.humanres.PayrollDocumentServices.get#UsaIrs1099MiscFormData", { timePeriodId: yearId, partyRelationshipId: relId })
+        const created = call("mantle.humanres.PayrollServices.create#PayrollInvoice", { partyRelationshipId: relId, invoiceTypeEnumId: "InvoicePayroll", invoiceDate: effectiveTime - 3600000 })
+        const invoice = ec.entity.find("mantle.account.invoice.Invoice").condition("invoiceId", created.invoiceId).one()
+        return { form, created, invoice }
+    },
+    then({ form, invoice }) {
+        form.formId == "UsaIrs1099Misc"
+        form.formMap["1099m_b"] == "98-7654321"
+        form.formMap["1099m_c"] == "123-45-6789"
+        form.formMap["1099m_d1"].includes("Tess")
+        // the employee is the invoice's from party, the organization is internal: payroll invoices are from the employer to the employee
+        invoice.statusId == "InvoiceInProcess" || invoice.statusId == "InvoiceIncoming"
+        invoice.currencyUomId == "USD"
+    },
+})
