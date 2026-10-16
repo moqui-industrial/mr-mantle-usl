@@ -238,7 +238,7 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="outUrlSlug"/></out-parameters>
         <actions>
-            <set field="outUrlSlug" from="inUrlSlug.toLowerCase().trim().replaceAll(' ',spaceReplacementCharacter).replaceAll('_',spaceReplacementCharacter).replaceAll('[^a-z0-9-]+','')"/>
+            <set field="outUrlSlug" from="inUrlSlug.toLowerCase().trim().replaceAll(' ', spaceReplacementCharacter).replaceAll('_', spaceReplacementCharacter).replace(/[^a-z0-9-]+/g, '')"/>
         </actions>
     </service>
 
