@@ -657,7 +657,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- create#CreditCard fields -->
             <auto-parameters entity-name="mantle.account.method.PaymentMethod" include="nonpk"/>
             <auto-parameters entity-name="mantle.account.method.CreditCard" include="nonpk"/>
-            <parameter name="expireDate" default-value="${expireMonth||''}/${expireYear||''}">
+            <parameter name="expireDate" default-value="${(expireMonth || expireYear) ? (expireMonth || '') + '/' + (expireYear || '') : ''}">
                 <time-range after="now" format="MM/yyyy"/></parameter>
             <parameter name="cardNumber"><credit-card/></parameter>
             <parameter name="validateSecurityCode"/>
@@ -1195,7 +1195,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-one entity-name="moqui.basic.Enumeration" value-field="valEnum">
                     <field-map field-name="enumId" from="settingValue"/></entity-find-one>
                 <if condition="valEnum == null || valEnum.enumTypeId != partySettingType.enumTypeId">
-                    <return error="true" message="Selected value ${valEnum.description||''} is not valid"/></if>
+                    <return error="true" message="Selected value ${valEnum?.description||settingValue} is not valid"/></if>
             </then><else-if condition="partySettingType.validRegexp">
                 <if condition="!new RegExp('^(?:' + partySettingType.validRegexp + ')$').test(settingValue)">
                     <return error="true" message="Value ${settingValue} is not valid"/></if>
