@@ -191,3 +191,30 @@ feature("import a BAI 2 file", {
         mismatch.includes("Control sum")
     },
 })
+
+feature("statements arrive as system messages and are consumed through the payment method's file types", {
+    when() {
+        call("create#moqui.service.message.SystemMessageType", { systemMessageTypeId: "TestBankIn", description: "Test incoming bank file" })
+        call("create#moqui.service.message.SystemMessageRemote", { systemMessageRemoteId: "TEST_BANK_IN", description: "Test bank", systemMessageTypeId: "TestBankIn" })
+        call("create#mantle.account.method.PaymentMethodFileType", { paymentMethodId: bankId, fileTypeEnumId: "PmftOfx", systemMessageTypeId: "TestBankIn", systemMessageRemoteId: "TEST_BANK_IN" })
+        const message = (text, offset) => call("create#moqui.service.message.SystemMessage", { systemMessageTypeId: "TestBankIn", systemMessageRemoteId: "TEST_BANK_IN",
+                isOutgoing: "N", statusId: "SmsgReceived", messageText: text, initDate: effectiveTime + offset }).systemMessageId
+        const before = ec.entity.find("mantle.account.method.PaymentMethodTrans").condition("paymentMethodId", bankId).count()
+        const newOfx = ofx.replace("OFX1", "OFXMSG1").replace("OFX2", "OFXMSG2").replace("OFX3", "OFXMSG3")
+        call("mantle.account.OfxServices.consume#OfxV1SystemMessage", { systemMessageId: message(newOfx, 10) })
+        const afterOfx = ec.entity.find("mantle.account.method.PaymentMethodTrans").condition("paymentMethodId", bankId).count()
+        // the BAI file type is not configured for this message type yet
+        const bai = ["01,SENDER,RECEIVER,260314,1200,1,80,,2/", `02,${routing},ORIG,1,260314,2359,USD,2/`, `03,${account},USD,015,100000,,,045,100000,,/`,
+                "16,108,5000,S,2500,2500,Deposit memo,MSG-REF", "49,205000,4/", "98,205000,1,6/", "99,205000,1,8/"].join("\n")
+        const notConfigured = errorOf("mantle.account.BaiServices.consume#Bai2SystemMessage", { systemMessageId: message(bai, 20) })
+        call("create#mantle.account.method.PaymentMethodFileType", { paymentMethodId: bankId, fileTypeEnumId: "PmftBai2", systemMessageTypeId: "TestBankIn", systemMessageRemoteId: "TEST_BANK_IN" })
+        call("mantle.account.BaiServices.consume#Bai2SystemMessage", { systemMessageId: message(bai, 30) })
+        const afterBai = ec.entity.find("mantle.account.method.PaymentMethodTrans").condition("paymentMethodId", bankId).count()
+        return { before, afterOfx, notConfigured, afterBai }
+    },
+    then({ before, afterOfx, notConfigured, afterBai }) {
+        afterOfx == before + 3
+        notConfigured.includes("Could not find paymentMethodId")
+        afterBai == afterOfx + 1
+    },
+})
