@@ -208,6 +208,7 @@ feature("totals, receivable statements and past-due checks run", {
 feature("invoice content text", {
     when() {
         const contentId = call("mantle.account.InvoiceServices.create#InvoiceContent", { invoiceId, invoiceContentTypeEnumId: "IvctOther", description: "note" }).invoiceContentId
+        call("mantle.account.InvoiceServices.update#InvoiceContent", { invoiceContentId: contentId, description: "note edited" })
         const location = call("mantle.account.InvoiceServices.get#InvoiceContentLocation", { invoiceId, contentTypeEnumIdList: ["IvctOther"] })
         return { contentId, location }
     },

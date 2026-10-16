@@ -104,6 +104,7 @@ feature("clone the order and merge another order's items", {
 feature("order content text and the 50/50 payment split", {
     when() {
         const contentId = call("mantle.order.OrderServices.create#OrderContent", { orderId, orderContentTypeEnumId: "OctOther", description: "po note" }).orderContentId
+        call("mantle.order.OrderServices.update#OrderContent", { orderContentId: contentId, description: "po note edited" })
         call("mantle.order.OrderServices.create#OrderPayments50Split", { orderId, orderPartSeqId: partSeqId, fromPartyId: customerPartyId, toPartyId: vendorPartyId, amount: 100, paymentInstrumentEnumId: "PiCompanyCheck",
                 dueDate: effectiveTime + 30 * 86400000 })
         const payments = Array.from(ec.entity.find("mantle.account.payment.Payment").condition("orderId", orderId).list())

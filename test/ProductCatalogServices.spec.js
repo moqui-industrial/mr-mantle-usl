@@ -133,6 +133,7 @@ feature("product content from text", {
         const content = ec.entity.find("mantle.product.ProductContent").condition("productContentId", contentId).one()
         const catContentId = call("mantle.product.ProductServices.create#ProductCategoryContent", { productCategoryId: categoryId,
                 productCategoryContentTypeEnumId: "PcctDescription", contentText: "All shirts" }).productCategoryContentId
+        call("mantle.product.ProductServices.update#ProductCategoryContent", { productCategoryContentId: catContentId, contentText: "All the shirts" })
         return { content, catContentId }
     },
     then({ content, catContentId }) {

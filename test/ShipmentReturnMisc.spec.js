@@ -101,6 +101,7 @@ feature("pack the rest, ship, and add content", {
         call("create#moqui.basic.EnumerationType", { enumTypeId: "ShipmentContentType", description: "Shipment Content Type" })
         call("create#moqui.basic.Enumeration", { enumId: "ShcntTestBol", enumTypeId: "ShipmentContentType", description: "Bill of lading" })
         const contentId = call("mantle.shipment.ShipmentServices.create#ShipmentContent", { shipmentId, shipmentContentTypeEnumId: "ShcntTestBol", description: "bol" }).shipmentContentId
+        call("mantle.shipment.ShipmentServices.update#ShipmentContent", { shipmentContentId: contentId, description: "bol edited" })
         return { shipped, contentId }
     },
     then({ shipped, contentId }) {

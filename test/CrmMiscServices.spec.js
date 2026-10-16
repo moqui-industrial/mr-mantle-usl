@@ -48,6 +48,8 @@ feature("messages, replies and finding communication events", {
         // the default type list "Email,Message,Comment" is also read as an equality by search-form-inputs, so a type is passed, as the screens do
         const found = call("mantle.party.CommunicationServices.find#PartyCommunicationEvents", { partyId: contactId, communicationEventTypeId: "Message" })
         const contentId = call("mantle.party.CommunicationServices.create#CommunicationEventContent", { communicationEventId: messageId, communicationContentTypeEnumId: "CecOther", description: "att" }).communicationEventContentId
+        call("mantle.party.CommunicationServices.update#CommunicationEventContent", { communicationEventContentId: contentId, description: "att edited" })
+        call("mantle.party.CommunicationServices.get#CommunicationEventContentLocation", { communicationEventId: messageId, contentTypeEnumIdList: ["CecOther"] })
         return { reply, found, contentId, parent: cev(reply.communicationEventId) }
     },
     then({ reply, found, contentId, parent }) {
@@ -73,6 +75,8 @@ feature("requests: create, update, comment, replace a party, and a contact reque
         call("mantle.request.RequestServices.replace#RequestParty", { requestId, roleTypeId: "Assignee", newPartyId: personId })
         const parties = Array.from(ec.entity.find("mantle.request.RequestParty").condition("requestId", requestId).condition("roleTypeId", "Assignee").condition("thruDate", null).list())
         const contentId = call("mantle.request.RequestServices.create#RequestContent", { requestId, requestContentTypeEnumId: "RqctAttachment", description: "file" }).requestContentId
+        call("mantle.request.RequestServices.update#RequestContent", { requestContentId: contentId, description: "file edited" })
+        call("mantle.request.RequestServices.get#RequestContentLocation", { requestId, contentTypeEnumIdList: ["RqctAttachment"] })
         const contact = call("mantle.request.RequestServices.create#ContactRequest", { requestName: "Contact us", description: "Question", firstName: "Web", lastName: "Visitor", emailAddress: "visitor@example.com" })
         return { request: ec.entity.find("mantle.request.Request").condition("requestId", requestId).one(), comments: comments.length, edited, left, parties, contentId, contact }
     },
@@ -124,6 +128,11 @@ feature("equipment and maintenance", {
         productMaintenanceId = call("create#mantle.product.maintenance.ProductMaintenance", { productId: "EQUIP_1", maintenanceTypeEnumId: "MtTestOil", description: "Oil change", intervalQuantity: 500 }).productMaintenanceId
         const before = call("mantle.product.EquipmentServices.get#AssetMaintenanceNeeded", { assetId: equipmentId, productMaintenanceId })
         const maint = call("mantle.product.EquipmentServices.create#AssetMaintenance", { assetId: equipmentId, productMaintenanceId, intervalQuantity: 500, comments: "done" })
+        // no enumeration is seeded for the content type of a maintenance record
+        if (!ec.entity.find("moqui.basic.EnumerationType").condition("enumTypeId", "AssetMaintContentType").one()) call("create#moqui.basic.EnumerationType", { enumTypeId: "AssetMaintContentType", description: "Asset Maintenance Content Type" })
+        if (!ec.entity.find("moqui.basic.Enumeration").condition("enumId", "AmctOther").one()) call("create#moqui.basic.Enumeration", { enumId: "AmctOther", description: "Other", enumTypeId: "AssetMaintContentType" })
+        const maintContent = call("mantle.product.EquipmentServices.create#AssetMaintenanceContent", { assetMaintenanceId: maint.assetMaintenanceId, contentTypeEnumId: "AmctOther", description: "photo" })
+        call("mantle.product.EquipmentServices.update#AssetMaintenanceContent", { assetMaintenanceId: maint.assetMaintenanceId, contentDate: maintContent.contentDate, description: "photo edited" })
         const after = call("mantle.product.EquipmentServices.get#AssetMaintenanceNeeded", { assetId: equipmentId, productMaintenanceId })
         return { before, maint, after }
     },

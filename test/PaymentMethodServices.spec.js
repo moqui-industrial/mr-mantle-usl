@@ -87,6 +87,7 @@ feature("mutable fields update in place; create and update a bank account", {
 feature("payment method content text", {
     when() {
         const contentId = call("mantle.account.PaymentMethodServices.create#PaymentMethodContent", { paymentMethodId: card2Id, contentTypeEnumId: "PmctImage", description: "scan" }).paymentMethodContentId
+        call("mantle.account.PaymentMethodServices.update#PaymentMethodContent", { paymentMethodContentId: contentId, description: "scan edited" })
         const loc = call("mantle.account.PaymentMethodServices.get#PaymentMethodContentLocation", { paymentMethodId: card2Id, contentTypeEnumIdList: ["PmctImage"] })
         return { contentId, loc }
     },

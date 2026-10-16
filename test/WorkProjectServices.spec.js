@@ -129,6 +129,7 @@ feature("work effort start and end, and its content", {
     when() {
         const startEnd = call("mantle.work.WorkEffortServices.get#WorkEffortStartEnd", { workEffortId: "WPS-1" })
         const contentId = call("mantle.work.WorkEffortServices.create#WorkEffortContent", { workEffortId: "WPS-1", workEffortContentTypeEnumId: "WecAttachment", description: "note" }).workEffortContentId
+        call("mantle.work.WorkEffortServices.update#WorkEffortContent", { workEffortContentId: contentId, description: "note edited" })
         const loc = call("mantle.work.WorkEffortServices.get#WorkEffortContentLocation", { workEffortId: "WPS-1", contentTypeEnumIdList: ["WecAttachment"] })
         return { startEnd, contentId, loc }
     },
