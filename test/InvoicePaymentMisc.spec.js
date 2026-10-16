@@ -213,3 +213,35 @@ feature("invoice content text", {
     },
     then({ contentId, location }) { contentId != null },
 })
+
+feature("past due emails: nothing is sent without a billing address, an old unpaid invoice, or when a payment covers it", {
+    when() {
+        const longAgo = effectiveTime - 90 * 86400000
+        const oldInvoice = call("mantle.account.InvoiceServices.create#Invoice", { fromPartyId: orgId, toPartyId: customerId, invoiceTypeEnumId: "InvoiceSales",
+                invoiceDate: longAgo, dueDate: longAgo + 30 * 86400000, currencyUomId: "USD", description: "Old invoice" }).invoiceId
+        call("mantle.account.InvoiceServices.create#InvoiceItem", { invoiceId: oldInvoice, itemTypeEnumId: "ItemProduct", quantity: 1, amount: 75, description: "Old item" })
+        call("update#mantle.account.invoice.Invoice", { invoiceId: oldInvoice, statusId: "InvoiceFinalized" })
+        const noAddress = call("mantle.account.InvoiceServices.send#CustomerPastDueEmail", { fromPartyId: orgId, toPartyId: customerId })
+        call("mantle.party.ContactServices.store#PartyContactInfo", { partyId: customerId, emailAddress: "billing@example.com", emailContactMechPurposeId: "EmailBilling" })
+        // no past due invoices for a party with none
+        const other = call("mantle.party.PartyServices.create#Organization", { organizationName: "Never Billed", roleTypeId: "Customer" }).partyId
+        call("mantle.party.ContactServices.store#PartyContactInfo", { partyId: other, emailAddress: "never@example.com", emailContactMechPurposeId: "EmailBilling" })
+        const none = call("mantle.account.InvoiceServices.send#CustomerPastDueEmail", { fromPartyId: orgId, toPartyId: other })
+        // an address given in the call is used without the lookup; the store the invoice came from decides the template, and this one has none
+        const noStore = call("mantle.account.InvoiceServices.send#CustomerPastDueEmail", { fromPartyId: orgId, toPartyId: customerId, toAddresses: "ap@example.com" })
+        // a payment from the customer that covers the invoice
+        const covering = call("mantle.account.PaymentServices.create#Payment", { fromPartyId: customerId, toPartyId: orgId, amount: 200, amountUomId: "USD",
+                paymentInstrumentEnumId: "PiCompanyCheck", statusId: "PmntDelivered", effectiveDate: effectiveTime - 3600000 }).paymentId
+        const covered = call("mantle.account.InvoiceServices.send#CustomerPastDueEmail", { fromPartyId: orgId, toPartyId: customerId })
+        const job = call("mantle.account.InvoiceServices.send#SalesInvoicePastDueEmails", { organizationPartyIdList: [orgId] })
+        return { noAddress, none, noStore, covered, job, covering }
+    },
+    then({ noAddress, none, noStore, covered, job, covering }) {
+        noAddress != null
+        none != null
+        noStore != null
+        covered != null
+        job != null
+        covering != null
+    },
+})
