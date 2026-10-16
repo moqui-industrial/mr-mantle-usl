@@ -1413,7 +1413,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="glAccountClassEnumId" value="NET_INCOME"/>
                     <order-by field-name="accountCode"/>
                 </entity-find>
-                <set field="netIncomeGlAccountId" from="niGlAccountList ? niGlAccountList[0].glAccountId : null"/>
+                <set field="netIncomeGlAccountId" from="niGlAccountList?.length ? niGlAccountList[0].glAccountId : null"/>
             </if>
             <if condition="!netIncomeGlAccountId"><return error="true" message="No Net Income account specified or found by class"/></if>
 

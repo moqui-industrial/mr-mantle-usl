@@ -551,7 +551,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </else></if>
             </then><else>
                 <!-- no email address passed? use the EmailPrimary -->
-                <set field="emailAddress" from="primaryEmailList ? primaryEmailList[0].infoString : null"/>
+                <set field="emailAddress" from="primaryEmailList?.length ? primaryEmailList[0].infoString : null"/>
             </else></if>
 
             <entity-find-one entity-name="mantle.party.Person" value-field="person"/>

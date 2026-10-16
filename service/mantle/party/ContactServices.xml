@@ -84,7 +84,7 @@ along with this software (see the LICENSE.md file). If not, see
                     </entity-find>
                     <if condition="(postalPcmList?.length > 0)"><set field="postalContactMechPurposeId" value="PostalPrimary"/></if>
                 </if>
-                <set field="postalContactMechId" from="postalPcmList ? postalPcmList[0].contactMechId : null"/>
+                <set field="postalContactMechId" from="postalPcmList?.length ? postalPcmList[0].contactMechId : null"/>
             </if>
             <entity-find-one entity-name="mantle.party.contact.ContactMech" value-field="postalContactMech">
                 <field-map field-name="contactMechId" from="postalContactMechId"/></entity-find-one>
@@ -108,7 +108,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <order-by field-name="-fromDate"/>
                     </entity-find>
                 </if>
-                <set field="postalContactMechPurposeId" from="postalPurposePcmList ? postalPurposePcmList[0].contactMechPurposeId : null"/>
+                <set field="postalContactMechPurposeId" from="postalPurposePcmList?.length ? postalPurposePcmList[0].contactMechPurposeId : null"/>
             </if>
 
             <!-- telecom number (get from PostalAddress.telecomContactMechId if not found) -->
@@ -126,7 +126,7 @@ along with this software (see the LICENSE.md file). If not, see
                     </entity-find>
                     <if condition="(telecomPcmList?.length > 0)"><set field="telecomContactMechPurposeId" value="PhonePrimary"/></if>
                 </if>
-                <set field="telecomPartyContactMech" from="telecomPcmList ? telecomPcmList[0] : null"/>
+                <set field="telecomPartyContactMech" from="telecomPcmList?.length ? telecomPcmList[0] : null"/>
                 <set field="telecomContactMechId" from="telecomPartyContactMech?.contactMechId"/>
             </if>
             <entity-find-one entity-name="mantle.party.contact.ContactMech" value-field="telecomContactMech">
@@ -146,7 +146,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="contactMechId" from="telecomContactMechId"/>
                     <econdition field-name="contactMechPurposeId" from="telecomContactMechPurposeId" ignore-if-empty="true"/>
                 </entity-find>
-                <set field="telecomPartyContactMech" from="telecomPcmList ? telecomPcmList[0] : null"/>
+                <set field="telecomPartyContactMech" from="telecomPcmList?.length ? telecomPcmList[0] : null"/>
             </if>
 
             <!-- fax number -->
@@ -164,7 +164,7 @@ along with this software (see the LICENSE.md file). If not, see
                     </entity-find>
                     <if condition="(faxPcmList?.length > 0)"><set field="faxContactMechPurposeId" value="PhoneFax"/></if>
                 </if>
-                <set field="faxPartyContactMech" from="faxPcmList ? faxPcmList[0] : null"/>
+                <set field="faxPartyContactMech" from="faxPcmList?.length ? faxPcmList[0] : null"/>
                 <set field="faxContactMechId" from="faxPartyContactMech?.contactMechId"/>
             </if>
             <entity-find-one entity-name="mantle.party.contact.ContactMech" value-field="faxContactMech">
@@ -177,7 +177,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="contactMechId" from="faxContactMechId"/>
                     <econdition field-name="contactMechPurposeId" from="faxContactMechPurposeId" ignore-if-empty="true"/>
                 </entity-find>
-                <set field="faxPartyContactMech" from="faxPcmList ? faxPcmList[0] : null"/>
+                <set field="faxPartyContactMech" from="faxPcmList?.length ? faxPcmList[0] : null"/>
             </if>
 
             <!-- email address -->
@@ -195,7 +195,7 @@ along with this software (see the LICENSE.md file). If not, see
                     </entity-find>
                     <if condition="(emailPcmList?.length > 0)"><set field="emailContactMechPurposeId" value="EmailPrimary"/></if>
                 </if>
-                <set field="emailPartyContactMech" from="emailPcmList ? emailPcmList[0] : null"/>
+                <set field="emailPartyContactMech" from="emailPcmList?.length ? emailPcmList[0] : null"/>
                 <set field="emailContactMechId" from="emailPartyContactMech?.contactMechId"/>
             </if>
             <entity-find-one entity-name="mantle.party.contact.ContactMech" value-field="emailContactMech">
@@ -213,7 +213,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="contactMechId" from="emailContactMechId"/>
                     <econdition field-name="contactMechPurposeId" from="emailContactMechPurposeId" ignore-if-empty="true"/>
                 </entity-find>
-                <set field="emailPartyContactMech" from="emailPcmList ? emailPcmList[0] : null"/>
+                <set field="emailPartyContactMech" from="emailPcmList?.length ? emailPcmList[0] : null"/>
             </if>
 
             <!-- web address -->
@@ -231,7 +231,7 @@ along with this software (see the LICENSE.md file). If not, see
                     </entity-find>
                     <if condition="(webPcmList?.length > 0)"><set field="webContactMechPurposeId" value="WebUrlPrimary"/></if>
                 </if>
-                <set field="webPartyContactMech" from="webPcmList ? webPcmList[0] : null"/>
+                <set field="webPartyContactMech" from="webPcmList?.length ? webPcmList[0] : null"/>
                 <set field="webContactMechId" from="webPartyContactMech?.contactMechId"/>
             </if>
             <entity-find-one entity-name="mantle.party.contact.ContactMech" value-field="webContactMech">
@@ -243,7 +243,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="contactMechId" from="webContactMechId"/>
                     <econdition field-name="contactMechPurposeId" from="webContactMechPurposeId" ignore-if-empty="true"/>
                 </entity-find>
-                <set field="webPartyContactMech" from="webPcmList ? webPcmList[0] : null"/>
+                <set field="webPartyContactMech" from="webPcmList?.length ? webPcmList[0] : null"/>
             </if>
 
             <!-- other contact info -->
@@ -253,7 +253,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="contactMechPurposeId" from="otherContactMechPurposeId"/>
                     <order-by field-name="-fromDate"/>
                 </entity-find>
-                <set field="otherContactMechId" from="otherPcmList ? otherPcmList[0].contactMechId : null"/>
+                <set field="otherContactMechId" from="otherPcmList?.length ? otherPcmList[0].contactMechId : null"/>
             </if>
             <entity-find-one entity-name="mantle.party.contact.ContactMech" value-field="otherContactMech">
                 <field-map field-name="contactMechId" from="otherContactMechId"/>

@@ -95,7 +95,7 @@ feature("create and update RateAmount", {
     when() {
         rateAmountId = call("mantle.humanres.RateServices.create#RateAmount",
                 { rateTypeEnumId: "RatpStandard", ratePurposeEnumId: "RaprVendor", partyId: employeeId,
-                    rateAmount: "45.5", rateUomId: "USD", fromDate: effectiveTime }).rateAmountId
+                    rateAmount: "45.5", rateCurrencyUomId: "USD", fromDate: effectiveTime }).rateAmountId
         const created = checkData(`<entity-facade-xml>
             <mantle.humanres.rate.RateAmount rateAmountId="${rateAmountId}" partyId="${employeeId}" rateTypeEnumId="RatpStandard"
                     ratePurposeEnumId="RaprVendor" rateAmount="45.5" timePeriodUomId="TF_hr"/>

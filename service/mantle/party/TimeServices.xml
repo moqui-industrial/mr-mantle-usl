@@ -454,7 +454,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <entity-find entity-name="mantle.party.time.TimePeriod" list="nextTimePeriodList">
                 <econdition field-name="previousPeriodId" from="timePeriodId"/></entity-find>
-            <set field="nextTimePeriod" from="nextTimePeriodList ? nextTimePeriodList[0] : null"/>
+            <set field="nextTimePeriod" from="nextTimePeriodList?.length ? nextTimePeriodList[0] : null"/>
             <set field="nextTimePeriodId" from="nextTimePeriod?.timePeriodId"/>
         </actions>
     </service>
