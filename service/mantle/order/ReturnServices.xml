@@ -222,7 +222,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="customerPartyId" from="returnHeader.customerPartyId"/>
                 <econdition field-name="vendorPartyId" from="returnHeader.vendorPartyId"/>
                 <econdition field-name="placedDate" operator="greater-equals" from="lookBackTs"/>
-                <select-field field-name="orderId,orderItemSeqId,itemTypeEnumId,productId,quantity,invoiceQuantity,invoiceAmount"/>
+                <select-field field-name="orderId,orderItemSeqId,itemTypeEnumId,productId,invoiceQuantity,invoiceAmount"/>
                 <order-by field-name="orderId,orderItemSeqId"/>
             </entity-find>
 
