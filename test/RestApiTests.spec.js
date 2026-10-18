@@ -38,8 +38,6 @@ feature("calculate GL Account Org Summaries for Accounting Tests", {
 })
 
 feature("call Moqui Tools REST API (#requestMethod, #screenPath, #containsTextList)", {
-    // Legitimate difference: the Groovy matched Jackson's pretty output `"key" : value`; this host writes JSON as
-    // `"key": value`, so the expected text has no space before the colon. The keys and values are unchanged.
     where: [
         // Order to Cash
         // TODO: better to not require session token in Service REST API calls?
@@ -50,20 +48,20 @@ feature("call Moqui Tools REST API (#requestMethod, #screenPath, #containsTextLi
         { requestMethod: "put", screenPath: "s1/mantle/orders/55800/shippingBilling", parameters: { paymentMethodId: 'CustJqpCc',
                 shippingPostalContactMechId: 'CustJqpAddr', shippingTelecomContactMechId: 'CustJqpTeln',
                 carrierPartyId: '_NA_', shipmentMethodEnumId: 'ShMthGround', moquiSessionToken: token }, containsTextList: ['paymentId', '55800'] },
-        { requestMethod: "post", screenPath: "s1/mantle/orders/55800/place", parameters: { moquiSessionToken: token }, containsTextList: ['"statusChanged": true'] },
-        { requestMethod: "post", screenPath: "s1/mantle/orders/55800/approve", parameters: { moquiSessionToken: token }, containsTextList: ['"statusChanged": true'] },
+        { requestMethod: "post", screenPath: "s1/mantle/orders/55800/place", parameters: { moquiSessionToken: token }, containsTextList: ['"statusChanged" : true'] },
+        { requestMethod: "post", screenPath: "s1/mantle/orders/55800/approve", parameters: { moquiSessionToken: token }, containsTextList: ['"statusChanged" : true'] },
         { requestMethod: "get", screenPath: "s1/mantle/payments/55800", parameters: null, containsTextList: ['CustJqpCc', 'PiCreditCard', 'PmntAuthorized', 'ORG_ZIZI_RETAIL'] },
         { requestMethod: "get", screenPath: "s1/mantle/orders/55800/items/01/reservations", parameters: null, containsTextList:
-                ['"assetReservationId": "55800"', '"orderId": "55800"', '"productId": "DEMO_1_1"'] },
+                ['"assetReservationId" : "55800"', '"orderId" : "55800"', '"productId" : "DEMO_1_1"'] },
 
-        { requestMethod: "post", screenPath: "s1/mantle/orders/55800/parts/01/shipments", parameters: { moquiSessionToken: token }, containsTextList: ['"shipmentId": "55800"'] },
-        { requestMethod: "get", screenPath: "s1/mantle/orders/55800/items/01/billings", parameters: null, containsTextList: ['"orderItemBillingId": "55800"', '"orderId": "55800"',
-                '"orderItemSeqId": "01"', '"invoiceId": "55800"', '"assetIssuanceId": "55800"', '"shipmentId": "55800"'] },
-        { requestMethod: "get", screenPath: "s1/mantle/orders/55800/items/01/shipments", parameters: null, containsTextList: ['"shipmentItemSourceId": "55800"',
-                '"shipmentId": "55800"', '"productId": "DEMO_1_1"', '"orderId": "55800"', '"orderItemSeqId": "01"',
-                '"invoiceId": "55800"'] },
-        { requestMethod: "get", screenPath: "s1/mantle/orders/55800/items/01/issuances", parameters: null, containsTextList: ['"assetIssuanceId": "55800"', '"orderId": "55800"',
-                '"orderItemSeqId": "01"', '"shipmentId": "55800"'] },
+        { requestMethod: "post", screenPath: "s1/mantle/orders/55800/parts/01/shipments", parameters: { moquiSessionToken: token }, containsTextList: ['"shipmentId" : "55800"'] },
+        { requestMethod: "get", screenPath: "s1/mantle/orders/55800/items/01/billings", parameters: null, containsTextList: ['"orderItemBillingId" : "55800"', '"orderId" : "55800"',
+                '"orderItemSeqId" : "01"', '"invoiceId" : "55800"', '"assetIssuanceId" : "55800"', '"shipmentId" : "55800"'] },
+        { requestMethod: "get", screenPath: "s1/mantle/orders/55800/items/01/shipments", parameters: null, containsTextList: ['"shipmentItemSourceId" : "55800"',
+                '"shipmentId" : "55800"', '"productId" : "DEMO_1_1"', '"orderId" : "55800"', '"orderItemSeqId" : "01"',
+                '"invoiceId" : "55800"'] },
+        { requestMethod: "get", screenPath: "s1/mantle/orders/55800/items/01/issuances", parameters: null, containsTextList: ['"assetIssuanceId" : "55800"', '"orderId" : "55800"',
+                '"orderItemSeqId" : "01"', '"shipmentId" : "55800"'] },
     ],
     expect({ requestMethod, screenPath, parameters, containsTextList }) {
         const str = restTest.render(screenPath, parameters, requestMethod)

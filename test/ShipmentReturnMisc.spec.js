@@ -171,7 +171,7 @@ feature("resell a shipment to another customer", {
     },
     then({ notSales, res }) {
         notSales != null
-        res.includes("newShipmentId is required")
+        res.includes("Field cannot be empty(for field New Shipment")
     },
 })
 

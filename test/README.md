@@ -16,11 +16,11 @@ moqui test mantle-usl --keep --log-level info          # keep the scratch runtim
 ```
 
 The console shows a line per feature and the failures in full at the end; everything is logged to `runtime/log/moqui.log`.
-The design is in the mr-moqui repository, `plans/TestHarness.md`.
+The guide to `moqui test` is `docs/Testing.md` in the mr-moqui repository, and the design record `plans/archive/TestHarness.md`.
 
 Besides the ports of the Spock specs, there are thirty-five specs without a Groovy original (HumanResServices, PayrollServices, PayrollAdjustments,
 BankFileServices, FinancialReports, ShipmentLoads, PaymentGateway and others) that run the services the flows never reach, 751 of the 762
-(`moqui test mantle-usl --coverage` lists the rest); `plans/MantleFlowTests.md` in the mr-moqui repository lists them. A spec that
+(`moqui test mantle-usl --coverage` lists the rest); `plans/archive/MantleFlowTests.md` in the mr-moqui repository lists them. A spec that
 calls a data-dependent service on a product the flows also use (DEMO_1_1, DEMO_2_1, DEMO_3_1) can see their inventory and reservations when
 it runs after them, so the newer specs receive their own stock or use DEMO_1_2.
 A spec that needs its own books creates an organization and calls `init#PartyAccountingConfiguration` with `sourcePartyId: "DefaultSettings"`.
@@ -119,5 +119,4 @@ match; a failure lists them), `login(username, password = "moqui")`, `logout()`,
 - Decimals from services are objects: `+`, `<` and `Number()` on them throw outside a condition. Use their methods, or `dec`.
 - `parallel` runs its function from its source text on other threads, each with its own `ec`: it cannot use the spec's
   variables; pass what it needs in `args` (copied as JSON) and return JSON-friendly values.
-- REST output is JSON as the Rust host writes it; Java's Jackson wrote `"key" : value`. Match on values, or on the
-  serialized form this host writes.
+- REST output is JSON written as Java's Jackson writes it, `"key" : value`, so the Groovy originals' expected text holds.
