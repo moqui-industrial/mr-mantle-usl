@@ -7,9 +7,7 @@
 // /u/<token>; an unsubscribe that waits for its confirmation sending the verification email, whose link completes it; the
 // reason given kept on the consent rows; resubscribing. The Mantle side of IronStone M11. New spec, no Groovy original.
 //
-// The List-Unsubscribe headers on the wire are the framework's gap: send#EmailTemplate has no parameter for extra
-// headers (the send passes them as extraHeaders, which it drops today) and the capture keeps no headers, so the feature
-// that checks them is ignored until both exist.
+// The List-Unsubscribe headers go out through send#EmailTemplate's extraHeaders, and the mail capture keeps them.
 const effectiveTime = Date.now()
 const minute = 60000
 const at = (minutes) => ec.user.setEffectiveTime(effectiveTime + minutes * minute)
@@ -172,7 +170,6 @@ feature("the List-Unsubscribe values of each message: the one-click URL of its t
 })
 
 feature("the List-Unsubscribe and List-Unsubscribe-Post headers go out with the message", {
-    ignore: "framework gap: org.moqui.EmailServices.send#EmailTemplate takes no extra headers (extraHeaders is dropped) and MailCapture keeps no headers",
     expect() {
         const mail = sentTo("ann.sendspec@example.com")[0]
         mail.headers["List-Unsubscribe"] == sendOut.recipientList.find((row) => row.partyId === party.Ann).listUnsubscribeHeaders["List-Unsubscribe"]
