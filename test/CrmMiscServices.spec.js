@@ -67,9 +67,11 @@ feature("requests: create, update, comment, replace a party, and a contact reque
     when() {
         requestId = call("mantle.request.RequestServices.create#Request", { requestName: "Support please", description: "Broken thing", customerPartyId: accountId, assignToPartyId: contactId }).requestId
         call("mantle.request.RequestServices.update#Request", { requestId, priority: 2, requestName: "Support now" })
-        call("mantle.request.RequestServices.add#RequestComment", { requestId, subject: "Note", body: "Looking" })
+        const added = call("mantle.request.RequestServices.add#RequestComment", { requestId, subject: "Note", body: "Looking" })
         const comments = Array.from(ec.entity.find("mantle.request.RequestCommEvent").condition("requestId", requestId).list())
         const commId = comments[0].communicationEventId
+        // the new comment's id comes back (Chatter shows it at once)
+        assert(added.communicationEventId === commId, `add#RequestComment answered ${added.communicationEventId}, the join has ${commId}`)
         call("mantle.request.RequestServices.update#RequestComment", { requestId, communicationEventId: commId, subject: "Note 2", body: "Fixed" })
         const edited = cev(commId)
         call("mantle.request.RequestServices.delete#RequestComment", { requestId, communicationEventId: commId })

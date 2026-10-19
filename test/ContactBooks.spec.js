@@ -644,6 +644,56 @@ feature("the duplicate policies on a generic CSV: skip and create", {
     },
 })
 
+// a contact file's bytes in a character set: Windows-1252 (as Outlook writes), UTF-16 with either byte order mark, UTF-16
+// chosen for a file without one (little-endian, as Windows writes), and UTF-8 with its byte order mark
+const charsetText = "Full Name,E-mail\r\nZoë “Zed” Ångström,zoe.charset@example.com\r\n"
+const cp1252Bytes = (text) => Array.from(text).map((ch) => ({ "“": 0x93, "”": 0x94, "€": 0x80, "–": 0x96 })[ch] ?? ch.charCodeAt(0))
+const utf16Bytes = (text, little) => Array.from(text).flatMap((ch) => {
+    const code = ch.charCodeAt(0)
+    return little ? [code & 0xFF, code >> 8] : [code >> 8, code & 0xFF]
+})
+const utf8Bytes = (text) => Array.from(unescape(encodeURIComponent(text))).map((ch) => ch.charCodeAt(0))
+
+feature("a contact file in its character set: Windows-1252, UTF-16 by its byte order mark whatever was chosen, UTF-16 without one little-endian", {
+    when() {
+        const files = { cp1252: [cp1252Bytes(charsetText), "WINDOWS-1252"], utf16le: [[0xFF, 0xFE].concat(utf16Bytes(charsetText, true)), "UTF-8"],
+            utf16be: [[0xFE, 0xFF].concat(utf16Bytes(charsetText, false)), "WINDOWS-1252"], utf16plain: [utf16Bytes(charsetText, true), "UTF-16"],
+            utf8bom: [[0xEF, 0xBB, 0xBF].concat(utf8Bytes(charsetText)), "UTF-8"] }
+        const out = {}
+        for (const [name, [bytes, characterSet]] of Object.entries(files)) {
+            const fileLocation = `dbresource://mantle-usl-test/ContactBooks/${name}.csv`
+            ec.resource.getLocationReference(fileLocation).putBytes(new Uint8Array(bytes))
+            const read = call("mantle.party.ContactImportServices.read#ContactFileText", { fileLocation, characterSet })
+            const parsed = call("mantle.party.ContactImportServices.parse#ContactFile", { fileLocation, fileName: `${name}.csv`, characterSet })
+            out[name] = { text: read.text, used: read.characterSetUsed, name: parsed.sampleRowList[0]["Full Name"], rowCount: parsed.rowCount }
+        }
+        out.missing = call("mantle.party.ContactImportServices.read#ContactFileText", { fileLocation: "dbresource://mantle-usl-test/ContactBooks/none.csv" })
+        out.upload = call("mantle.party.ContactImportServices.read#ContactFileText", { contactFile: uploadedFile("upload.csv", charsetText, "text/csv") })
+        out.unknown = errorOf("mantle.party.ContactImportServices.read#ContactFileText", { contactFile: uploadedFile("upload.csv", charsetText, "text/csv"),
+            characterSet: "NO-SUCH-SET" })
+        return out
+    },
+    then({ cp1252, utf16le, utf16be, utf16plain, utf8bom, missing, upload, unknown }) {
+        cp1252.text == charsetText
+        cp1252.used == "WINDOWS-1252"
+        cp1252.name == "Zoë “Zed” Ångström"
+        cp1252.rowCount == 1
+        utf16le.text == charsetText
+        utf16le.used == "UTF-16"
+        utf16le.name == "Zoë “Zed” Ångström"
+        utf16be.text == charsetText
+        utf16be.used == "UTF-16"
+        utf16plain.text == charsetText
+        utf16plain.used == "UTF-16LE"
+        utf8bom.text == charsetText
+        utf8bom.name == "Zoë “Zed” Ångström"
+        missing.text == null
+        upload.text == charsetText
+        upload.characterSetUsed == "UTF-8"
+        unknown.includes("could not be read in NO-SUCH-SET")
+    },
+})
+
 // a vCard 3.0 card with TYPE parameters, a PREF type and a folded NOTE; a 4.0 card with PREF values and Apple's item
 // labels (a standard one and a custom one); and a 4.0 card of a contact already there (Olive, by email)
 const vcf = [

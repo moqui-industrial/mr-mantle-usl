@@ -1597,7 +1597,9 @@ along with this software (see the LICENSE.md file). If not, see
             active (the set's applyCond leaves it off then, but the user still has the filter here).
             - A work effort (task, event, project, ...): its ownerPartyId, or that of its root work effort, is the user's
               party or one of the user's organizations, or one of those is a current WorkEffortParty of it or of its root
-              work effort.
+              work effort; or it is in a calendar (CalendarWorkEffort, the series' for an instance changed on its own) the
+              user may view (mantle.work.CalendarServices.check#CalendarAccess: view, edit or manage, not free/busy only),
+              or it is visible to all users (visibilityEnumId WevAllUsers), as check#EventAccess has it.
             - A request: the user's party filed it (filedByPartyId), or the user's party or one of the user's
               organizations (such as the customer organization) is a current RequestParty, or the organization of its
               product store or the owner of its facility is one of the user's organizations.
@@ -1808,8 +1810,19 @@ along with this software (see the LICENSE.md file). If not, see
                     root = ec.entity.find(WORK_EFFORT).condition('workEffortId', workEffort.rootWorkEffortId).disableAuthz().one()
                 }
                 if ([workEffort.ownerPartyId, root?.ownerPartyId].some((partyId) => partyId && s.partyIds.includes(partyId))) return true
-                return ec.entity.find('mantle.work.effort.WorkEffortParty').condition('workEffortId', 'in', ids)
-                        .condition('partyId', 'in', s.partyIds).condition(current()).disableAuthz().count() > 0
+                if (ec.entity.find('mantle.work.effort.WorkEffortParty').condition('workEffortId', 'in', ids)
+                        .condition('partyId', 'in', s.partyIds).condition(current()).disableAuthz().count() > 0) return true
+                // an event the user sees on the calendar: visible to all users, or in a calendar the user may view (an
+                // instance changed on its own is in its series' calendars)
+                if (workEffort.visibilityEnumId === 'WevAllUsers') return true
+                const calendarOf = ids.concat(Array.from(ec.entity.find('mantle.work.effort.WorkEffortAssoc').condition('toWorkEffortId', workEffort.workEffortId)
+                        .condition('workEffortAssocTypeEnumId', 'WeatRecurrenceInstance').disableAuthz().list()).map((assoc) => assoc.workEffortId))
+                const calendarIds = Array.from(new Set(Array.from(ec.entity.find('mantle.work.calendar.CalendarWorkEffort')
+                        .condition('workEffortId', 'in', calendarOf).disableAuthz().list()).map((row) => row.calendarId)))
+                if (!calendarIds.length) return false
+                const access = ec.service.sync().name('mantle.work.CalendarServices.check#CalendarAccess')
+                        .parameters({calendarIdList: calendarIds}).disableAuthz().call()
+                return calendarIds.some((id) => ['CalpView', 'CalpEdit', 'CalpManage'].includes(access?.permissionMap?.[id]))
             }
             const requestVisible = (request, s) => {
                 if (s.userPartyId && request.filedByPartyId === s.userPartyId) return true
@@ -1874,6 +1887,8 @@ along with this software (see the LICENSE.md file). If not, see
                 }
                 for (const row of ec.entity.find('mantle.party.communication.CommunicationEventRecord')
                         .condition('communicationEventId', 'in', eventIds).disableAuthz().list()) {
+                    // the chat message an event was made from (findOrCreate#ChatCommunicationEvent) names it, it is no record
+                    if (row.recordEntityName === 'moqui.chat.ChatEvent') continue
                     let keyField = null
                     try {
                         const keys = Object.keys(ec.entity.makeValue(row.recordEntityName).getPrimaryKeys())
@@ -2536,11 +2551,13 @@ along with this software (see the LICENSE.md file). If not, see
             or a party to (find#PartyCommunicationEvents, mailbox posts left out unless includeListPosts); its *Note rows
             as notes (PartyNote, WorkEffortNote, RequestNote, OrderNote, FacilityNote); its done activities (work efforts
             with the purpose WepPhoneCall, WepEmail, WepToDo or WepMeeting through RequestWorkEffort, WikiPageWorkEffort
-            or WorkEffortRecord); its changes from the entity audit log; and its files (the *Content rows). The open
-            activities come apart in plannedActivities, soonest due first, with the assignee.
+            or WorkEffortRecord); its changes from the entity audit log; its files (the *Content rows); and the messages of
+            the chat room bound to it (org.moqui.impl.ChatServices.get#Timeline by the record: none when there is no room or
+            the user may not read it). The open activities come apart in plannedActivities, soonest due first, with the
+            assignee.
 
-            kinds limits the entries to messages, notes, activities, changes and files (a list or comma-separated text;
-            empty is all). Page with pageIndex and pageSize, or by a cursor: beforeDate with seenKeys, which are
+            kinds limits the entries to messages, notes, activities, changes, files and chat (a list or comma-separated
+            text; empty is all; messages includes chat). Page with pageIndex and pageSize, or by a cursor: beforeDate with seenKeys, which are
             nextBeforeDate and nextSeenKeys of the page before, gives the entries before that date and those of that date
             not shown yet, so the pages neither skip nor repeat an entry when entries share a date. beforeDate alone
             gives the entries strictly before it, as before seenKeys (an entry of the same date as the last one shown is
@@ -2558,7 +2575,11 @@ along with this software (see the LICENSE.md file). If not, see
             emailMessageId, contactListId and attachments (the CommunicationEventContent rows) for a message or a Comment
             note; noteDate and internalNote for a *Note row; workEffortId and purposeEnumId for an activity;
             auditHistorySeqId, fieldName, oldValue, newValue, oldValueDescription and newValueDescription (status
-            descriptions) and changeReason for a change; contentKey, contentLocation and contentTypeEnumId for a file.
+            descriptions) and changeReason for a change; contentKey, contentLocation and contentTypeEnumId for a file;
+            for a chat message (kind chat, source moqui.chat.ChatEvent: the room's messages of the main timeline, not
+            removed, edits applied) chatRoomId, eventSeq, roomName (also the title), authorName, bodyText (the body is the
+            message's HTML), edited, threadReplyCount, chatAttachments and records (as get#Timeline has them), and url,
+            the room at the message when chatRoomUrl is given.
         </description>
         <in-parameters>
             <parameter name="recordEntityName" required="true"/>
@@ -2570,6 +2591,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="seenKeys" type="List"><description>With beforeDate: the entryKey of each entry shown whose date is
                 beforeDate (nextSeenKeys); the other entries of that date come too. A list or comma-separated.</description></parameter>
             <parameter name="includeListPosts" type="Boolean" default="false"/>
+            <parameter name="chatRoomUrl"><description>The app's chat screen (such as /qapps/Comms/Chat): a chat entry's url is
+                it with chatRoomId and eventSeq</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="recordEntityName"/>
@@ -2607,10 +2630,11 @@ along with this software (see the LICENSE.md file). If not, see
                 return Number.isNaN(number) ? new Date(String(value)).getTime() : number
             }
             const kindNames = {message: 'message', messages: 'message', note: 'note', notes: 'note', activity: 'activity',
-                activities: 'activity', change: 'change', changes: 'change', file: 'file', files: 'file'}
+                activities: 'activity', change: 'change', changes: 'change', file: 'file', files: 'file', chat: 'chat'}
             const kindValues = kinds == null ? [] : (typeof kinds === 'string' ? kinds.split(',') : Array.from(kinds))
             const wanted = new Set(kindValues.map((kind) => kindNames[String(kind).trim()]).filter((kind) => kind))
-            const wants = (kind) => wanted.size === 0 || wanted.has(kind)
+            // the chat messages are messages too
+            const wants = (kind) => wanted.size === 0 || wanted.has(kind) || (kind === 'chat' && wanted.has('message'))
             const start = pageIndex * pageSize
             const need = start + pageSize + 1
             const beforeMillis = toMillis(beforeDate)
@@ -2779,7 +2803,38 @@ along with this software (see the LICENSE.md file). If not, see
                 }
             })
 
-            // registered sources, such as a chat room bound to the record
+            // chat: the messages of the room bound to the record, newest first back to the cursor, a page of the room's
+            // timeline at a time (get#Timeline pages by eventSeq, oldest first in each page)
+            if (wants('chat')) runSource('chatRoom', () => {
+                let beforeSeq = null
+                let found = 0
+                for (let pages = 0; pages < 20; pages++) {
+                    const parameters = {recordEntityName: recordEntityName, recordId: recordId, limit: Math.min(200, Math.max(fetch, 20))}
+                    if (beforeSeq != null) parameters.beforeSeq = beforeSeq
+                    const out = callSource('org.moqui.impl.ChatServices.get#Timeline', parameters)
+                    if (ec.message.hasError() || !out?.room) return
+                    const room = out.room
+                    const events = Array.from(out.eventList ?? [])
+                    for (const event of events) {
+                        if (event.type !== 'message' || event.redacted) continue
+                        const sentMillis = toMillis(event.sentDate)
+                        if (before && sentMillis >= before.getTime()) continue
+                        entries.push({kind: 'chat', date: sentMillis, entryKey: `chat:${room.chatRoomId}:${event.eventSeq}`,
+                            authorPartyId: null, authorUserId: event.senderUserId ?? null, authorName: event.senderName ?? null,
+                            title: room.roomName ?? null, body: event.body ?? null, contentType: 'text/html', bodyText: event.bodyText ?? null,
+                            statusId: null, source: 'moqui.chat.ChatEvent', chatRoomId: room.chatRoomId, eventSeq: event.eventSeq,
+                            roomName: room.roomName ?? null, edited: !!event.edited, threadReplyCount: event.threadReplyCount ?? 0,
+                            chatAttachments: event.attachments ?? [], records: event.records ?? [],
+                            url: chatRoomUrl ? `${chatRoomUrl}${String(chatRoomUrl).includes('?') ? '&' : '?'}chatRoomId=` +
+                                `${encodeURIComponent(room.chatRoomId)}&eventSeq=${event.eventSeq}` : null})
+                        found++
+                    }
+                    if (!out.hasMoreBefore || !events.length || found >= fetch) return
+                    beforeSeq = events[0].eventSeq
+                }
+            })
+
+            // registered sources
             const registered = ec.entity.find('moqui.service.ServiceRegister').condition('serviceTypeEnumId', 'RecordTimelineSource')
                     .useCache(true).list()
             for (const register of registered) runSource(register.serviceRegisterId, () => {
@@ -3098,6 +3153,223 @@ along with this software (see the LICENSE.md file). If not, see
                     partyId: account?.partyId ?? null, notifyMessages: follower.notifyMessages, notifyNotes: follower.notifyNotes,
                     notifyActivities: follower.notifyActivities, notifyChanges: follower.notifyChanges, fromDate: follower.fromDate})
                 if (follower.userId === ec.user.userId) isFollowing = true
+            }
+        ]]></script></actions>
+    </service>
+
+    <!-- ================================================ -->
+    <!-- ========== Chat messages on records ========== -->
+    <!-- ================================================ -->
+
+    <!-- A chat message (the framework's moqui.chat store, org.moqui.impl.ChatServices) is not a communication event: it
+        becomes one only when a user files it on a record or turns it into a task, request or event (IronStone design §13).
+        A record room's messages show in the record's timeline as they are (get#RecordTimeline, kind chat). -->
+
+    <service verb="findOrCreate" noun="ChatCommunicationEvent">
+        <description>
+            A chat message as a communication event, made once per message: type Chat, from the sender's party, its date
+            the message's, the room's name as its subject and the message's HTML (its last edit) as its body. The user must
+            be able to read the room (org.moqui.impl.ChatServices.get#RoomAccess), and the message is one of the room's
+            messages that is not removed. The event names its message by a CommunicationEventRecord of moqui.chat.ChatEvent
+            whose recordId is chatRoomId::eventSeq (the key of the MoquiChatEvent document): it finds the event again, and is
+            no record a timeline or the record visibility rules read. Filing it on a record is link#CommunicationEventRecord
+            (create#RecordFromChatMessage does it for the record it makes). created is true when this call made the event;
+            chatMessage is the message: {chatRoomId, eventSeq, senderUserId, senderName, senderPartyId, sentDate, body,
+            bodyText, attachmentNames, roomName, roomRecordEntityName, roomRecordId}.
+        </description>
+        <in-parameters>
+            <parameter name="chatRoomId" required="true"/>
+            <parameter name="eventSeq" type="Integer" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="communicationEventId"/>
+            <parameter name="created" type="Boolean"/>
+            <parameter name="chatMessage" type="Map"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            communicationEventId = null
+            created = false
+            chatMessage = null
+            const parse = (text) => { if (!text) return {}; try { const value = JSON.parse(text); return value && typeof value === 'object' ? value : {} } catch (err) { return {} } }
+            const access = ec.service.sync().name('org.moqui.impl.ChatServices.get#RoomAccess').parameter('chatRoomId', chatRoomId).call()
+            if (ec.message.hasError()) return
+            if (!access?.canRead) { ec.message.addError(`Chat room ${chatRoomId} not found`); return }
+            const row = ec.entity.find('moqui.chat.ChatEvent').condition('chatRoomId', chatRoomId).condition('eventSeq', eventSeq).one()
+            if (row == null || row.eventTypeEnumId !== 'CetMessage' || row.redactedDate) {
+                ec.message.addError(`Message ${eventSeq} not found in the room`); return }
+            const content = parse(row.contentJson)
+            let html = content.body ?? null
+            if (row.lastEditEventSeq != null) {
+                const edit = ec.entity.find('moqui.chat.ChatEvent').condition('chatRoomId', chatRoomId).condition('eventSeq', row.lastEditEventSeq).one()
+                const edited = parse(edit?.contentJson)
+                if (edited.body != null) html = edited.body
+            }
+            const room = access.room
+            const sender = row.senderUserId ? ec.entity.find('moqui.security.UserAccount').condition('userId', row.senderUserId)
+                    .disableAuthz().one() : null
+            chatMessage = {chatRoomId: chatRoomId, eventSeq: Number(eventSeq), senderUserId: row.senderUserId ?? null,
+                senderName: sender ? (sender.userFullName || sender.username) : null, senderPartyId: sender?.partyId ?? null,
+                sentDate: row.sentDate, body: html, bodyText: row.bodyText ?? null,
+                attachmentNames: Array.from(content.attachments ?? []).map((file) => file.fileName).filter((name) => name),
+                roomName: room.roomName ?? null, roomRecordEntityName: room.recordEntityName ?? null, roomRecordId: room.recordId ?? null}
+
+            const messageKey = `${chatRoomId}::${eventSeq}`
+            const existing = Array.from(ec.entity.find('mantle.party.communication.CommunicationEventRecord')
+                    .condition('recordEntityName', 'moqui.chat.ChatEvent').condition('recordId', messageKey).list())
+            if (existing.length) { communicationEventId = existing[0].communicationEventId; return }
+            communicationEventId = ec.service.sync().name('create#mantle.party.communication.CommunicationEvent').parameters({
+                communicationEventTypeId: 'Chat', statusId: 'CeSent', fromPartyId: chatMessage.senderPartyId, entryDate: row.sentDate,
+                datetimeStarted: row.sentDate, subject: room.roomName ?? null, contentType: 'text/html', body: html}).call()?.communicationEventId
+            if (ec.message.hasError()) return
+            ec.service.sync().name('create#mantle.party.communication.CommunicationEventRecord').parameters({communicationEventId: communicationEventId,
+                recordEntityName: 'moqui.chat.ChatEvent', recordId: messageKey, linkedByUserId: ec.user.userId, linkedDate: ec.user.nowTimestamp}).call()
+            created = !ec.message.hasError()
+        ]]></script></actions>
+    </service>
+
+    <service verb="create" noun="RecordFromChatMessage">
+        <description>
+            A task, request or event made from a chat message (the Chat message actions, IronStone design §13): recordKind
+            task (mantle.work.TaskServices.create#SimpleTask, owned by the user and assigned to assignToPartyId, the user by
+            default), request (mantle.request.RequestServices.create#Request, filed by the user and submitted) or event
+            (mantle.work.EventServices.create#Event in calendarId, the user's default calendar by default, from
+            estimatedStartDate to estimatedCompletionDate, or on allDayStart to allDayEnd; with neither, the next whole hour
+            for an hour). Its name is name, by default the message's first line (at most 100 characters; the file names, or
+            "Message from" the sender, for a message without text), and its description description, by default the
+            message's text. The message becomes a communication event (findOrCreate#ChatCommunicationEvent) filed on the new
+            record (its own join, WorkEffortCommEvent or RequestCommEvent), so the record's timeline shows where it came from.
+            When the room is bound to a record, the new record is linked to it as well unless linkRoomRecord is false: a task
+            or event by link#WorkEffortRecord (the record's own join, such as RequestWorkEffort, else WorkEffortRecord), a
+            request to a work effort by RequestWorkEffort; a request has no link to another kind of record
+            (roomRecordLinked false). A failure of that link is logged and leaves roomRecordLinked false; the rest stands.
+        </description>
+        <in-parameters>
+            <parameter name="chatRoomId" required="true"/>
+            <parameter name="eventSeq" type="Integer" required="true"/>
+            <parameter name="recordKind" required="true"><description>task, request or event</description></parameter>
+            <parameter name="name"/>
+            <parameter name="description"/>
+            <parameter name="assignToPartyId"/>
+            <parameter name="purposeEnumId"><description>A task's (default WepTask) or an event's (default WepMeeting)</description></parameter>
+            <parameter name="priority" type="Long"/>
+            <parameter name="estimatedStartDate" type="Timestamp"/>
+            <parameter name="estimatedCompletionDate" type="Timestamp"><description>A task's due date, an event's end</description></parameter>
+            <parameter name="allDayStart" type="Date"/>
+            <parameter name="allDayEnd" type="Date"/>
+            <parameter name="calendarId"/>
+            <parameter name="requestTypeEnumId" default-value="RqtSupport"/>
+            <parameter name="linkRoomRecord" type="Boolean" default="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId"/>
+            <parameter name="workEffortId"/>
+            <parameter name="requestId"/>
+            <parameter name="communicationEventId"/>
+            <parameter name="roomRecordEntityName"/>
+            <parameter name="roomRecordId"/>
+            <parameter name="roomRecordLinked" type="Boolean"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            recordEntityName = null; recordId = null; workEffortId = null; requestId = null
+            roomRecordEntityName = null; roomRecordId = null; roomRecordLinked = false
+            const kind = String(recordKind || '').trim().toLowerCase()
+            if (!['task', 'request', 'event'].includes(kind)) { ec.message.addError(`A record from a chat message is a task, request or event, not ${recordKind}`); return }
+            const myPartyId = ec.user.userAccount?.partyId || null
+            if (!myPartyId) { ec.message.addError('Making a record from a chat message needs a user with a party'); return }
+            const found = ec.service.sync().name('mantle.party.CommunicationServices.findOrCreate#ChatCommunicationEvent')
+                    .parameters({chatRoomId: chatRoomId, eventSeq: eventSeq}).call()
+            if (ec.message.hasError()) return
+            communicationEventId = found.communicationEventId
+            const chatMessage = found.chatMessage
+            const text = String(chatMessage.bodyText ?? '').trim()
+
+            let title = name != null ? String(name).trim() : ''
+            if (!title) {
+                const firstLine = (text.split(/\r?\n/).map((line) => line.replace(/\s+/g, ' ').trim()).find((line) => line) || '')
+                title = firstLine.length > 100 ? firstLine.substring(0, 99) + '…' : firstLine
+            }
+            if (!title) title = chatMessage.attachmentNames.length ? chatMessage.attachmentNames.join(', ').substring(0, 100)
+                    : ec.resource.expand('Message from ${name}', '', {name: chatMessage.senderName || chatMessage.senderUserId || ''})
+            const details = description != null ? (String(description) || null) : (text || null)
+
+            if (kind === 'task') {
+                workEffortId = ec.service.sync().name('mantle.work.TaskServices.create#SimpleTask').parameters({workEffortName: title,
+                    description: details, purposeEnumId: purposeEnumId || 'WepTask', priority: priority ?? 5,
+                    estimatedCompletionDate: estimatedCompletionDate, assignToPartyId: assignToPartyId || myPartyId,
+                    ownerPartyId: myPartyId}).call()?.workEffortId
+                recordEntityName = 'mantle.work.effort.WorkEffort'; recordId = workEffortId
+            } else if (kind === 'event') {
+                const fields = {workEffortName: title, description: details, purposeEnumId: purposeEnumId || 'WepMeeting', priority: priority ?? 5,
+                    assignToPartyId: assignToPartyId || myPartyId, ownerPartyId: myPartyId}
+                if (allDayStart) Object.assign(fields, {allDayStart: allDayStart, allDayEnd: allDayEnd || null})
+                else {
+                    const toMillis = (value) => {
+                        if (value == null || value === '') return null
+                        if (typeof value === 'number') return value
+                        if (value instanceof Date) return value.getTime()
+                        const text = String(value)
+                        if (/^-?\d+$/.test(text)) return Number(text)
+                        const parsed = Date.parse(text)
+                        return Number.isNaN(parsed) ? null : parsed
+                    }
+                    // with no start, the next whole hour
+                    const startMs = toMillis(estimatedStartDate) ?? Math.floor(toMillis(ec.user.nowTimestamp) / 3600000) * 3600000 + 3600000
+                    let endMs = toMillis(estimatedCompletionDate)
+                    if (endMs == null || endMs <= startMs) endMs = startMs + 3600000
+                    Object.assign(fields, {estimatedStartDate: new Date(startMs), estimatedCompletionDate: new Date(endMs),
+                        estimatedWorkDuration: (endMs - startMs) / 3600000, timeUomId: 'TF_hr'})
+                }
+                let eventCalendarId = calendarId || null
+                if (!eventCalendarId) {
+                    eventCalendarId = ec.service.sync().name('mantle.work.CalendarServices.ensure#UserDefaultCalendar').call()?.calendarId || null
+                    if (ec.message.hasError()) return
+                }
+                fields.calendarId = eventCalendarId
+                workEffortId = ec.service.sync().name('mantle.work.EventServices.create#Event').parameters(fields).call()?.workEffortId
+                recordEntityName = 'mantle.work.effort.WorkEffort'; recordId = workEffortId
+            } else {
+                requestId = ec.service.sync().name('mantle.request.RequestServices.create#Request').parameters({requestName: title,
+                    description: details, statusId: 'ReqSubmitted', requestTypeEnumId: requestTypeEnumId || 'RqtSupport', priority: priority ?? 5,
+                    assignToPartyId: assignToPartyId || null}).call()?.requestId
+                recordEntityName = 'mantle.request.Request'; recordId = requestId
+            }
+            if (ec.message.hasError()) return
+            if (!recordId) { ec.message.addError(`The ${kind} was not made`); return }
+
+            // the message on the new record
+            ec.service.sync().name('mantle.party.CommunicationServices.link#CommunicationEventRecord').parameters({
+                communicationEventId: communicationEventId, recordEntityName: recordEntityName, recordId: recordId}).call()
+            if (ec.message.hasError()) return
+
+            // the room's record: linked as well, failure tolerant
+            roomRecordEntityName = chatMessage.roomRecordEntityName
+            roomRecordId = chatMessage.roomRecordId
+            if (!linkRoomRecord || !roomRecordEntityName || !roomRecordId) return
+            ec.message.pushErrors()
+            try {
+                if (workEffortId) {
+                    ec.service.sync().name('mantle.work.WorkEffortServices.link#WorkEffortRecord').parameters({workEffortId: workEffortId,
+                        recordEntityName: roomRecordEntityName, recordId: roomRecordId}).call()
+                    if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                    roomRecordLinked = true
+                } else if (roomRecordEntityName === 'mantle.work.effort.WorkEffort') {
+                    ec.service.sync().name('mantle.party.CommunicationServices.get#RecordLinkInfo').parameters({
+                        recordEntityName: roomRecordEntityName, recordId: roomRecordId}).call()
+                    if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                    const keys = {requestId: requestId, workEffortId: roomRecordId}
+                    if (ec.entity.find('mantle.request.RequestWorkEffort').condition(keys).one() == null)
+                        ec.service.sync().name('create#mantle.request.RequestWorkEffort').parameters(keys).call()
+                    if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                    roomRecordLinked = true
+                }
+            } catch (err) {
+                ec.logger.warn(`The ${kind} ${recordId} from chat message ${chatRoomId}::${eventSeq} is not linked to the room's record ` +
+                        `${roomRecordEntityName} ${roomRecordId}: ${err && err.message ? err.message : err}`)
+                roomRecordLinked = false
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
             }
         ]]></script></actions>
     </service>

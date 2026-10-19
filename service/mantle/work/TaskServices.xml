@@ -224,6 +224,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="body"/>
             <parameter name="contentType" default-value="text/plain"/>
         </in-parameters>
+        <out-parameters><parameter name="communicationEventId"><description>The new comment (Chatter shows it at once)</description></parameter></out-parameters>
         <actions>
             <service-call name="create#mantle.party.communication.CommunicationEvent" out-map="context"
                     in-map="{communicationEventTypeId:'Comment', contactMechTypeEnumId:'CmtWebForm', statusId:'CeSent',

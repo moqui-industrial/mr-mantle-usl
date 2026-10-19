@@ -193,8 +193,11 @@ along with this software (see the LICENSE.md file). If not, see
         record. A topic that waits on a decision (an approval) is an app's, with the framework's approveServiceName and
         refuseServiceName on its NotificationTopic; those services get recordEntityName, recordId, the message's
         messageJson map and, for a refuse, reason. -->
-    <!-- a mention in a chat room: roomName, chatRoomId, authorUserId, authorName, summary -->
-    <moqui.security.user.NotificationTopic topic="ChatMention" description="Mentioned in a Chat Room" typeString="info"
+    <!-- a mention in a chat room, as org.moqui.impl.ChatServices send#Message and edit#Message send it: roomName, chatRoomId,
+        eventSeq, authorUserId, authorName and summary in the message, reason NrMention, the room (moqui.chat.ChatRoom) as
+        its record, the actor the author, and the caller's roomUrl as its link; in the Notifications inbox (it asks for the
+        user, so it is in the badge) -->
+    <moqui.security.user.NotificationTopic topic="ChatMention" inboxEnumId="NinNotifications" description="Mentioned in a Chat Room" typeString="info"
             showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="${authorName} mentioned you in ${roomName}: ${summary}" linkTemplate=""/>
     <!-- a task, activity or event coming due or starting: workEffortId, workEffortName, whenText (the due or start time in
@@ -219,10 +222,10 @@ along with this software (see the LICENSE.md file). If not, see
 
     <!-- an event invitation, new or updated (mantle.work.EventServices.send#EventInvitations): workEffortId, workEffortName,
         organizerName, whenText (the time in the organizer's words), whereText, update (true for a changed event), cancelled,
-        message -->
+        removed (true for an attendee taken off the event, remove#EventAttendee), message -->
     <moqui.security.user.NotificationTopic topic="EventInvitation" description="Event Invitation" typeString="info"
             showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
-            titleTemplate="${cancelled ? organizerName + ' cancelled ' + workEffortName : (update ? organizerName + ' updated ' + workEffortName : organizerName + ' invited you to ' + workEffortName)}, ${whenText}"
+            titleTemplate="${removed ? organizerName + ' removed you from ' + workEffortName : (cancelled ? organizerName + ' cancelled ' + workEffortName : (update ? organizerName + ' updated ' + workEffortName : organizerName + ' invited you to ' + workEffortName))}, ${whenText}"
             linkTemplate=""/>
     <!-- an attendee's answer to the organizer (mantle.work.EventServices.respond#EventInvitation): workEffortId, workEffortName,
         responderName, response (accept, tentative or decline), responseText (accepted, tentatively accepted, declined), message -->

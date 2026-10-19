@@ -279,7 +279,10 @@ along with this software (see the LICENSE.md file). If not, see
               (mantle.party.CommunicationServices.count#UnreadInternalMessages), the Messages badge
             - email: the unread mail in the Inbox folders of the user's mail accounts, not snoozed or archived
               (org.moqui.impl.EmailClientServices.count#UnreadEmail), the Mail badge
-            - chat: 0 until chat
+            - chat: the unread chat messages and mentions that count for the user
+              (org.moqui.impl.ChatServices.get#UnreadCounts total: the unread of rooms at notification level all, the
+              mentions of rooms at mentions or muted, nothing at none), the Chat badge. The framework's ChatServices publish
+              the counts of the users whose chat counts change (publish#ChatCounts), so no entity ECA is needed for it.
             Each part stands alone: one that fails is logged by name, null in counts and named in failedParts. The counts
             read only the user's own rows, with authorization disabled; another user's counts only for internal work, with
             authorization already disabled.
@@ -340,7 +343,7 @@ along with this software (see the LICENSE.md file). If not, see
                 })
                 part('messages', ['messages'], () => ({messages: callService('mantle.party.CommunicationServices.count#UnreadInternalMessages', {userId: userId}).unreadCount}))
                 part('email', ['email'], () => ({email: callService('org.moqui.impl.EmailClientServices.count#UnreadEmail', {userId: userId}).unreadCount}))
-                counts.chat = 0
+                part('chat', ['chat'], () => ({chat: callService('org.moqui.impl.ChatServices.get#UnreadCounts', {userId: userId}).total}))
             } finally {
                 if (!wasDisabled) ec.artifactExecution.enableAuthz()
             }
