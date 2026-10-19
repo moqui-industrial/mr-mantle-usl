@@ -317,7 +317,8 @@ feature("create#UnsubscribeToken: a random token given once with its hash kept, 
         news.token.length == 32
         urlSafe.test(news.token)
         news.unsubscribeUrl == "https://shop.example.com/u/" + news.token
-        news.listUnsubscribeHeaders["List-Unsubscribe"] == "<https://shop.example.com/u/" + news.token + ">"
+        news.oneClickUrl == "https://shop.example.com/u/" + news.token + "/oneClick"
+        news.listUnsubscribeHeaders["List-Unsubscribe"] == "<https://shop.example.com/u/" + news.token + "/oneClick>"
         news.listUnsubscribeHeaders["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
         row.contactListId == list.news
         row.partyId == party.Cora

@@ -241,6 +241,11 @@ along with this software (see the LICENSE.md file). If not, see
         subject, fromAddress and fromName in bodyParameters, and the body. -->
     <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_CALENDAR_EMAIL" description="Calendar Invitation or Reminder" emailServerId="SYSTEM"
             fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}" sendPartial="Y"/>
+    <!-- Email: the confirmation an unsubscribe waits for on a list that requires it (mantle.party.ConsentServices
+        send#UnsubscribeVerifyEmail, when the list's Unsubscribe Verify email names no template): from the list's
+        verifyEmailFrom, with the link of the page. -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_UNSUBSCRIBE_VERIFY" description="Unsubscribe Confirmation" emailServerId="SYSTEM"
+            fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}"/>
 
     <!-- ========== Registered Services ========== -->
 

@@ -30,25 +30,29 @@ along with this software (see the LICENSE.md file). If not, see
         current member row with a preferredContactMechId, which the later mailbox email bridge sets).
 
         A list requires confirmation of an unsubscribe when it has a current ContactListEmail of type CONT_UNSUB_VER
-        (Unsubscribe Verify): the unsubscribe then goes to CLPT_UNSUBS_PENDING with a new ContactListParty.optInVerifyCode
-        for the verification email, and a verifyCode that matches it, a signed-in user's confirmed=true, or a one-click
-        POST completes it. The withdrawal is recorded when it is asked for.
+        (Unsubscribe Verify): the unsubscribe then goes to CLPT_UNSUBS_PENDING with a new ContactListParty.optInVerifyCode,
+        and the verification email (send#UnsubscribeVerifyEmail, the row's emailTemplateId) goes to the address with a link
+        to the page carrying the code (/u/<new token>?verifyCode=<code>); a verifyCode that matches, a signed-in user's
+        confirmed=true, or a one-click POST completes it. The withdrawal is recorded when it is asked for.
 
         Unsubscribe links: create#UnsubscribeToken makes a random token (ec.user.randomString(32): 32 URL-safe characters,
         192 bits) for a party on a list, usually one per message sent, and keeps only its hash in
         mantle.marketing.contact.ContactListToken (tokenHash, ec.user.singleUseCodeHash), so the stored rows give no working
-        links; thruDate revokes or expires one. The public page /u/<token> reads resolve#UnsubscribeToken (read only, so a
-        mail scanner fetching the link changes nothing) and posts unsubscribe#ContactListParty or
-        apply#UnsubscribePreferences. These three run for an anonymous visitor (authenticate anonymous-view and
-        anonymous-all, which let their entity operations run without a login) and check the token before they read
-        anything else: an unknown, revoked or expired token gets the one error "This unsubscribe link is not valid or has
-        expired" and no data, and they answer only about the token's party and the lists of the token list's organization.
+        links; thruDate revokes or expires one. The public page /u/<token> (a token-route whose check is
+        check#UnsubscribeToken: a known token is let through, an ended one only to say so) reads resolve#UnsubscribeToken
+        (read only, so a mail scanner fetching the link changes nothing) and posts unsubscribe#ContactListParty or
+        apply#UnsubscribePreferences. These run for an anonymous visitor (authenticate anonymous-view and anonymous-all,
+        which let their entity operations run without a login) and check the token before they read anything else: an
+        unknown, revoked or expired token gets the one error "This unsubscribe link is not valid or has expired" and no
+        data, and they answer only about the token's party and the lists of the token list's organization.
 
-        The RFC 8058 one-click POST (List-Unsubscribe-Post: List-Unsubscribe=One-Click) to /u/<token> is the call
-        unsubscribe#ContactListParty({token: '<token from the URL>', listUnsubscribe: 'One-Click'}) (the route maps the
-        form field List-Unsubscribe to listUnsubscribe): it unsubscribes the party from the token's list, CLPT_UNSUBSCRIBED
-        with no confirmation step, and records the withdrawal with source PcsEmailLink; a second POST changes nothing. The
-        header values come from create#UnsubscribeToken (listUnsubscribeHeaders). -->
+        The RFC 8058 one-click POST (List-Unsubscribe-Post: List-Unsubscribe=One-Click) goes to the List-Unsubscribe URL,
+        /u/<token>/oneClick: a transition of the route's screen (a POST to /u/<token> itself renders the public shell),
+        which calls unsubscribe#ContactListParty({token: '<token from the URL>', listUnsubscribe: 'One-Click'}) with the
+        form field List-Unsubscribe: it unsubscribes the party from the token's list, CLPT_UNSUBSCRIBED with no
+        confirmation step, and records the withdrawal with source PcsEmailLink; a second POST changes nothing. The header
+        values come from create#UnsubscribeToken (listUnsubscribeHeaders); mantle.marketing.ContactListServices
+        send#ContactListEmail makes one per message it sends. -->
 
     <service verb="store" noun="PartyConsent">
         <description>
@@ -613,8 +617,10 @@ along with this software (see the LICENSE.md file). If not, see
             Unsubscribing sets every current row to CLPT_UNSUBSCRIBED, or CLPT_UNSUBS_PENDING with a new optInVerifyCode
             when the list requires confirmation (a current CONT_UNSUB_VER ContactListEmail) and the change is not
             confirmed (confirmed, or a verifyCode that matches a pending row's), a CLPT_UNSUBSCRIBED row for a party not on
-            the list (a suppression), and records a withdrawal for the list unless its last list consent is one. Nothing
-            changes when the party is already in the state asked for.
+            the list (a suppression), and records a withdrawal for the list unless its last list consent is one. A change
+            to CLPT_UNSUBS_PENDING sends the verification email (send#UnsubscribeVerifyEmail, in a transaction of its own:
+            one that is not sent is logged and the unsubscribe stays pending). comments (a reason the visitor gave) go on
+            the consent rows. Nothing changes when the party is already in the state asked for.
         </description>
         <in-parameters>
             <parameter name="contactListId" required="true"/>
@@ -623,14 +629,17 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="contactMechId"/>
             <parameter name="sourceEnumId"/>
             <parameter name="evidenceText"/>
+            <parameter name="comments"/>
             <parameter name="confirmed" type="Boolean" default="false"/>
             <parameter name="verifyCode"/>
+            <parameter name="baseUrl"><description>The site's root for the verification email's link</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="statusId"/>
             <parameter name="previousStatusId"/>
             <parameter name="changed" type="Boolean"/>
             <parameter name="consentRecorded" type="Boolean"/>
+            <parameter name="verifyEmailSent" type="Boolean"/>
         </out-parameters>
         <actions><script><![CDATA[
             const cf = ec.entity.conditionFactory
@@ -645,7 +654,7 @@ along with this software (see the LICENSE.md file). If not, see
             const idOrder = (a, b) => (a.length - b.length) || (a < b ? -1 : a > b ? 1 : 0)
             const newestFirst = (a, b) => ((toMillis(b.consentDate) ?? 0) - (toMillis(a.consentDate) ?? 0)) ||
                     idOrder(String(b.partyConsentId), String(a.partyConsentId))
-            statusId = null; previousStatusId = null; changed = false; consentRecorded = false
+            statusId = null; previousStatusId = null; changed = false; consentRecorded = false; verifyEmailSent = false
             const now = ec.user.nowTimestamp
             const nowMillis = toMillis(now)
             const currentDate = cf.makeConditionDate('fromDate', 'thruDate', null)
@@ -673,6 +682,7 @@ along with this software (see the LICENSE.md file). If not, see
                 ec.service.sync().name('mantle.party.ConsentServices.store#PartyConsent').parameters({partyId: partyId,
                     contactMechId: contactMechId, purposeEnumId: purposeEnumId, statusId: consentStatusId, sourceEnumId: sourceEnumId,
                     evidenceText: [evidenceText, extraEvidence].filter((part) => part).join('; ') || null,
+                    comments: comments ? String(comments).trim().slice(0, 255) || null : null,
                     contactListId: forList ? contactListId : null}).call()
             }
 
@@ -719,6 +729,8 @@ along with this software (see the LICENSE.md file). If not, see
             const needsConfirm = !isConfirmed && ec.entity.find('mantle.marketing.contact.ContactListEmail').condition('contactListId', contactListId)
                     .condition('emailTypeEnumId', 'CONT_UNSUB_VER').condition(currentDate).count() > 0
             const target = needsConfirm ? 'CLPT_UNSUBS_PENDING' : 'CLPT_UNSUBSCRIBED'
+            // one new code for the rows going to pending, the one the verification email carries
+            let newVerifyCode = null
             if (rows.length === 0) {
                 ec.service.sync().name('create#mantle.marketing.contact.ContactListParty').parameters({contactListId: contactListId,
                     partyId: partyId, fromDate: now, statusId: 'CLPT_UNSUBSCRIBED', preferredContactMechId: contactMechId}).call()
@@ -729,7 +741,10 @@ along with this software (see the LICENSE.md file). If not, see
                 for (const row of rows) {
                     if (row.statusId === 'CLPT_UNSUBSCRIBED' || row.statusId === target) continue
                     row.set('statusId', target)
-                    if (target === 'CLPT_UNSUBS_PENDING') row.set('optInVerifyCode', ec.user.randomString(20))
+                    if (target === 'CLPT_UNSUBS_PENDING') {
+                        if (!newVerifyCode) newVerifyCode = ec.user.randomString(20)
+                        row.set('optInVerifyCode', newVerifyCode)
+                    }
                     row.update()
                     changed = true
                 }
@@ -741,6 +756,105 @@ along with this software (see the LICENSE.md file). If not, see
                 if (ec.message.hasError()) return
                 consentRecorded = true
             }
+
+            // the verification email of an unsubscribe that waits for its confirmation, a probe: one not sent is logged
+            if (newVerifyCode) {
+                ec.message.pushErrors()
+                try {
+                    const out = ec.service.sync().name('mantle.party.ConsentServices.send#UnsubscribeVerifyEmail').parameters({contactListId: contactListId,
+                        partyId: partyId, contactMechId: contactMechId || latest?.preferredContactMechId || null, verifyCode: newVerifyCode,
+                        baseUrl: baseUrl || null}).requireNewTransaction(true).call()
+                    if (ec.message.hasError()) ec.logger.error(`Unsubscribe verification email to party ${partyId} for list ${contactListId} not sent: ${ec.message.getErrorsString()}`)
+                    else verifyEmailSent = !!out?.sent
+                } catch (err) {
+                    ec.logger.error(`Unsubscribe verification email to party ${partyId} for list ${contactListId} not sent: ${String(err && err.message ? err.message : err).trim()}`)
+                } finally {
+                    ec.message.clearErrors()
+                    ec.message.popErrors()
+                }
+            }
+        ]]></script></actions>
+    </service>
+
+    <service verb="send" noun="UnsubscribeVerifyEmail">
+        <description>
+            Internal, for set#ContactListPartySubscription: the email that asks a party to confirm its unsubscribe from a
+            list that requires it, to the address (contactMechId when it is an email address, else the party's primary
+            one). The template is the emailTemplateId of the list's current CONT_UNSUB_VER ContactListEmail, else, when the
+            list has a verifyEmailFrom, MANTLE_UNSUBSCRIBE_VERIFY (from verifyEmailFrom, the subject verifyEmailSubject or
+            "Confirm your unsubscribe from" the list). Its bodyParameters are verifyUrl (the unsubscribe page with a new
+            token for the party on the list, valid 14 days, and the code: baseUrl/u/token?verifyCode=code), verifyCode,
+            contactListId, contactListName, organizationName, partyId, fromAddress, fromName and subject; a template with
+            no body screen gets a short body with the link. With no template or no address nothing is sent (sent false,
+            logged); a template that cannot send is an error.
+        </description>
+        <in-parameters>
+            <parameter name="contactListId" required="true"/>
+            <parameter name="partyId" required="true"/>
+            <parameter name="contactMechId"/>
+            <parameter name="verifyCode" required="true"/>
+            <parameter name="baseUrl"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="sent" type="Boolean"/>
+            <parameter name="emailMessageId"/>
+            <parameter name="verifyUrl"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const cf = ec.entity.conditionFactory
+            sent = false
+            const currentDate = cf.makeConditionDate('fromDate', 'thruDate', null)
+            const list = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', contactListId).one()
+            if (list == null) { ec.message.addError(`Contact list ${contactListId} not found`); return }
+            const listEmail = Array.from(ec.entity.find('mantle.marketing.contact.ContactListEmail').condition('contactListId', contactListId)
+                    .condition('emailTypeEnumId', 'CONT_UNSUB_VER').condition(currentDate).orderBy('-fromDate').list()).find((row) => row.emailTemplateId)
+            const templateId = listEmail?.emailTemplateId || (list.verifyEmailFrom ? 'MANTLE_UNSUBSCRIBE_VERIFY' : null)
+            if (!templateId) { ec.logger.warn(`List ${contactListId} requires unsubscribe confirmation but has no Unsubscribe Verify template or verifyEmailFrom; none sent to party ${partyId}`); return }
+            const template = ec.entity.find('moqui.basic.email.EmailTemplate').condition('emailTemplateId', templateId).one()
+            if (template == null) { ec.message.addError(`Email template ${templateId} not found`); return }
+            // the address: the given one when it is an email address of the party, else its primary email
+            const emailOf = (id) => {
+                if (!id) return null
+                const info = Array.from(ec.entity.find('mantle.party.contact.PartyContactMechInfo').condition('partyId', partyId).condition('contactMechId', id)
+                        .condition('contactMechTypeEnumId', 'CmtEmailAddress').condition(currentDate).list())[0]
+                return info?.infoString ? info : null
+            }
+            let address = emailOf(contactMechId)
+            if (address == null) {
+                const infos = Array.from(ec.entity.find('mantle.party.contact.PartyContactMechInfo').condition('partyId', partyId)
+                        .condition('contactMechTypeEnumId', 'CmtEmailAddress').condition(currentDate).orderBy('fromDate').list()).filter((info) => info.infoString)
+                address = infos.find((info) => info.contactMechPurposeId === 'EmailPrimary') || infos[0] || null
+            }
+            if (address == null) { ec.logger.warn(`Unsubscribe verification for party ${partyId} on list ${contactListId}: no email address, none sent`); return }
+            let root = String(baseUrl || '').trim()
+            if (!root && template.webHostName) root = `https://${template.webHostName}`
+            const link = ec.service.sync().name('mantle.party.ConsentServices.create#UnsubscribeToken').parameters({contactListId: contactListId,
+                partyId: partyId, contactMechId: address.contactMechId, baseUrl: root || null, validDays: 14}).call()
+            if (ec.message.hasError()) return
+            verifyUrl = `${link.unsubscribeUrl}?verifyCode=${encodeURIComponent(verifyCode)}`
+            let organizationName = null
+            if (list.ownerPartyId) {
+                const owner = ec.entity.find('mantle.party.PartyDetail').condition('partyId', list.ownerPartyId).one()
+                organizationName = owner == null ? null : (owner.organizationName || ec.resource.expand('PartyFullNameTemplate', '', owner).trim() || null)
+            }
+            const listName = list.contactListName || contactListId
+            const encode = (text) => String(text == null ? '' : text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+            const params = {verifyUrl: verifyUrl, verifyCode: verifyCode, contactListId: contactListId, contactListName: listName,
+                organizationName: organizationName, partyId: partyId, fromAddress: list.verifyEmailFrom || null, fromName: organizationName,
+                subject: list.verifyEmailSubject || `Confirm your unsubscribe from ${listName}`}
+            // a template without a body screen: a short body with the link
+            const own = !template.bodyScreenLocation
+            const out = ec.service.sync().name('org.moqui.impl.EmailServices.send#EmailTemplate').parameters({emailTemplateId: template.emailTemplateId,
+                toAddresses: address.infoString, createEmailMessage: true, bodyParameters: params,
+                body: own ? `<p>Please confirm that you want to stop getting ${encode(listName)}${organizationName ? ' from ' + encode(organizationName) : ''}.</p>`
+                    + `<p><a href="${encode(verifyUrl)}">Confirm unsubscribe</a></p><p>If you did not ask for this, ignore this email and you stay subscribed.</p>` : null,
+                bodyText: own ? `Please confirm that you want to stop getting ${listName}${organizationName ? ' from ' + organizationName : ''}.\n\n`
+                    + `Confirm unsubscribe: ${verifyUrl}\n\nIf you did not ask for this, ignore this email and you stay subscribed.\n` : null}).call()
+            if (ec.message.hasError()) return
+            emailMessageId = out?.emailMessageId ?? null
+            // a server with no SMTP host keeps the message unsent, with no Message-ID
+            sent = !!out?.messageId
+            if (!sent) ec.logger.warn(`Unsubscribe verification email ${emailMessageId} to party ${partyId} for list ${contactListId} was not sent by the mail server`)
         ]]></script></actions>
     </service>
 
@@ -794,7 +908,9 @@ along with this software (see the LICENSE.md file). If not, see
             another of that organization's lists the party is on (contactListId). The source is PcsEmailLink. A one-click
             call is confirmed (CLPT_UNSUBSCRIBED at once); otherwise only a verifyCode matching the pending row confirms.
             Without a token: a signed-in user, with contactListId (unless allMarketing) and partyId; source PcsStaff by
-            default, and confirmed=true skips the confirmation.
+            default, and confirmed=true skips the confirmation. reasonText (why, as the visitor or staff gave it) goes on
+            the consent rows as their comments; an unsubscribe that waits for confirmation sends the verification email,
+            its link under baseUrl (verifyEmailSent).
         </description>
         <in-parameters>
             <parameter name="token"/>
@@ -803,15 +919,19 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="contactMechId"/>
             <parameter name="allMarketing" type="Boolean" default="false"/>
             <parameter name="listUnsubscribe"><description>One-Click for the RFC 8058 POST, whose form field
-                List-Unsubscribe=One-Click the route passes here</description></parameter>
+                List-Unsubscribe=One-Click the route passes here; Mailto for the email to the List-Unsubscribe mailto
+                (process#UnsubscribeEmail, which gives the sender as evidenceText)</description></parameter>
             <parameter name="sourceEnumId"/>
             <parameter name="evidenceText"/>
             <parameter name="confirmed" type="Boolean" default="false"/>
             <parameter name="verifyCode"/>
+            <parameter name="reasonText"/>
+            <parameter name="baseUrl"/>
         </in-parameters>
         <out-parameters>
             <parameter name="statusId"><description>The list's status after, for one list</description></parameter>
             <parameter name="unsubscribePending" type="Boolean"/>
+            <parameter name="verifyEmailSent" type="Boolean"/>
             <parameter name="changedList" type="List"><parameter name="changed" type="Map">
                 <parameter name="contactListId"/><parameter name="statusId"/><parameter name="previousStatusId"/></parameter></parameter>
             <parameter name="unchangedContactListIds" type="List"/>
@@ -832,8 +952,9 @@ along with this software (see the LICENSE.md file). If not, see
             const newestFirst = (a, b) => ((toMillis(b.consentDate) ?? 0) - (toMillis(a.consentDate) ?? 0)) ||
                     idOrder(String(b.partyConsentId), String(a.partyConsentId))
             statusId = null; unsubscribePending = false; changedList = []; unchangedContactListIds = []; failedContactListIds = []
-            marketingWithdrawn = false
+            marketingWithdrawn = false; verifyEmailSent = false
             const now = ec.user.nowTimestamp
+            const reason = reasonText ? String(reasonText).trim().slice(0, 255) || null : null
 
             // the token first, before anything else is read
             const invalid = 'This unsubscribe link is not valid or has expired'
@@ -846,7 +967,9 @@ along with this software (see the LICENSE.md file). If not, see
                 if (partyId && partyId !== tokenRow.partyId) { ec.message.addError(invalid); return }
             }
             const oneClick = String(listUnsubscribe || '').trim().toLowerCase() === 'one-click'
-            if (oneClick && tokenRow == null) { ec.message.addError('A one-click unsubscribe needs the link token'); return }
+            // the List-Unsubscribe mailto: an email whose subject carries the token (process#UnsubscribeEmail)
+            const byMail = String(listUnsubscribe || '').trim().toLowerCase() === 'mailto'
+            if ((oneClick || byMail) && tokenRow == null) { ec.message.addError('A one-click unsubscribe needs the link token'); return }
 
             let tokenList = null
             if (tokenRow != null) {
@@ -855,12 +978,14 @@ along with this software (see the LICENSE.md file). If not, see
                 else if (contactMechId !== tokenRow.contactMechId) { ec.message.addError(invalid); return }
                 // an anonymous visitor's change is the email link's, with the link as its evidence
                 if (!sourceEnumId || !ec.user.userId) sourceEnumId = 'PcsEmailLink'
-                // the link's own confirmation: only a one-click POST, or a verifyCode below
-                confirmed = oneClick
+                // the link's own confirmation: only a one-click POST or the mailto's email, or a verifyCode below
+                confirmed = oneClick || byMail
                 // a Message-ID without its angle brackets, which the evidence parameters take as markup
                 const ofMessage = tokenRow.messageId ? ` of message ${String(tokenRow.messageId).replace(/[<>]/g, '')}`
                         : tokenRow.communicationEventId ? ` of communication ${tokenRow.communicationEventId}` : ''
-                evidenceText = oneClick ? `One-click unsubscribe (RFC 8058)${ofMessage}` : `Unsubscribe link${ofMessage}`
+                const mailFrom = byMail && evidenceText ? ` from ${String(evidenceText).replace(/[<>]/g, '').trim().slice(0, 200)}` : ''
+                evidenceText = oneClick ? `One-click unsubscribe (RFC 8058)${ofMessage}`
+                        : byMail ? `Unsubscribe by email (List-Unsubscribe mailto)${mailFrom}${ofMessage}` : `Unsubscribe link${ofMessage}`
                 tokenList = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', tokenRow.contactListId).one()
                 if (tokenList == null) { ec.message.addError(invalid); return }
             } else {
@@ -898,7 +1023,7 @@ along with this software (see the LICENSE.md file). If not, see
             const change = (id, separately) => {
                 let call = ec.service.sync().name('mantle.party.ConsentServices.set#ContactListPartySubscription').parameters({contactListId: id,
                     partyId: partyId, subscribe: false, contactMechId: contactMechId, sourceEnumId: sourceEnumId, evidenceText: evidenceText,
-                    confirmed: confirmed, verifyCode: allMarketing ? null : verifyCode})
+                    comments: reason, confirmed: confirmed, verifyCode: allMarketing ? null : verifyCode, baseUrl: baseUrl || null})
                 if (separately) call = call.requireNewTransaction(true)
                 return call.call()
             }
@@ -907,6 +1032,7 @@ along with this software (see the LICENSE.md file). If not, see
                 if (ec.message.hasError()) return
                 statusId = out.statusId
                 unsubscribePending = statusId === 'CLPT_UNSUBS_PENDING'
+                verifyEmailSent = !!out.verifyEmailSent
                 if (out.changed) changedList.push({contactListId: listIds[0], statusId: out.statusId, previousStatusId: out.previousStatusId})
                 else unchangedContactListIds.push(listIds[0])
             } else {
@@ -918,6 +1044,7 @@ along with this software (see the LICENSE.md file). If not, see
                         if (out.changed) changedList.push({contactListId: id, statusId: out.statusId, previousStatusId: out.previousStatusId})
                         else unchangedContactListIds.push(id)
                         if (out.statusId === 'CLPT_UNSUBS_PENDING') unsubscribePending = true
+                        if (out.verifyEmailSent) verifyEmailSent = true
                     } catch (err) {
                         ec.message.clearErrors()
                         ec.logger.error(`Unsubscribe of party ${partyId} from contact list ${id} failed: ${String(err && err.message ? err.message : err).trim()}`)
@@ -937,7 +1064,7 @@ along with this software (see the LICENSE.md file). If not, see
                     if (state?.statusId === 'PconWithdrawn') continue
                     ec.service.sync().name('mantle.party.ConsentServices.store#PartyConsent').parameters({partyId: partyId, contactMechId: mechId,
                         purposeEnumId: 'PcpMarketingEmail', statusId: 'PconWithdrawn', sourceEnumId: sourceEnumId,
-                        evidenceText: [evidenceText, 'all marketing email'].filter((part) => part).join('; ')}).call()
+                        evidenceText: [evidenceText, 'all marketing email'].filter((part) => part).join('; '), comments: reason}).call()
                     if (ec.message.hasError()) return
                     marketingWithdrawn = true
                 }
@@ -948,6 +1075,39 @@ along with this software (see the LICENSE.md file). If not, see
             }
         ]]></script></actions>
     </service>
+    <service verb="process" noun="UnsubscribeEmail" authenticate="anonymous-all" allow-remote="false">
+        <implements service="org.moqui.EmailServices.process#EmailEca"/>
+        <description>
+            The List-Unsubscribe mailto of a list email (create#UnsubscribeToken with mailtoAddress): a received email whose
+            subject is "unsubscribe" and a token unsubscribes the token's party from the token's list at once, as the
+            one-click POST does (unsubscribe#ContactListParty with listUnsubscribe Mailto, the sender as evidence). The
+            email ECA rule of MantleConsent.emecas.xml calls it for each email polled (poll#EmailServer) with such a
+            subject, so the address only needs to be an email server the deployment polls. A token that is unknown,
+            ended or refused is logged and the email is taken as handled, so the poll does not keep it; unsubscribed
+            tells whether it unsubscribed.
+        </description>
+        <out-parameters><parameter name="unsubscribed" type="Boolean"/></out-parameters>
+        <actions><script><![CDATA[
+            unsubscribed = false
+            const subjectText = String(fields?.subject || '').trim()
+            const found = /^unsubscribe\s+([A-Za-z0-9_-]{16,128})$/i.exec(subjectText)
+            if (!found) return
+            const sender = String(fields?.from || '').replace(/[<>]/g, ' ').replace(/\s+/g, ' ').trim()
+            ec.message.pushErrors()
+            try {
+                const out = ec.service.sync().name('mantle.party.ConsentServices.unsubscribe#ContactListParty').parameters({token: found[1],
+                    listUnsubscribe: 'Mailto', evidenceText: sender || null}).requireNewTransaction(true).call()
+                if (ec.message.hasError()) ec.logger.warn(`Unsubscribe email from ${sender || 'an unknown sender'} not applied: ${ec.message.getErrorsString()}`)
+                else unsubscribed = !!out
+            } catch (err) {
+                ec.logger.warn(`Unsubscribe email from ${sender || 'an unknown sender'} not applied: ${String(err && err.message ? err.message : err).trim()}`)
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+        ]]></script></actions>
+    </service>
+
     <service verb="unsubscribe" noun="ContactListParties">
         <description>
             The Consent screen's bulk action: unsubscribes each of partyIdList from a list (unsubscribe#ContactListParty,
@@ -988,11 +1148,14 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="create" noun="UnsubscribeToken">
         <description>
             A new unsubscribe link token for a party on a contact list, usually one per message sent: the token (given only
-            here; the row keeps its hash), the page's URL (baseUrl + /u/ + token) and the List-Unsubscribe and
-            List-Unsubscribe-Post (RFC 8058) header values for the message. A messageId of a ContactListCommStatus fills the
-            list, party, address and communication event. The address defaults to the party's preferredContactMechId on the
-            list, the purpose to PcpSms for a list of phone numbers, else PcpMarketingEmail. thruDate (or validDays) ends
-            it; with neither it does not expire.
+            here; the row keeps its hash), the page's URL (baseUrl + /u/ + token), the one-click URL (the page's URL +
+            /oneClick, the route screen's transition that takes the RFC 8058 POST) and the List-Unsubscribe and
+            List-Unsubscribe-Post header values for the message: List-Unsubscribe is the one-click URL, then with
+            mailtoAddress a mailto (RFC 2369) whose subject is "unsubscribe" and the token. A messageId of a
+            ContactListCommStatus fills the list, party, address and communication event. The address defaults to the
+            party's preferredContactMechId on the list, the purpose to PcpSms for a list of phone numbers, else
+            PcpMarketingEmail. baseUrl defaults to the web request's root URL when there is one. thruDate (or validDays)
+            ends it; with neither it does not expire.
         </description>
         <in-parameters>
             <parameter name="contactListId"/>
@@ -1004,11 +1167,14 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="thruDate" type="Timestamp"/>
             <parameter name="validDays" type="Integer"/>
             <parameter name="baseUrl"><description>The site's https root, such as https://example.com</description></parameter>
+            <parameter name="mailtoAddress"><description>An address that takes unsubscribe requests by mail, for the
+                List-Unsubscribe mailto; empty leaves it out</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="token"/>
             <parameter name="contactListTokenId"/>
             <parameter name="unsubscribeUrl"/>
+            <parameter name="oneClickUrl"/>
             <parameter name="listUnsubscribeHeaders" type="Map"/>
         </out-parameters>
         <actions><script><![CDATA[
@@ -1047,8 +1213,60 @@ along with this software (see the LICENSE.md file). If not, see
                 communicationEventId: communicationEventId || null, messageId: messageId || null, purposeEnumId: purposeEnumId,
                 createdDate: ec.user.nowTimestamp, thruDate: thruDate || null}).call()?.contactListTokenId ?? null
             if (ec.message.hasError()) { token = null; return }
-            unsubscribeUrl = `${String(baseUrl || '').replace(/\/+$/, '')}/u/${token}`
-            listUnsubscribeHeaders = {'List-Unsubscribe': `<${unsubscribeUrl}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'}
+            let root = String(baseUrl || '').trim()
+            if (!root) { try { root = ec.web ? String(ec.web.getWebappRootUrl() || '') : '' } catch (err) { root = '' } }
+            unsubscribeUrl = `${root.replace(/\/+$/, '')}/u/${token}`
+            oneClickUrl = `${unsubscribeUrl}/oneClick`
+            const uris = [`<${oneClickUrl}>`]
+            const mailto = String(mailtoAddress || '').trim()
+            // one plain address: no display name, brackets, spaces or a query of its own
+            if (mailto && /^[^\s<>@?,;"]+@[^\s<>@?,;"]+$/.test(mailto)) uris.push(`<mailto:${mailto}?subject=${encodeURIComponent('unsubscribe ' + token)}>`)
+            else if (mailto) ec.logger.warn(`Unsubscribe token for party ${partyId} on list ${contactListId}: mailto address ${mailto} is not one plain address, left out`)
+            listUnsubscribeHeaders = {'List-Unsubscribe': uris.join(', '), 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'}
+        ]]></script></actions>
+    </service>
+
+    <service verb="check" noun="UnsubscribeToken" authenticate="anonymous-view" allow-remote="false">
+        <description>
+            The token check of the public unsubscribe page's token-route (/u/&lt;token&gt;; the framework calls it with token
+            and routeName before anything of the page runs). An unknown or malformed token is not valid, so the route
+            answers its "link expired or not found" page. A known one is valid: routeContext {expired: false,
+            organizationName, contactListName} while it is current, and {expired: true} with nothing else once it has ended
+            (revoked or expired), so the page can say so in its own words. Read only; the page's calls check the token
+            again.
+        </description>
+        <in-parameters>
+            <parameter name="token" required="true"/>
+            <parameter name="routeName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="valid" type="Boolean"/>
+            <parameter name="routeContext" type="Map"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const toMillis = (value) => {
+                if (value == null || value === '') return null
+                if (typeof value === 'number') return value
+                if (value instanceof Date) return value.getTime()
+                const number = Number(value)
+                return Number.isNaN(number) ? new Date(String(value)).getTime() : number
+            }
+            valid = false
+            routeContext = null
+            const tokenText = token == null ? '' : String(token).trim()
+            if (!/^[A-Za-z0-9_-]{16,128}$/.test(tokenText)) return
+            const tokenRow = ec.entity.find('mantle.marketing.contact.ContactListToken').condition('tokenHash', ec.user.singleUseCodeHash(tokenText)).one()
+            if (tokenRow == null) return
+            valid = true
+            if (tokenRow.thruDate != null && toMillis(tokenRow.thruDate) <= toMillis(ec.user.nowTimestamp)) { routeContext = {expired: true}; return }
+            const list = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', tokenRow.contactListId).one()
+            if (list == null) { routeContext = {expired: true}; return }
+            let organizationName = null
+            if (list.ownerPartyId) {
+                const owner = ec.entity.find('mantle.party.PartyDetail').condition('partyId', list.ownerPartyId).one()
+                organizationName = owner == null ? null : (owner.organizationName || ec.resource.expand('PartyFullNameTemplate', '', owner).trim() || null)
+            }
+            routeContext = {expired: false, organizationName: organizationName, contactListName: list.contactListName ?? null}
         ]]></script></actions>
     </service>
 
@@ -1136,18 +1354,24 @@ along with this software (see the LICENSE.md file). If not, see
             subscribed} (or a map of contactListId to subscribed), subscribes or unsubscribes the token's party on each of
             the lists resolve#UnsubscribeToken offers (others are skipped and listed in failedContactListIds), each in its
             own transaction, with source PcsEmailLink; with unsubscribeAll, all marketing email instead
-            (unsubscribe#ContactListParty allMarketing). The token is checked first.
+            (unsubscribe#ContactListParty allMarketing). The token is checked first. reasonText goes on the consent rows of
+            the lists unsubscribed (their comments). A list that requires confirmation waits for it (CLPT_UNSUBS_PENDING,
+            the verification email with its link under baseUrl). Subscribing again here is the page's undo.
         </description>
         <in-parameters>
             <parameter name="token" required="true"/>
             <parameter name="listChoices" type="Object"/>
             <parameter name="unsubscribeAll" type="Boolean" default="false"/>
+            <parameter name="reasonText"/>
+            <parameter name="baseUrl"/>
         </in-parameters>
         <out-parameters>
             <parameter name="changedList" type="List"><parameter name="changed" type="Map">
                 <parameter name="contactListId"/><parameter name="statusId"/><parameter name="previousStatusId"/></parameter></parameter>
             <parameter name="failedContactListIds" type="List"/>
             <parameter name="marketingWithdrawn" type="Boolean"/>
+            <parameter name="unsubscribePending" type="Boolean"/>
+            <parameter name="verifyEmailSent" type="Boolean"/>
         </out-parameters>
         <actions><script><![CDATA[
             const toMillis = (value) => {
@@ -1157,7 +1381,7 @@ along with this software (see the LICENSE.md file). If not, see
                 const number = Number(value)
                 return Number.isNaN(number) ? new Date(String(value)).getTime() : number
             }
-            changedList = []; failedContactListIds = []; marketingWithdrawn = false
+            changedList = []; failedContactListIds = []; marketingWithdrawn = false; unsubscribePending = false; verifyEmailSent = false
             // the token first, before anything else is read
             const invalid = 'This unsubscribe link is not valid or has expired'
             const tokenText = token == null ? '' : String(token).trim()
@@ -1167,11 +1391,13 @@ along with this software (see the LICENSE.md file). If not, see
 
             if (unsubscribeAll) {
                 const out = ec.service.sync().name('mantle.party.ConsentServices.unsubscribe#ContactListParty')
-                        .parameters({token: tokenText, allMarketing: true}).call()
+                        .parameters({token: tokenText, allMarketing: true, reasonText: reasonText || null, baseUrl: baseUrl || null}).call()
                 if (ec.message.hasError()) return
                 changedList = out.changedList || []
                 failedContactListIds = out.failedContactListIds || []
                 marketingWithdrawn = !!out.marketingWithdrawn
+                unsubscribePending = !!out.unsubscribePending
+                verifyEmailSent = !!out.verifyEmailSent
                 return
             }
 
@@ -1200,8 +1426,11 @@ along with this software (see the LICENSE.md file). If not, see
                 try {
                     const out = ec.service.sync().name('mantle.party.ConsentServices.set#ContactListPartySubscription').parameters({contactListId: id,
                         partyId: tokenRow.partyId, subscribe: choice.subscribed, contactMechId: tokenRow.contactMechId || null,
-                        sourceEnumId: 'PcsEmailLink', evidenceText: evidence}).requireNewTransaction(true).call()
+                        sourceEnumId: 'PcsEmailLink', evidenceText: evidence, comments: choice.subscribed ? null : (reasonText || null),
+                        baseUrl: baseUrl || null}).requireNewTransaction(true).call()
                     if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                    if (out.statusId === 'CLPT_UNSUBS_PENDING') unsubscribePending = true
+                    if (out.verifyEmailSent) verifyEmailSent = true
                     if (out.changed) changedList.push({contactListId: id, statusId: out.statusId, previousStatusId: out.previousStatusId})
                 } catch (err) {
                     ec.message.clearErrors()
