@@ -18,8 +18,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>
             The communication events a party is from or to, or has a CommunicationEventParty row on (a to or cc recipient,
             a watcher, or a party the event was filed on), newest first unless ordered otherwise. Posts to a mailbox
-            (contactListId set) belong to the mailbox's members and are left out unless includeListPosts is true or a
-            contactListId is given.
+            (contactListId set) belong to the mailbox's members and are left out unless includeListPosts is true, a
+            contactListId is given, or the post was filed on the party (its _NA_ row, link#CommunicationEventRecord).
         </description>
         <in-parameters>
             <parameter name="partyId" required="true"/>
@@ -35,6 +35,12 @@ along with this software (see the LICENSE.md file). If not, see
             </parameter></parameter>
         </out-parameters>
         <actions>
+            <!-- list posts are left out, except those filed on the party -->
+            <script><![CDATA[
+                linkedPostIds = includeListPosts || contactListId ? [] : Array.from(ec.entity.find('mantle.party.communication.CommunicationEventPartyAndEvent')
+                        .condition('partyId', partyId).condition('roleTypeId', '_NA_').condition('contactListId', 'not-equals', null)
+                        .selectField('communicationEventId').list()).map((row) => row.communicationEventId)
+            ]]></script>
             <!-- a row per party row of the event, so distinct; the select fields are the event's; the type is the in
                 condition below, which a search form equals on the comma-separated default would replace -->
             <entity-find entity-name="mantle.party.communication.CommunicationEventPartyAndPurpose" list="commEventList" distinct="true">
@@ -45,7 +51,11 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="recipientPartyId" from="partyId"/>
                 </econditions>
                 <econdition field-name="communicationEventTypeId" operator="in"/>
-                <econdition field-name="contactListId" operator="is-null" ignore="includeListPosts || contactListId"/>
+                <econditions combine="or">
+                    <econdition field-name="contactListId" operator="is-null" ignore="includeListPosts || contactListId"/>
+                    <econdition field-name="communicationEventId" operator="in" from="linkedPostIds"
+                            ignore="includeListPosts || contactListId || !linkedPostIds.length"/>
+                </econditions>
                 <select-field field-name="communicationEventId"/><select-field field-name="entryDate"/>
                 <select-field field-name="statusId"/><select-field field-name="fromPartyId"/><select-field field-name="toPartyId"/>
                 <select-field field-name="subject"/><select-field field-name="communicationEventTypeId"/>
@@ -53,6 +63,22 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="create" noun="Message">
+        <description>
+            A communication event, by default an internal Message from the current user's party. Each recipient gets a
+            CommunicationEventParty row, which holds that recipient's own read, flag, archive and snooze state: the
+            parties of toPartyId and toPartyIdList (role MessageTo), of ccPartyIdList and mentionPartyIdList (an @mention
+            is a cc; MessageCc), and for a post to a mailbox (a contactListId of type MAILBOX) the mailbox's current
+            members and the participants of the thread (MessageMailbox), less the poster. A party gets one row, its role
+            by that priority: to, then cc, then mailbox. toPartyId is set to the first to-party.
+
+            A post must be allowed by the mailbox's posting policy for the from party
+            (mantle.marketing.ContactListServices.get#ContactListAccess). A post in a thread (parentCommEventId, or
+            rootCommEventId, which defaults to the parent's thread) must be in that mailbox's thread, and the thread must
+            not be closed (its first post CeResolved). The participants of a thread are the parties its messages are from
+            or to and its to and cc recipients; besides the members they get the post where they may read the thread (a
+            public mailbox, or their own threads in a help mailbox). A contactListId of another type (Marketing's lists)
+            is only set on the event, as before.
+        </description>
         <in-parameters>
             <auto-parameters entity-name="mantle.party.communication.CommunicationEvent" include="nonpk"/>
             <parameter name="body" allow-html="safe"/>
@@ -62,6 +88,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="entryDate" default="ec.user.nowTimestamp"/>
 
             <parameter name="purposeEnumId"/>
+            <parameter name="toPartyIdList" type="List"><description>To recipients after toPartyId</description></parameter>
+            <parameter name="ccPartyIdList" type="List"/>
+            <parameter name="mentionPartyIdList" type="List"><description>Parties mentioned with @, added as cc</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="communicationEventId"/>
@@ -70,38 +99,741 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="communicationEventTypeId"/>
             <parameter name="statusId"/>
             <parameter name="entryDate"/>
+            <parameter name="toPartyId"/>
+            <parameter name="rootCommEventId"/>
+            <parameter name="recipientList" type="List"><description>The CommunicationEventParty rows written: {partyId, roleTypeId}</description></parameter>
         </out-parameters>
         <actions>
+            <script><![CDATA[
+                const asList = (value) => (value == null ? [] : (typeof value === 'string' ? value.split(',') : Array.from(value)))
+                        .map((id) => String(id).trim()).filter((id) => id)
+                recipientList = []
+                const toIds = []
+                const ccIds = []
+                for (const id of (toPartyId ? [toPartyId] : []).concat(asList(toPartyIdList))) if (!toIds.includes(id)) toIds.push(id)
+                for (const id of asList(ccPartyIdList).concat(asList(mentionPartyIdList))) {
+                    if (!toIds.includes(id) && !ccIds.includes(id)) ccIds.push(id)
+                }
+                const named = toIds.concat(ccIds)
+                if (named.length) {
+                    const found = new Set(Array.from(ec.entity.find('mantle.party.Party').condition('partyId', 'in', named)
+                            .selectField('partyId').disableAuthz().list()).map((party) => party.partyId))
+                    const missing = named.filter((id) => !found.has(id))
+                    if (missing.length) { ec.message.addError(`Party ${missing.join(', ')} not found`); return }
+                }
+                toPartyId = toIds.length ? toIds[0] : null
+
+                const findEvent = (id) => ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', id).one()
+                if (parentCommEventId) {
+                    const parent = findEvent(parentCommEventId)
+                    if (parent == null) { ec.message.addError(`Communication event ${parentCommEventId} not found`); return }
+                    if (!rootCommEventId) rootCommEventId = parent.rootCommEventId || parent.communicationEventId
+                }
+
+                // the recipients by priority: to, cc, then the mailbox's members and the thread's participants
+                const roles = new Map()
+                for (const id of toIds) roles.set(id, 'MessageTo')
+                for (const id of ccIds) if (!roles.has(id)) roles.set(id, 'MessageCc')
+                if (contactListId) {
+                    const access = ec.service.sync().name('mantle.marketing.ContactListServices.get#ContactListAccess')
+                            .parameters({contactListId: contactListId, partyId: fromPartyId}).call()
+                    if (!access.exists || !access.canSeeHeader) { ec.message.addError(`Contact list ${contactListId} not found`); return }
+                    if (access.isMailbox) {
+                        const listName = access.contactList?.contactListName || contactListId
+                        if (!access.canPost) {
+                            ec.message.addError(access.isArchived ? `Mailbox ${listName} is archived` : `You may not post to mailbox ${listName}`)
+                            return
+                        }
+                        let threadEvents = []
+                        if (rootCommEventId) {
+                            const root = findEvent(rootCommEventId)
+                            if (root == null) { ec.message.addError(`Communication event ${rootCommEventId} not found`); return }
+                            if (root.contactListId !== contactListId) {
+                                ec.message.addError(`Communication event ${rootCommEventId} is not a post in mailbox ${listName}`); return }
+                            if (root.statusId === 'CeResolved') { ec.message.addError(`This thread in mailbox ${listName} is closed`); return }
+                            const cf = ec.entity.conditionFactory
+                            threadEvents = Array.from(ec.entity.find('mantle.party.communication.CommunicationEvent')
+                                    .condition(cf.makeCondition([cf.makeCondition('communicationEventId', 'equals', rootCommEventId),
+                                        cf.makeCondition('rootCommEventId', 'equals', rootCommEventId)], 'or'))
+                                    .condition(cf.makeCondition('statusId', 'not-equals', 'CeCancelled', true))
+                                    .selectField('communicationEventId').selectField('fromPartyId').selectField('toPartyId').list())
+                            const threadIds = threadEvents.map((event) => event.communicationEventId)
+                            const threadRows = threadIds.length ? Array.from(ec.entity.find('mantle.party.communication.CommunicationEventParty')
+                                    .condition('communicationEventId', 'in', threadIds).list()) : []
+                            // a poster who may not read every thread (a help mailbox's non-member) posts only in their own
+                            if (!access.canReadAll && !threadEvents.some((event) => event.fromPartyId === fromPartyId || event.toPartyId === fromPartyId)
+                                    && !threadRows.some((row) => row.partyId === fromPartyId)) {
+                                ec.message.addError(`Communication event ${rootCommEventId} not found`); return }
+                            if (access.isPublic || access.postingEnumId === 'ClpAnyUser') {
+                                const participants = []
+                                for (const event of threadEvents) for (const id of [event.fromPartyId, event.toPartyId]) if (id) participants.push(id)
+                                for (const row of threadRows) if (row.roleTypeId === 'MessageTo' || row.roleTypeId === 'MessageCc') participants.push(row.partyId)
+                                for (const id of participants) if (id !== fromPartyId && !roles.has(id)) roles.set(id, 'MessageMailbox')
+                            }
+                        }
+                        for (const row of ec.entity.find('mantle.marketing.contact.ContactListParty').condition('contactListId', contactListId)
+                                .condition('statusId', 'CLPT_ACCEPTED').condition(ec.entity.conditionFactory.makeConditionDate('fromDate', 'thruDate', null))
+                                .orderBy('fromDate').list()) {
+                            if (row.partyId !== fromPartyId && !roles.has(row.partyId)) roles.set(row.partyId, 'MessageMailbox')
+                        }
+                    }
+                }
+                recipientList = Array.from(roles.entries()).map(([partyId, roleTypeId]) => ({partyId: partyId, roleTypeId: roleTypeId}))
+            ]]></script>
+            <if condition="ec.message.hasError()"><return/></if>
             <service-call name="create#mantle.party.communication.CommunicationEvent" in-map="context" out-map="context"/>
             <if condition="purposeEnumId">
                 <service-call name="create#mantle.party.communication.CommunicationEventPurpose" in-map="context"/>
             </if>
+            <script><![CDATA[
+                for (const recipient of recipientList) {
+                    ec.service.sync().name('create#mantle.party.communication.CommunicationEventParty').parameters({
+                        communicationEventId: communicationEventId, partyId: recipient.partyId, roleTypeId: recipient.roleTypeId,
+                        statusId: 'CepReceived'}).call()
+                    if (ec.message.hasError()) return
+                }
+            ]]></script>
         </actions>
     </service>
     <service verb="reply" noun="CommunicationEvent">
+        <description>
+            A reply to a communication event (parentCommEventId) in its thread (rootCommEventId), through create#Message.
+            A reply to a Message is a Message, and a reply to anything else a Comment to the parent's other party, as
+            before (request, task and wiki comment replies). A reply to a Message is a reply all: a mailbox post's reply
+            goes to its mailbox (create#Message adds the members and the thread's participants); any other goes to the
+            parent's sender and its To recipients, with its Cc recipients as cc, less the replier. replyToSenderOnly
+            answers only the parent's sender (its recipient when the replier sent it), as an internal message off the
+            mailbox. toPartyIdList, ccPartyIdList and mentionPartyIdList add recipients. The from party must be able to
+            see the parent Message: from, to or a recipient of it, or a post of a mailbox it may read.
+        </description>
         <in-parameters>
             <parameter name="parentCommEventId" required="true" default="communicationEventId"/>
             <parameter name="communicationEventId"/>
             <parameter name="subject"/>
-            <parameter name="body"/>
+            <parameter name="body" allow-html="safe"/>
             <parameter name="contentType" default-value="text/plain"/>
             <parameter name="fromPartyId" default="ec.user.userAccount.partyId"/>
             <parameter name="statusId" default-value="CeReceived"/>
+            <parameter name="replyToSenderOnly" type="Boolean" default="false"/>
+            <parameter name="toPartyIdList" type="List"/>
+            <parameter name="ccPartyIdList" type="List"/>
+            <parameter name="mentionPartyIdList" type="List"/>
         </in-parameters>
-        <out-parameters><parameter name="communicationEventId"/></out-parameters>
-        <actions>
-            <entity-find-one entity-name="mantle.party.communication.CommunicationEvent" value-field="parentCe">
-                <field-map field-name="communicationEventId" from="parentCommEventId"/>
-            </entity-find-one>
-            <set field="rootCommEventId" from="parentCe?.rootCommEventId || parentCommEventId"/>
-            <!-- if the from Party for this reply is the from Party on this message, send it to the to Party instead -->
-            <set field="toPartyId" from="parentCe.fromPartyId == fromPartyId ? parentCe.toPartyId : parentCe.fromPartyId"/>
-            <service-call name="create#mantle.party.communication.CommunicationEvent" out-map="context"
-                    in-map="{communicationEventTypeId:'Comment', contactMechTypeEnumId:'CmtWebForm', statusId:statusId,
-                        parentCommEventId:parentCommEventId, rootCommEventId:rootCommEventId,
-                        fromPartyId:fromPartyId, toPartyId:toPartyId, entryDate:ec.user.nowTimestamp,
-                        contentType:contentType, subject:subject, body:body}"/>
-        </actions>
+        <out-parameters>
+            <parameter name="communicationEventId"/>
+            <parameter name="communicationEventTypeId"/>
+            <parameter name="rootCommEventId"/>
+            <parameter name="toPartyId"/>
+            <parameter name="contactListId"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const asList = (value) => (value == null ? [] : (typeof value === 'string' ? value.split(',') : Array.from(value)))
+                    .map((id) => String(id).trim()).filter((id) => id)
+            const parent = ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', parentCommEventId).one()
+            if (parent == null) { ec.message.addError(`Communication event ${parentCommEventId} not found`); return }
+            const isMessage = parent.communicationEventTypeId === 'Message'
+            communicationEventTypeId = isMessage ? 'Message' : 'Comment'
+            rootCommEventId = parent.rootCommEventId || parentCommEventId
+            contactListId = null
+            const rowsOf = (roleTypeId) => Array.from(ec.entity.find('mantle.party.communication.CommunicationEventParty')
+                    .condition('communicationEventId', parentCommEventId).condition('roleTypeId', roleTypeId).list()).map((row) => row.partyId)
+
+            if (isMessage) {
+                // the replier sees the parent: from, to or a recipient of it, or a post of a mailbox it may read
+                let visible = parent.fromPartyId === fromPartyId || parent.toPartyId === fromPartyId ||
+                        ec.entity.find('mantle.party.communication.CommunicationEventParty').condition('communicationEventId', parentCommEventId)
+                            .condition('partyId', fromPartyId).count() > 0
+                if (!visible && parent.contactListId) {
+                    const access = ec.service.sync().name('mantle.marketing.ContactListServices.get#ContactListAccess')
+                            .parameters({contactListId: parent.contactListId, partyId: fromPartyId}).call()
+                    // a help mailbox's non-member only in their own thread, which create#Message checks
+                    visible = access.isMailbox && (access.canReadAll || access.canReadOwn)
+                }
+                if (!visible) { ec.message.addError(`Communication event ${parentCommEventId} not found`); return }
+            }
+
+            const toIds = []
+            const ccIds = []
+            const addTo = (id) => { if (id && !toIds.includes(id)) toIds.push(id) }
+            if (!isMessage || replyToSenderOnly) {
+                addTo(parent.fromPartyId === fromPartyId ? parent.toPartyId : parent.fromPartyId)
+            } else if (parent.contactListId) {
+                contactListId = parent.contactListId
+            } else {
+                for (const id of [parent.fromPartyId, parent.toPartyId].concat(rowsOf('MessageTo'))) if (id !== fromPartyId) addTo(id)
+                for (const id of rowsOf('MessageCc')) if (id !== fromPartyId && !toIds.includes(id) && !ccIds.includes(id)) ccIds.push(id)
+            }
+            for (const id of asList(toPartyIdList)) addTo(id)
+
+            const out = ec.service.sync().name('mantle.party.CommunicationServices.create#Message').parameters({
+                communicationEventTypeId: communicationEventTypeId, contactMechTypeEnumId: 'CmtWebForm', statusId: statusId,
+                parentCommEventId: parentCommEventId, rootCommEventId: rootCommEventId, fromPartyId: fromPartyId,
+                toPartyIdList: toIds, ccPartyIdList: ccIds.concat(asList(ccPartyIdList)), mentionPartyIdList: mentionPartyIdList,
+                contactListId: contactListId, entryDate: ec.user.nowTimestamp, contentType: contentType, subject: subject, body: body}).call()
+            if (ec.message.hasError()) return
+            communicationEventId = out.communicationEventId
+            toPartyId = out.toPartyId ?? null
+        ]]></script></actions>
+    </service>
+
+    <!-- ================================================ -->
+    <!-- ========== Internal messages and mailbox threads ========== -->
+    <!-- ================================================ -->
+
+    <!-- An internal message is a CommunicationEvent of type Message or Comment; a thread is a root message and the
+        messages whose rootCommEventId is it. Each recipient's state is its CommunicationEventParty row with role
+        MessageTo, MessageCc or MessageMailbox (create#Message). These services are for the current user's party only.
+        A message is visible to a party it is from or to or that has a row on it, and a mailbox post also to those who
+        may read the mailbox (mantle.marketing.ContactListServices.get#ContactListAccess: canReadAll, or canReadOwn in a
+        thread the party takes part in). In a mailbox, a post with no row for the party (a member who joined later, or
+        one who reads a public mailbox) is read. -->
+
+    <service verb="get" noun="InternalThreadMessages">
+        <description>
+            For find#InternalThreads and get#InternalThread: the messages of threads (by root id) the current user's party
+            may see, oldest first, each with that party's rows (myRowList), its to and cc recipients and its attachments;
+            per thread its mailbox and what the party may do there. Cancelled messages are left out; a thread with no
+            visible message is not in threadMap.
+        </description>
+        <in-parameters>
+            <parameter name="rootCommEventIdList" type="List" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="threadMap" type="Map"><description>Root id to {rootCommEventId, root, subject, contactListId,
+                contactListName, isMailbox, isClosed, takesPart, canReadAll, canPost, canModerate, messageList}</description></parameter>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const cf = ec.entity.conditionFactory
+            threadMap = {}
+            const partyId = ec.user.userAccount?.partyId || null
+            const rootIds = Array.from(new Set(Array.from(rootCommEventIdList || []).map((id) => String(id))))
+            if (!partyId || rootIds.length === 0) return
+            const rootSet = new Set(rootIds)
+            const events = Array.from(ec.entity.find('mantle.party.communication.CommunicationEvent')
+                    .condition(cf.makeCondition([cf.makeCondition('communicationEventId', 'in', rootIds),
+                        cf.makeCondition('rootCommEventId', 'in', rootIds)], 'or'))
+                    .condition(cf.makeCondition('statusId', 'not-equals', 'CeCancelled', true))
+                    .orderBy('entryDate').orderBy('communicationEventId').list()).map((value) => value.getMap())
+            if (events.length === 0) return
+            const eventIds = events.map((event) => event.communicationEventId)
+
+            const myRows = new Map()
+            const recipients = new Map()
+            for (const value of ec.entity.find('mantle.party.communication.CommunicationEventParty').condition('communicationEventId', 'in', eventIds)
+                    .condition(cf.makeCondition([cf.makeCondition('partyId', 'equals', partyId),
+                        cf.makeCondition('roleTypeId', 'in', ['MessageTo', 'MessageCc'])], 'or')).orderBy('partyId').list()) {
+                const row = value.getMap()
+                if (row.partyId === partyId) {
+                    if (!myRows.has(row.communicationEventId)) myRows.set(row.communicationEventId, [])
+                    myRows.get(row.communicationEventId).push({roleTypeId: row.roleTypeId, readDate: row.readDate ?? null,
+                        isFlagged: row.isFlagged ?? null, archivedDate: row.archivedDate ?? null, snoozedThruDate: row.snoozedThruDate ?? null,
+                        statusId: row.statusId ?? null})
+                }
+                if (row.roleTypeId === 'MessageTo' || row.roleTypeId === 'MessageCc') {
+                    if (!recipients.has(row.communicationEventId)) recipients.set(row.communicationEventId, {to: [], cc: []})
+                    recipients.get(row.communicationEventId)[row.roleTypeId === 'MessageTo' ? 'to' : 'cc'].push(row.partyId)
+                }
+            }
+            const attachments = new Map()
+            for (const value of ec.entity.find('mantle.party.communication.CommunicationEventContent').condition('communicationEventId', 'in', eventIds)
+                    .orderBy('sequenceNum').orderBy('contentDate').list()) {
+                if (!attachments.has(value.communicationEventId)) attachments.set(value.communicationEventId, [])
+                attachments.get(value.communicationEventId).push({communicationEventContentId: value.communicationEventContentId,
+                    contentLocation: value.contentLocation ?? null, description: value.description ?? null,
+                    contentTypeEnumId: value.contentTypeEnumId ?? null, contentDate: value.contentDate ?? null})
+            }
+            const accessByList = new Map()
+            const accessOf = (contactListId) => {
+                if (!accessByList.has(contactListId)) accessByList.set(contactListId, ec.service.sync()
+                        .name('mantle.marketing.ContactListServices.get#ContactListAccess').parameter('contactListId', contactListId).call())
+                return accessByList.get(contactListId)
+            }
+
+            const byThread = new Map()
+            for (const event of events) {
+                const threadId = rootSet.has(event.communicationEventId) ? event.communicationEventId : event.rootCommEventId
+                if (!byThread.has(threadId)) byThread.set(threadId, [])
+                byThread.get(threadId).push(event)
+            }
+            for (const [threadId, messages] of byThread) {
+                const mine = (event) => event.fromPartyId === partyId || event.toPartyId === partyId || myRows.has(event.communicationEventId)
+                const takesPart = messages.some(mine)
+                const visible = messages.filter((event) => {
+                    if (mine(event)) return true
+                    if (!event.contactListId) return false
+                    const access = accessOf(event.contactListId)
+                    return access.isMailbox && (access.canReadAll || (access.canReadOwn && takesPart))
+                })
+                if (visible.length === 0) continue
+                const root = messages.find((event) => event.communicationEventId === threadId) || null
+                const listId = root?.contactListId || null
+                const access = listId ? accessOf(listId) : null
+                const isMailbox = !!access?.isMailbox
+                threadMap[threadId] = {rootCommEventId: threadId, root: root, subject: root?.subject ?? visible[0].subject ?? null,
+                    contactListId: listId, contactListName: access?.contactList?.contactListName ?? null, isMailbox: isMailbox,
+                    isClosed: isMailbox && root?.statusId === 'CeResolved', takesPart: takesPart,
+                    canReadAll: isMailbox ? access.canReadAll : null, canPost: isMailbox ? access.canPost : null,
+                    canModerate: isMailbox ? access.canModerate : false,
+                    messageList: visible.map((event) => Object.assign({}, event, {myRowList: myRows.get(event.communicationEventId) || [],
+                        toPartyIdList: recipients.get(event.communicationEventId)?.to ?? [],
+                        ccPartyIdList: recipients.get(event.communicationEventId)?.cc ?? [],
+                        attachmentList: attachments.get(event.communicationEventId) || []}))}
+            }
+        ]]></script></actions>
+    </service>
+
+    <service verb="find" noun="InternalThreads">
+        <description>
+            The current user's internal threads, a row per thread (the root message and its replies), newest first by
+            sortDate: the date of the thread's newest message that puts it in the view.
+
+            Views: received (the default: the Inbox, threads with a to or cc row of the user's, or a mailbox row of a
+            mailbox delivered to the Inbox, not archived and not snoozed), sent (threads with a message from the user),
+            flagged, snoozed (snoozedThruDate in the future; those threads are out of received until then), archived (every
+            row of the user's in the thread archived), all (any thread with a row of the user's). With contactListId, the
+            threads of that mailbox (view all is its default; the other views then go by the user's rows on its posts): every
+            thread for a member or a public mailbox, the user's own in a help mailbox, none for a party with only a join
+            request; a post with no row of the user's is read. unreadOnly keeps threads with an unread message for the
+            user; searchText matches the subject or body of the view's messages.
+
+            Paging: pageSize threads, and beforeDate, the sortDate of the last thread shown (nextBeforeDate), for the
+            next page. A row is {store (internal), threadId and rootCommEventId (the root's id), lastCommEventId,
+            communicationEventTypeId, subject, snippet (the last message as text), sortDate, lastDate, firstDate (epoch
+            millis), messageCount, replyCount, unreadCount, isUnread, isFlagged, isArchived, snoozedThruDate, hasAttachment,
+            fromPartyId (of the last message), participantPartyIdList, participantList ({partyId, name}), contactListId,
+            contactListName, isClosed}; the store and the date cursor let find#InboxThreads merge it with the framework's mail.
+        </description>
+        <in-parameters>
+            <parameter name="view"><description>received, sent, flagged, snoozed, archived or all</description></parameter>
+            <parameter name="contactListId"/>
+            <parameter name="unreadOnly" type="Boolean" default="false"/>
+            <parameter name="searchText"/>
+            <parameter name="beforeDate" type="Timestamp"/>
+            <parameter name="pageSize" type="Integer" default="50"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="threadList" type="List"><parameter name="thread" type="Map"/></parameter>
+            <parameter name="hasMore" type="Boolean"/>
+            <parameter name="nextBeforeDate" type="Long"><description>The sortDate of the last row, when hasMore</description></parameter>
+            <parameter name="view"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const cf = ec.entity.conditionFactory
+            const DELIVERY = ['MessageTo', 'MessageCc', 'MessageMailbox']
+            const TYPES = ['Message', 'Comment']
+            const toMillis = (value) => {
+                if (value == null || value === '') return null
+                if (typeof value === 'number') return value
+                if (value instanceof Date) return value.getTime()
+                const number = Number(value)
+                return Number.isNaN(number) ? new Date(String(value)).getTime() : number
+            }
+            threadList = []
+            hasMore = false
+            nextBeforeDate = null
+            const partyId = ec.user.userAccount?.partyId || null
+            if (!partyId) { ec.message.addError('Internal messages need a user with a party'); return }
+            if (!view) view = contactListId ? 'all' : 'received'
+            if (!['received', 'sent', 'flagged', 'snoozed', 'archived', 'all'].includes(view)) {
+                ec.message.addError(`Unknown view ${view}: received, sent, flagged, snoozed, archived or all`); return }
+            if (!(pageSize > 0)) pageSize = 50
+            const now = ec.user.nowTimestamp
+            const nowMillis = toMillis(now)
+
+            if (contactListId) {
+                const access = ec.service.sync().name('mantle.marketing.ContactListServices.get#ContactListAccess')
+                        .parameter('contactListId', contactListId).call()
+                if (!access.exists || !access.isMailbox || !access.canSeeHeader) { ec.message.addError(`Mailbox ${contactListId} not found`); return }
+                // a join request sees only the header
+                if (!access.canReadOwn) return
+            }
+            // the Inbox leaves out the posts of the mailboxes the user takes as Mailbox only
+            let mailboxOnlyIds = []
+            if (view === 'received' && !contactListId) {
+                const memberRows = Array.from(ec.entity.find('mantle.marketing.contact.ContactListParty').condition('partyId', partyId)
+                        .condition('statusId', 'CLPT_ACCEPTED').condition(cf.makeConditionDate('fromDate', 'thruDate', null)).list())
+                const listIds = Array.from(new Set(memberRows.map((row) => row.contactListId)))
+                const defaults = {}
+                if (listIds.length) for (const list of ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', 'in', listIds)
+                        .selectField('contactListId').selectField('defaultDeliveryEnumId').list()) defaults[list.contactListId] = list.defaultDeliveryEnumId
+                mailboxOnlyIds = Array.from(new Set(memberRows.filter((row) => (row.deliveryEnumId || defaults[row.contactListId] || 'CldInbox') === 'CldMailboxOnly')
+                        .map((row) => row.contactListId)))
+            }
+
+            const notCancelled = cf.makeCondition('statusId', 'not-equals', 'CeCancelled', true)
+            const textCondition = searchText ? cf.makeCondition([cf.makeCondition('subject', 'like', `%${searchText}%`, false, true),
+                cf.makeCondition('body', 'like', `%${searchText}%`, false, true)], 'or') : null
+            // the messages that put a thread in the view
+            const byEvents = view === 'sent' || (contactListId && view === 'all')
+            const makeFind = () => {
+                let find
+                if (byEvents) {
+                    find = ec.entity.find('mantle.party.communication.CommunicationEvent')
+                    if (view === 'sent') find = find.condition('fromPartyId', partyId).condition(cf.makeCondition([
+                        cf.makeCondition('communicationEventTypeId', 'equals', 'Message'), cf.makeCondition('toPartyId', 'not-equals', null),
+                        cf.makeCondition('contactListId', 'not-equals', null)], 'or'))
+                } else {
+                    find = ec.entity.find('mantle.party.communication.CommunicationEventPartyAndEvent').condition('partyId', partyId)
+                            .condition('roleTypeId', 'in', DELIVERY)
+                    const notSnoozed = cf.makeCondition([cf.makeCondition('snoozedThruDate', 'equals', null),
+                        cf.makeCondition('snoozedThruDate', 'less-equals', now)], 'or')
+                    if (view === 'received') {
+                        find = find.condition('archivedDate', null).condition(notSnoozed)
+                        if (mailboxOnlyIds.length) find = find.condition(cf.makeCondition([cf.makeCondition('roleTypeId', 'in', ['MessageTo', 'MessageCc']),
+                            cf.makeCondition('contactListId', 'not-in', mailboxOnlyIds)], 'or'))
+                    } else if (view === 'flagged') find = find.condition('isFlagged', 'Y')
+                    else if (view === 'snoozed') find = find.condition('archivedDate', null).condition(cf.makeCondition('snoozedThruDate', 'greater', now))
+                    else if (view === 'archived') find = find.condition(cf.makeCondition('archivedDate', 'not-equals', null))
+                    if (unreadOnly) find = find.condition('readDate', null)
+                }
+                find = find.condition('communicationEventTypeId', 'in', TYPES).condition(notCancelled)
+                if (contactListId) find = find.condition('contactListId', contactListId)
+                if (textCondition) find = find.condition(textCondition)
+                return find.selectField('communicationEventId').selectField('rootCommEventId').selectField('entryDate')
+            }
+
+            const textOf = (body) => body ? String(body).replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim() : ''
+            const summarize = (thread, sortDate) => {
+                const messages = thread.messageList
+                const deliveryRows = messages.flatMap((message) => message.myRowList.filter((row) => DELIVERY.includes(row.roleTypeId)))
+                const unreadCount = messages.filter((message) => message.myRowList.some((row) => DELIVERY.includes(row.roleTypeId) && row.readDate == null)).length
+                const isArchived = deliveryRows.length > 0 && deliveryRows.every((row) => row.archivedDate != null)
+                if (view === 'archived' && !isArchived) return null
+                if (unreadOnly && unreadCount === 0) return null
+                const snoozes = deliveryRows.filter((row) => row.archivedDate == null).map((row) => toMillis(row.snoozedThruDate))
+                        .filter((millis) => millis != null && millis > nowMillis)
+                const participants = []
+                for (const message of messages) for (const id of [message.fromPartyId].concat(message.toPartyIdList, message.ccPartyIdList, [message.toPartyId])) {
+                    if (id && !participants.includes(id)) participants.push(id)
+                }
+                const first = messages[0]
+                const last = messages[messages.length - 1]
+                const snippet = textOf(last.body)
+                return {store: 'internal', threadId: thread.rootCommEventId, rootCommEventId: thread.rootCommEventId,
+                    lastCommEventId: last.communicationEventId, communicationEventTypeId: (thread.root || first).communicationEventTypeId,
+                    subject: thread.subject, snippet: snippet.length > 140 ? snippet.substring(0, 137) + '...' : snippet,
+                    sortDate: sortDate, lastDate: toMillis(last.entryDate), firstDate: toMillis(first.entryDate),
+                    messageCount: messages.length, replyCount: messages.length - 1, unreadCount: unreadCount, isUnread: unreadCount > 0,
+                    isFlagged: messages.some((message) => message.myRowList.some((row) => row.isFlagged === 'Y')), isArchived: isArchived,
+                    snoozedThruDate: snoozes.length ? Math.max.apply(null, snoozes) : null,
+                    hasAttachment: messages.some((message) => message.attachmentList.length > 0), fromPartyId: last.fromPartyId ?? null,
+                    participantPartyIdList: participants, participantList: [], contactListId: thread.isMailbox ? thread.contactListId : null,
+                    contactListName: thread.isMailbox ? thread.contactListName : null, isClosed: thread.isClosed}
+            }
+
+            // scan the view's messages newest first; a thread comes at its newest one
+            const beforeMillis = toMillis(beforeDate)
+            const chunkSize = Math.max(pageSize * 2, 50)
+            const seen = new Set()
+            const accepted = []
+            let offset = 0
+            while (accepted.length <= pageSize) {
+                let find = makeFind()
+                if (beforeMillis != null) find = find.condition(cf.makeCondition('entryDate', 'less', new Date(beforeMillis)))
+                const rows = Array.from(find.orderBy('-entryDate').orderBy('-communicationEventId').offset(offset).limit(chunkSize).list())
+                offset += rows.length
+                const fresh = []
+                for (const row of rows) {
+                    const threadId = row.rootCommEventId || row.communicationEventId
+                    if (seen.has(threadId)) continue
+                    seen.add(threadId)
+                    fresh.push({threadId: threadId, sortDate: toMillis(row.entryDate)})
+                }
+                if (fresh.length) {
+                    // a thread with a message in the view at or after the cursor was on an earlier page
+                    let shown = new Set()
+                    if (beforeMillis != null) {
+                        const ids = fresh.map((candidate) => candidate.threadId)
+                        shown = new Set(Array.from(makeFind().condition(cf.makeCondition([cf.makeCondition('communicationEventId', 'in', ids),
+                            cf.makeCondition('rootCommEventId', 'in', ids)], 'or')).condition(cf.makeCondition('entryDate', 'greater-equals',
+                            new Date(beforeMillis))).list()).map((row) => row.rootCommEventId || row.communicationEventId))
+                    }
+                    const candidates = fresh.filter((candidate) => !shown.has(candidate.threadId))
+                    const threadMap = candidates.length ? ec.service.sync().name('mantle.party.CommunicationServices.get#InternalThreadMessages')
+                            .parameter('rootCommEventIdList', candidates.map((candidate) => candidate.threadId)).call().threadMap : {}
+                    if (ec.message.hasError()) return
+                    for (const candidate of candidates) {
+                        const thread = threadMap[candidate.threadId]
+                        const summary = thread ? summarize(thread, candidate.sortDate) : null
+                        if (summary == null) continue
+                        accepted.push(summary)
+                        if (accepted.length > pageSize) break
+                    }
+                }
+                if (rows.length < chunkSize) break
+            }
+            hasMore = accepted.length > pageSize
+            threadList = accepted.slice(0, pageSize)
+            if (hasMore) nextBeforeDate = threadList[threadList.length - 1].sortDate
+
+            // the participants' names
+            const partyIds = Array.from(new Set(threadList.flatMap((thread) => thread.participantPartyIdList)))
+            if (partyIds.length) {
+                const names = {}
+                for (const party of ec.entity.find('mantle.party.PartyDetail').condition('partyId', 'in', partyIds).disableAuthz().list())
+                    names[party.partyId] = party.organizationName || [party.firstName, party.lastName].filter((part) => part).join(' ') || party.partyId
+                for (const thread of threadList) thread.participantList = thread.participantPartyIdList.map((id) => ({partyId: id, name: names[id] || id}))
+            }
+        ]]></script></actions>
+    </service>
+
+    <service verb="get" noun="InternalThread">
+        <description>
+            The messages of a thread the current user may see, oldest first, by any message of it (communicationEventId)
+            or its root (rootCommEventId); a message or thread the user may not see is "not found". Each message has its
+            fields, its to and cc recipients, its attachments, and myState: the user's row {roleTypeId, readDate,
+            isFlagged, archivedDate, snoozedThruDate}, null when the user has none (a post read through the mailbox, or a
+            message the user sent). It marks nothing read; set#InternalMessageState does. canReply is false for a closed
+            thread or a mailbox the user may not post to.
+        </description>
+        <in-parameters>
+            <parameter name="communicationEventId"/>
+            <parameter name="rootCommEventId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="rootCommEventId"/>
+            <parameter name="subject"/>
+            <parameter name="contactListId"/>
+            <parameter name="contactListName"/>
+            <parameter name="isClosed" type="Boolean"/>
+            <parameter name="canReply" type="Boolean"/>
+            <parameter name="canModerate" type="Boolean"/>
+            <parameter name="unreadCount" type="Integer"/>
+            <parameter name="messageList" type="List"><parameter name="message" type="Map">
+                <parameter name="communicationEventId"/><parameter name="parentCommEventId"/><parameter name="rootCommEventId"/>
+                <parameter name="communicationEventTypeId"/><parameter name="statusId"/><parameter name="fromPartyId"/>
+                <parameter name="toPartyId"/><parameter name="toPartyIdList" type="List"/><parameter name="ccPartyIdList" type="List"/>
+                <parameter name="entryDate"/><parameter name="subject"/><parameter name="body"/><parameter name="contentType"/>
+                <parameter name="contactListId"/><parameter name="attachmentList" type="List"/><parameter name="myState" type="Map"/>
+                <parameter name="isUnread" type="Boolean"/>
+            </parameter></parameter>
+            <parameter name="participantList" type="List"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const DELIVERY = ['MessageTo', 'MessageCc', 'MessageMailbox']
+            messageList = []
+            participantList = []
+            const partyId = ec.user.userAccount?.partyId || null
+            if (!partyId) { ec.message.addError('Internal messages need a user with a party'); return }
+            const wanted = communicationEventId || rootCommEventId
+            if (!wanted) { ec.message.addError('A communicationEventId or rootCommEventId is required'); return }
+            if (!rootCommEventId) {
+                const event = ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', communicationEventId).one()
+                if (event == null) { ec.message.addError(`Communication event ${communicationEventId} not found`); return }
+                rootCommEventId = event.rootCommEventId || event.communicationEventId
+            }
+            const thread = ec.service.sync().name('mantle.party.CommunicationServices.get#InternalThreadMessages')
+                    .parameter('rootCommEventIdList', [rootCommEventId]).call().threadMap[rootCommEventId]
+            if (ec.message.hasError()) return
+            if (thread == null || (communicationEventId && !thread.messageList.some((message) => message.communicationEventId === communicationEventId))) {
+                ec.message.addError(`Communication event ${wanted} not found`); return }
+            subject = thread.subject
+            contactListId = thread.isMailbox ? thread.contactListId : null
+            contactListName = thread.isMailbox ? thread.contactListName : null
+            isClosed = thread.isClosed
+            canModerate = thread.canModerate
+            canReply = !isClosed && (!thread.isMailbox || thread.canPost === true)
+            unreadCount = 0
+            const participants = []
+            for (const message of thread.messageList) {
+                const rows = message.myRowList
+                const row = rows.find((candidate) => DELIVERY.includes(candidate.roleTypeId)) || rows[0] || null
+                const isUnread = rows.some((candidate) => DELIVERY.includes(candidate.roleTypeId) && candidate.readDate == null)
+                if (isUnread) unreadCount++
+                messageList.push({communicationEventId: message.communicationEventId, parentCommEventId: message.parentCommEventId ?? null,
+                    rootCommEventId: message.rootCommEventId ?? null, communicationEventTypeId: message.communicationEventTypeId ?? null,
+                    statusId: message.statusId ?? null, fromPartyId: message.fromPartyId ?? null, toPartyId: message.toPartyId ?? null,
+                    toPartyIdList: message.toPartyIdList, ccPartyIdList: message.ccPartyIdList, entryDate: message.entryDate ?? null,
+                    subject: message.subject ?? null, body: message.body ?? null, contentType: message.contentType ?? null,
+                    contactListId: message.contactListId ?? null, attachmentList: message.attachmentList,
+                    myState: row == null ? null : {roleTypeId: row.roleTypeId, readDate: row.readDate, isFlagged: row.isFlagged,
+                        archivedDate: row.archivedDate, snoozedThruDate: row.snoozedThruDate},
+                    isUnread: isUnread})
+                for (const id of [message.fromPartyId].concat(message.toPartyIdList, message.ccPartyIdList, [message.toPartyId])) {
+                    if (id && !participants.includes(id)) participants.push(id)
+                }
+            }
+            if (participants.length) {
+                const names = {}
+                for (const party of ec.entity.find('mantle.party.PartyDetail').condition('partyId', 'in', participants).disableAuthz().list())
+                    names[party.partyId] = party.organizationName || [party.firstName, party.lastName].filter((part) => part).join(' ') || party.partyId
+                participantList = participants.map((id) => ({partyId: id, name: names[id] || id}))
+            }
+        ]]></script></actions>
+    </service>
+
+    <service verb="set" noun="InternalMessageState">
+        <description>
+            Sets the current user's state of a message (communicationEventId) or of every message of a thread
+            (rootCommEventId): read (true sets readDate, false clears it), flagged, archived (archivedDate), and
+            snoozedThruDate (hidden from the Inbox until then; unsnooze clears it). It updates every row the user's party
+            has on each message. A mailbox post the user reads without a row (a member who joined later) gets a
+            MessageMailbox row, on the message or the thread's last post, when the change is more than marking it read.
+        </description>
+        <in-parameters>
+            <parameter name="communicationEventId"/>
+            <parameter name="rootCommEventId"><description>The whole thread</description></parameter>
+            <parameter name="read" type="Boolean"/>
+            <parameter name="flagged" type="Boolean"/>
+            <parameter name="archived" type="Boolean"/>
+            <parameter name="snoozedThruDate" type="Timestamp"/>
+            <parameter name="unsnooze" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="updatedCount" type="Integer"/>
+            <parameter name="communicationEventIdList" type="List"><description>The messages whose rows changed</description></parameter>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const cf = ec.entity.conditionFactory
+            updatedCount = 0
+            communicationEventIdList = []
+            const partyId = ec.user.userAccount?.partyId || null
+            if (!partyId) { ec.message.addError('Internal messages need a user with a party'); return }
+            if (!communicationEventId && !rootCommEventId) { ec.message.addError('A communicationEventId or rootCommEventId is required'); return }
+            const wanted = rootCommEventId || communicationEventId
+            let scopeIds
+            if (rootCommEventId) {
+                scopeIds = Array.from(ec.entity.find('mantle.party.communication.CommunicationEvent')
+                        .condition(cf.makeCondition([cf.makeCondition('communicationEventId', 'equals', rootCommEventId),
+                            cf.makeCondition('rootCommEventId', 'equals', rootCommEventId)], 'or'))
+                        .selectField('communicationEventId').list()).map((event) => event.communicationEventId)
+            } else {
+                scopeIds = ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', communicationEventId)
+                        .count() > 0 ? [communicationEventId] : []
+            }
+            if (scopeIds.length === 0) { ec.message.addError(`Communication event ${wanted} not found`); return }
+            const findRows = () => Array.from(ec.entity.find('mantle.party.communication.CommunicationEventParty')
+                    .condition('communicationEventId', 'in', scopeIds).condition('partyId', partyId).list())
+            let rows = findRows()
+            const changesState = read === false || flagged != null || archived != null || snoozedThruDate != null || unsnooze === true
+            if (rows.length === 0) {
+                // no row: visible only through a mailbox (or a message the user sent), and read there
+                let rootId = rootCommEventId
+                if (!rootId) {
+                    const event = ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', communicationEventId).one()
+                    rootId = event.rootCommEventId || event.communicationEventId
+                }
+                const thread = ec.service.sync().name('mantle.party.CommunicationServices.get#InternalThreadMessages')
+                        .parameter('rootCommEventIdList', [rootId]).call().threadMap[rootId]
+                const visible = thread ? thread.messageList : []
+                if (visible.length === 0 || (!rootCommEventId && !visible.some((message) => message.communicationEventId === communicationEventId))) {
+                    ec.message.addError(`Communication event ${wanted} not found`); return }
+                if (!changesState) return
+                const posts = visible.filter((message) => message.contactListId && message.contactListId === thread.contactListId && thread.isMailbox &&
+                        (rootCommEventId || message.communicationEventId === communicationEventId))
+                if (posts.length === 0) return
+                ec.service.sync().name('create#mantle.party.communication.CommunicationEventParty').parameters({
+                    communicationEventId: posts[posts.length - 1].communicationEventId, partyId: partyId, roleTypeId: 'MessageMailbox',
+                    statusId: 'CepReceived', readDate: ec.user.nowTimestamp}).call()
+                if (ec.message.hasError()) return
+                rows = findRows()
+            }
+            const now = ec.user.nowTimestamp
+            const changed = new Set()
+            for (const row of rows) {
+                if (read === true && row.readDate == null) row.set('readDate', now)
+                if (read === false) row.set('readDate', null)
+                if (flagged != null) row.set('isFlagged', flagged ? 'Y' : 'N')
+                if (archived === true && row.archivedDate == null) row.set('archivedDate', now)
+                if (archived === false) row.set('archivedDate', null)
+                if (snoozedThruDate != null) row.set('snoozedThruDate', snoozedThruDate)
+                if (unsnooze === true) row.set('snoozedThruDate', null)
+                row.update()
+                updatedCount++
+                changed.add(row.communicationEventId)
+            }
+            communicationEventIdList = Array.from(changed)
+        ]]></script></actions>
+    </service>
+
+    <service verb="close" noun="ListThread">
+        <description>
+            An owner or moderator of a mailbox closes a thread (any message of it): its first post gets status CeResolved,
+            and the thread takes no more replies in the mailbox. reopen=true opens it again (CeReceived).
+        </description>
+        <in-parameters>
+            <parameter name="communicationEventId" required="true"/>
+            <parameter name="reopen" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="rootCommEventId"/>
+            <parameter name="statusId"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const findEvent = (id) => ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', id).one()
+            const event = findEvent(communicationEventId)
+            if (event == null) { ec.message.addError(`Communication event ${communicationEventId} not found`); return }
+            rootCommEventId = event.rootCommEventId || event.communicationEventId
+            const root = rootCommEventId === event.communicationEventId ? event : findEvent(rootCommEventId)
+            const access = root?.contactListId ? ec.service.sync().name('mantle.marketing.ContactListServices.get#ContactListAccess')
+                    .parameter('contactListId', root.contactListId).call() : null
+            if (access == null || !access.isMailbox) { ec.message.addError(`Communication event ${communicationEventId} is not a mailbox post`); return }
+            if (!access.canModerate) {
+                ec.message.addError(access.canReadOwn ? `Only an owner or moderator of ${access.contactList?.contactListName || root.contactListId} may close a thread`
+                        : `Communication event ${communicationEventId} not found`)
+                return
+            }
+            // the first post's status, set directly: the status flow has no way back from Resolved
+            root.set('statusId', reopen ? 'CeReceived' : 'CeResolved')
+            root.update()
+            statusId = root.statusId
+        ]]></script></actions>
+    </service>
+
+    <service verb="count" noun="UnreadInternalMessages">
+        <description>
+            The unread internal messages delivered to a party's Inbox (the party, or the user's party; the current user's
+            by default), each message once: its to and cc rows and its mailbox rows of mailboxes it takes in the Inbox (a
+            member's delivery CldInbox, or a participant of a thread who is not a member), not archived and not snoozed.
+            unreadThreadCount counts their threads. For the header's Inbox count (get#ShellCounts).
+        </description>
+        <in-parameters>
+            <parameter name="partyId"/>
+            <parameter name="userId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="unreadCount" type="Integer"/>
+            <parameter name="unreadThreadCount" type="Integer"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const cf = ec.entity.conditionFactory
+            unreadCount = 0
+            unreadThreadCount = 0
+            if (!partyId && userId) partyId = ec.entity.find('moqui.security.UserAccount').condition('userId', userId).disableAuthz().one()?.partyId
+            if (!partyId && !userId) partyId = ec.user.userAccount?.partyId || null
+            if (!partyId) return
+            const now = ec.user.nowTimestamp
+            const rows = Array.from(ec.entity.find('mantle.party.communication.CommunicationEventPartyAndEvent').condition('partyId', partyId)
+                    .condition('roleTypeId', 'in', ['MessageTo', 'MessageCc', 'MessageMailbox']).condition('readDate', null)
+                    .condition('archivedDate', null).condition(cf.makeCondition([cf.makeCondition('snoozedThruDate', 'equals', null),
+                        cf.makeCondition('snoozedThruDate', 'less-equals', now)], 'or'))
+                    .condition('communicationEventTypeId', 'in', ['Message', 'Comment'])
+                    .condition(cf.makeCondition('statusId', 'not-equals', 'CeCancelled', true))
+                    .selectField('communicationEventId').selectField('rootCommEventId').selectField('roleTypeId').selectField('contactListId').list())
+            if (rows.length === 0) return
+            // the mailboxes the party takes as Mailbox only
+            const listIds = Array.from(new Set(rows.filter((row) => row.roleTypeId === 'MessageMailbox' && row.contactListId).map((row) => row.contactListId)))
+            const mailboxOnly = new Set()
+            if (listIds.length) {
+                const defaults = {}
+                for (const list of ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', 'in', listIds)
+                        .selectField('contactListId').selectField('defaultDeliveryEnumId').list()) defaults[list.contactListId] = list.defaultDeliveryEnumId
+                for (const row of ec.entity.find('mantle.marketing.contact.ContactListParty').condition('partyId', partyId)
+                        .condition('contactListId', 'in', listIds).condition('statusId', 'CLPT_ACCEPTED')
+                        .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).list()) {
+                    if ((row.deliveryEnumId || defaults[row.contactListId] || 'CldInbox') === 'CldMailboxOnly') mailboxOnly.add(row.contactListId)
+                }
+            }
+            const messages = new Set()
+            const threads = new Set()
+            for (const row of rows) {
+                if (row.roleTypeId === 'MessageMailbox' && mailboxOnly.has(row.contactListId)) continue
+                messages.add(row.communicationEventId)
+                threads.add(row.rootCommEventId || row.communicationEventId)
+            }
+            unreadCount = messages.size
+            unreadThreadCount = threads.size
+        ]]></script></actions>
     </service>
 
     <service verb="add" noun="WikiPageComment">
@@ -288,7 +1020,8 @@ along with this software (see the LICENSE.md file). If not, see
             Files a communication event on a record. The link is the record's own join when it has one (OrderCommunicationEvent,
             RequestCommEvent, WorkEffortCommEvent, WikiPageCommunicationEvent). For a party it is the event's from or to
             party, or the party's CommunicationEventParty row, written with role _NA_ (Not Applicable: a party the event is
-            about, not a recipient) when the party has none. Any other record gets a CommunicationEventRecord. Linking
+            about, not a recipient) when the party has none; for a mailbox post (contactListId), which stays off the party
+            timelines of its members and participants, it is always the _NA_ row. Any other record gets a CommunicationEventRecord. Linking
             again changes nothing. The event is communicationEventId, or the event of a framework email (emailMessageId),
             created when there is none. With notifyFollowers a new link notifies the record's followers of messages (of
             notes for a Comment).
@@ -329,13 +1062,14 @@ along with this software (see the LICENSE.md file). If not, see
                 created = !ec.message.hasError()
             }
             if (info.isParty) {
-                if (commEvent.fromPartyId === recordId || commEvent.toPartyId === recordId) {
+                const isPost = !!commEvent.contactListId
+                if (!isPost && (commEvent.fromPartyId === recordId || commEvent.toPartyId === recordId)) {
                     linkEntityName = 'mantle.party.communication.CommunicationEvent'
                 } else {
                     linkEntityName = 'mantle.party.communication.CommunicationEventParty'
-                    const partyRows = ec.entity.find(linkEntityName).condition('communicationEventId', communicationEventId)
-                            .condition('partyId', recordId).list()
-                    if (partyRows.length === 0) createRow(linkEntityName, {communicationEventId: communicationEventId, partyId: recordId, roleTypeId: '_NA_'})
+                    let partyFind = ec.entity.find(linkEntityName).condition('communicationEventId', communicationEventId).condition('partyId', recordId)
+                    if (isPost) partyFind = partyFind.condition('roleTypeId', '_NA_')
+                    if (partyFind.list().length === 0) createRow(linkEntityName, {communicationEventId: communicationEventId, partyId: recordId, roleTypeId: '_NA_'})
                 }
             } else if (info.commEventJoin) {
                 linkEntityName = info.commEventJoin.entityName

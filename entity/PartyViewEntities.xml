@@ -288,6 +288,16 @@ along with this software (see the LICENSE.md file). If not, see
         <alias name="recipientPartyId" entity-alias="CEPTY" field="partyId"/>
         <alias name="recipientRoleTypeId" entity-alias="CEPTY" field="roleTypeId"/>
     </view-entity>
+    <!-- a party's row on a communication event with the event: an internal message recipient's state (readDate,
+        isFlagged, archivedDate, snoozedThruDate) beside the message; statusId is the event's, partyStatusId the row's -->
+    <view-entity entity-name="CommunicationEventPartyAndEvent" package="mantle.party.communication">
+        <member-entity entity-alias="CEPTY" entity-name="mantle.party.communication.CommunicationEventParty"/>
+        <member-entity entity-alias="CEV" entity-name="mantle.party.communication.CommunicationEvent" join-from-alias="CEPTY">
+            <key-map field-name="communicationEventId"/></member-entity>
+        <alias-all entity-alias="CEPTY"><exclude field="statusId"/></alias-all>
+        <alias name="partyStatusId" entity-alias="CEPTY" field="statusId"/>
+        <alias-all entity-alias="CEV"><exclude field="communicationEventId"/></alias-all>
+    </view-entity>
     <view-entity entity-name="WikiPageCommEventDetail" package="mantle.party.communication">
         <member-entity entity-alias="WPCE" entity-name="mantle.party.communication.WikiPageCommunicationEvent"/>
         <member-entity entity-alias="CEV" entity-name="mantle.party.communication.CommunicationEvent" join-from-alias="WPCE">
