@@ -317,6 +317,8 @@ feature("create#UnsubscribeToken: a random token given once with its hash kept, 
         news.token.length == 32
         urlSafe.test(news.token)
         news.unsubscribeUrl == "https://shop.example.com/u/" + news.token
+        // RFC 8058: the one-click POST goes to the page's own URL
+        news.oneClickUrl == "https://shop.example.com/u/" + news.token
         news.listUnsubscribeHeaders["List-Unsubscribe"] == "<https://shop.example.com/u/" + news.token + ">"
         news.listUnsubscribeHeaders["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
         row.contactListId == list.news

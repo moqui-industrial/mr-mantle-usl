@@ -22,6 +22,50 @@ along with this software (see the LICENSE.md file). If not, see
         (contactFile), as text (fileText) or as a resource location (fileLocation), so a large import can run later as a
         job on a stored file. -->
 
+    <service verb="read" noun="ContactFileText">
+        <description>
+            A contact file's text, from an upload (contactFile) or a resource location (fileLocation), in its character set:
+            characterSet (UTF-8 by default; WINDOWS-1252, ISO-8859-1 or any other Java or WHATWG name, read by the
+            framework's FileItem.getString and stream getText), except that a file that starts with a UTF-16 byte order
+            mark is read as UTF-16 whatever was chosen, and UTF-16 chosen for a file without one is read little-endian, as
+            Windows writes it. The byte order mark is not in text. characterSetUsed is the set the file was read in. text is
+            null for a location with no file. read#ContactRows reads its file so, and an app that keeps the file's text
+            (IronStone BOSS's import draft) reads it with this service.
+        </description>
+        <in-parameters>
+            <parameter name="contactFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="fileLocation"/>
+            <parameter name="characterSet" default-value="UTF-8"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="text" allow-html="any"/>
+            <parameter name="characterSetUsed"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            text = null
+            characterSetUsed = null
+            const chosen = String(characterSet || 'UTF-8').trim().toUpperCase()
+            const decode = (bytes, read) => {
+                const bom16 = bytes.length >= 2 && ((bytes[0] === 0xFF && bytes[1] === 0xFE) || (bytes[0] === 0xFE && bytes[1] === 0xFF))
+                characterSetUsed = bom16 ? 'UTF-16' : (chosen === 'UTF-16' || chosen === 'UTF16' ? 'UTF-16LE' : chosen)
+                let out = read(characterSetUsed)
+                if (out != null && String(out).charCodeAt(0) === 0xFEFF) out = String(out).substring(1)
+                return out
+            }
+            try {
+                if (contactFile != null) {
+                    text = decode(contactFile.getInputStream().readAllBytes(), (charset) => contactFile.getString(charset))
+                } else if (fileLocation) {
+                    const stream = ec.resource.getLocationReference(fileLocation).openStream()
+                    if (stream == null) return
+                    try { text = decode(stream.readAllBytes(), (charset) => stream.getText(charset)) } finally { stream.close() }
+                }
+            } catch (err) {
+                ec.message.addError(`The contact file could not be read in ${characterSetUsed || chosen}: ${err && err.message ? err.message : err}`)
+            }
+        ]]></script></actions>
+    </service>
+
     <service verb="read" noun="ContactRows" type="script"
             location="component://mantle-usl/service/mantle/party/ContactImportServices/readContactRows.js">
         <description>
@@ -31,6 +75,7 @@ along with this software (see the LICENSE.md file). If not, see
             email, phone, address or website slot with a part and an optional fixed purpose (email1, email1.label,
             address2.city, phone3:PhoneMobile). presetId (google, outlook, generic; found from the headers when empty)
             maps the columns, and columnMapping overrides it per column (an empty target or 'ignore' leaves a column out).
+            An upload or a location is read in characterSet by read#ContactFileText.
         </description>
         <in-parameters>
             <parameter name="contactFile" type="org.apache.commons.fileupload2.core.FileItem"/>

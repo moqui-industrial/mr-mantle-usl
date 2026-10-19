@@ -245,6 +245,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="body"/>
             <parameter name="contentType" default-value="text/plain"/>
         </in-parameters>
+        <out-parameters><parameter name="communicationEventId"><description>The new comment (Chatter shows it at once)</description></parameter></out-parameters>
         <actions>
             <service-call name="create#mantle.party.communication.CommunicationEvent" out-map="context"
                     in-map="{communicationEventTypeId:'Comment', contactMechTypeEnumId:'CmtWebForm', statusId:'CeSent',
@@ -255,30 +256,67 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="update" noun="RequestComment">
+        <description>Changes the text of a comment on a request: a Comment joined to the request by RequestCommEvent, by its
+            author only (its from party is the user's party). The author stays; editedDate is set, which a timeline shows as
+            edited.</description>
         <in-parameters>
             <parameter name="requestId" required="true"/>
             <parameter name="communicationEventId" required="true"/>
             <parameter name="subject"/>
-            <parameter name="body"/>
+            <parameter name="body" allow-html="safe"/>
             <parameter name="contentType" default-value="text/plain"/>
         </in-parameters>
+        <out-parameters><parameter name="editedDate" type="Timestamp"/></out-parameters>
         <actions>
-            <service-call name="update#mantle.party.communication.CommunicationEvent" out-map="context"
-                    in-map="{communicationEventId:communicationEventId, fromPartyId:ec.user.userAccount.partyId,
-                        contentType:contentType, subject:subject, body:body}"/>
+            <service-call name="mantle.request.RequestServices.check#RequestComment" out-map="commentOut"
+                    in-map="{requestId:requestId, communicationEventId:communicationEventId, action:'update'}"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <set field="editedDate" from="ec.user.nowTimestamp"/>
+            <service-call name="update#mantle.party.communication.CommunicationEvent"
+                    in-map="{communicationEventId:communicationEventId, contentType:contentType, subject:subject, body:body, editedDate:editedDate}"/>
         </actions>
     </service>
     <service verb="delete" noun="RequestComment">
+        <description>Deletes a comment on a request that has no replies: a Comment joined to the request by RequestCommEvent,
+            by its author or a user in the ADMIN group, with its join, party, purpose and content rows
+            (mantle.party.CommunicationServices.delete#CommunicationEventRows).</description>
         <in-parameters>
             <parameter name="requestId" required="true"/>
             <parameter name="communicationEventId" required="true"/>
         </in-parameters>
         <actions>
-            <service-call name="delete#mantle.request.RequestCommEvent"
-                    in-map="{requestId:requestId, communicationEventId:communicationEventId}"/>
-            <service-call name="delete#mantle.party.communication.CommunicationEvent"
-                    in-map="{communicationEventId:communicationEventId}"/>
+            <service-call name="mantle.request.RequestServices.check#RequestComment" out-map="commentOut"
+                    in-map="{requestId:requestId, communicationEventId:communicationEventId, action:'delete'}"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <service-call name="mantle.party.CommunicationServices.delete#CommunicationEventRows" in-map="{communicationEventId:communicationEventId}"/>
         </actions>
+    </service>
+    <service verb="check" noun="RequestComment" allow-remote="false">
+        <description>A comment of a request that the user may change (action update: its author) or delete (action delete: its
+            author or a user in the ADMIN group): a Comment communication event, not cancelled, joined to the request by
+            RequestCommEvent. An error otherwise.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="communicationEventId" required="true"/>
+            <parameter name="action" default-value="update"/>
+        </in-parameters>
+        <out-parameters><parameter name="commEvent" type="Map"/></out-parameters>
+        <actions><script><![CDATA[
+            const joined = ec.entity.find('mantle.request.RequestCommEvent').condition('requestId', requestId)
+                    .condition('communicationEventId', communicationEventId).count() > 0
+            const value = joined ? ec.entity.find('mantle.party.communication.CommunicationEvent')
+                    .condition('communicationEventId', communicationEventId).one() : null
+            if (value == null || value.statusId === 'CeCancelled') {
+                ec.message.addError(`Comment ${communicationEventId} not found on request ${requestId}`); return }
+            if (value.communicationEventTypeId !== 'Comment') {
+                ec.message.addError(`Communication event ${communicationEventId} is not a comment: a message once sent stays as it is`); return }
+            const partyId = ec.user.userAccount?.partyId || null
+            const isAuthor = !!partyId && value.fromPartyId === partyId
+            if (action === 'delete') {
+                if (!isAuthor && !(ec.user.userId && ec.user.isInGroup('ADMIN'))) { ec.message.addError('You may delete only your own comments'); return }
+            } else if (!isAuthor) { ec.message.addError('You may change only your own comments'); return }
+            commEvent = value.getMap()
+        ]]></script></actions>
     </service>
 
     <!-- ========== RequestContent Services ========== -->

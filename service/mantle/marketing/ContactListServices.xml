@@ -630,4 +630,221 @@ along with this software (see the LICENSE.md file). If not, see
             effectiveDeliveryEnumId = deliveryEnumId || access.contactList.defaultDeliveryEnumId || 'CldInbox'
         ]]></script></actions>
     </service>
+
+    <!-- ========== Marketing sends ========== -->
+
+    <service verb="send" noun="ContactListEmail" transaction="ignore" allow-remote="false">
+        <description>
+            Sends an email to each subscribed member of a contact list (a list of email that is not a mailbox and not
+            archived): the members with a current CLPT_ACCEPTED or CLPT_IN_USE row (only those of partyIdList when given),
+            each once, at the row's preferredContactMechId when it is one of the party's current email addresses, else the
+            party's primary email. Consent gates it: a member is skipped (skippedList, with the reason) when the address
+            does not allow solicitation (allowSolicitation N), its marketing email consent or the party's is withdrawn, it
+            has no email address, the address was already sent to, or the party is disabled or merged.
+
+            The message is the template's (emailTemplateId, else the list's current CONT_EMAIL_TEMPLATE ContactListEmail):
+            its server, from and subject, with body and bodyText when given (else the template's body screen). One
+            CommunicationEvent (type Email, the list's contactListId, from the list's owner) stands for the send. For each
+            member, in a transaction of its own (send#ContactListPartyEmail): an unsubscribe token
+            (mantle.party.ConsentServices.create#UnsubscribeToken, under baseUrl, else https://webHostName of the
+            template, else the web request's root; with unsubscribeMailto the mailto too; validDays), the email with the
+            List-Unsubscribe and List-Unsubscribe-Post headers (RFC 2369, RFC 8058; given to send#EmailTemplate as
+            extraHeaders) and the bodyParameters plus unsubscribeUrl, partyId, contactListId, contactListName,
+            organizationName and communicationEventId, a ContactListCommStatus row with the Message-ID, and the Message-ID
+            on the token. ${unsubscribeUrl} and the other bodyParameters are expanded in a given body; a body without the
+            link gets a short footer with it. A member whose send fails is logged and listed in failedPartyIdList, and the
+            others are still sent.
+        </description>
+        <in-parameters>
+            <parameter name="contactListId" required="true"/>
+            <parameter name="emailTemplateId"/>
+            <parameter name="body" allow-html="any"/>
+            <parameter name="bodyText" allow-html="any"/>
+            <parameter name="subject"><description>The communication event's subject; the template's subject is the email's</description></parameter>
+            <parameter name="bodyParameters" type="Map"/>
+            <parameter name="partyIdList" type="List"><parameter name="partyId"/></parameter>
+            <parameter name="baseUrl"><description>The site's https root for the unsubscribe links</description></parameter>
+            <parameter name="unsubscribeMailto"/>
+            <parameter name="validDays" type="Integer"><description>How long the unsubscribe links work; empty is no end</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="communicationEventId"/>
+            <parameter name="sentCount" type="Integer"/>
+            <parameter name="recipientList" type="List"><parameter name="recipient" type="Map">
+                <parameter name="partyId"/><parameter name="contactMechId"/><parameter name="emailAddress"/><parameter name="emailMessageId"/>
+                <parameter name="messageId"/><parameter name="unsubscribeUrl"/><parameter name="listUnsubscribeHeaders" type="Map"/></parameter></parameter>
+            <parameter name="skippedList" type="List"><parameter name="skipped" type="Map">
+                <parameter name="partyId"/><parameter name="contactMechId"/><parameter name="reason"/></parameter></parameter>
+            <parameter name="failedPartyIdList" type="List"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const cf = ec.entity.conditionFactory
+            const CLP = 'mantle.marketing.contact.ContactListParty'
+            const toMillis = (value) => {
+                if (value == null || value === '') return null
+                if (typeof value === 'number') return value
+                if (value instanceof Date) return value.getTime()
+                const number = Number(value)
+                return Number.isNaN(number) ? new Date(String(value)).getTime() : number
+            }
+            const idOrder = (a, b) => (a.length - b.length) || (a < b ? -1 : a > b ? 1 : 0)
+            const newestFirst = (a, b) => ((toMillis(b.consentDate) ?? 0) - (toMillis(a.consentDate) ?? 0)) ||
+                    idOrder(String(b.partyConsentId), String(a.partyConsentId))
+            communicationEventId = null; sentCount = 0; recipientList = []; skippedList = []; failedPartyIdList = []
+            const nowMillis = toMillis(ec.user.nowTimestamp)
+            const currentDate = cf.makeConditionDate('fromDate', 'thruDate', null)
+
+            const list = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', contactListId).one()
+            if (list == null) { ec.message.addError(`Contact list ${contactListId} not found`); return }
+            const listName = list.contactListName || contactListId
+            if (list.contactListTypeEnumId === 'MAILBOX') { ec.message.addError(`${listName} is a mailbox: post to it instead`); return }
+            if (list.archivedDate != null && toMillis(list.archivedDate) <= nowMillis) { ec.message.addError(`${listName} is archived`); return }
+            if (list.contactMechTypeEnumId && list.contactMechTypeEnumId !== 'CmtEmailAddress') { ec.message.addError(`${listName} is not a list of email addresses`); return }
+            if (!emailTemplateId) emailTemplateId = Array.from(ec.entity.find('mantle.marketing.contact.ContactListEmail').condition('contactListId', contactListId)
+                    .condition('emailTypeEnumId', 'CONT_EMAIL_TEMPLATE').condition(currentDate).orderBy('-fromDate').list()).map((row) => row.emailTemplateId).find((id) => id) || null
+            if (!emailTemplateId) { ec.message.addError(`${listName} has no email template: give emailTemplateId or add its Outgoing Email`); return }
+            const template = ec.entity.find('moqui.basic.email.EmailTemplate').condition('emailTemplateId', emailTemplateId).one()
+            if (template == null) { ec.message.addError(`Email template ${emailTemplateId} not found`); return }
+            let root = String(baseUrl || '').trim()
+            if (!root && template.webHostName) root = `https://${template.webHostName}`
+            if (!root) { try { root = ec.web ? String(ec.web.getWebappRootUrl() || '') : '' } catch (err) { root = '' } }
+            if (!root) { ec.message.addError('The unsubscribe links need the site address: give baseUrl or the template\'s web host name'); return }
+            let organizationName = null
+            if (list.ownerPartyId) {
+                const owner = ec.entity.find('mantle.party.PartyDetail').condition('partyId', list.ownerPartyId).one()
+                organizationName = owner == null ? null : (owner.organizationName || ec.resource.expand('PartyFullNameTemplate', '', owner).trim() || null)
+            }
+
+            // the subscribed members, each party once
+            const only = partyIdList ? new Set(Array.from(partyIdList).map((id) => String(id))) : null
+            const memberRows = Array.from(ec.entity.find(CLP).condition('contactListId', contactListId).condition(currentDate)
+                    .condition('statusId', 'in', ['CLPT_ACCEPTED', 'CLPT_IN_USE']).orderBy('-fromDate').list())
+                    .filter((row) => only == null || only.has(row.partyId))
+            // each party's latest row, the members in the order they joined (then by id), so an address two share goes to the first
+            const byParty = new Map()
+            for (const row of memberRows) if (!byParty.has(row.partyId)) byParty.set(row.partyId, row)
+            const joined = (row) => toMillis(row.fromDate) ?? 0
+            const members = Array.from(byParty.entries()).sort(([a, left], [b, right]) => (joined(left) - joined(right)) || idOrder(String(a), String(b)))
+            const skip = (partyId, contactMechId, reason) => skippedList.push({partyId: partyId, contactMechId: contactMechId || null, reason: reason})
+            const recipients = []
+            const addresses = new Set()
+            for (const [partyId, row] of members) {
+                const party = ec.entity.find('mantle.party.Party').condition('partyId', partyId).one()
+                if (party == null || party.disabled === 'Y' || party.mergedToPartyId) { skip(partyId, null, 'disabled or merged'); continue }
+                const infos = Array.from(ec.entity.find('mantle.party.contact.PartyContactMechInfo').condition('partyId', partyId)
+                        .condition('contactMechTypeEnumId', 'CmtEmailAddress').condition(currentDate).orderBy('fromDate').list()).filter((info) => info.infoString)
+                const preferred = row.preferredContactMechId ? infos.find((info) => info.contactMechId === row.preferredContactMechId) : null
+                const address = preferred || infos.find((info) => info.contactMechPurposeId === 'EmailPrimary') || infos[0] || null
+                if (address == null) { skip(partyId, null, 'no email address'); continue }
+                const flags = infos.filter((info) => info.contactMechId === address.contactMechId).map((info) => info.allowSolicitation)
+                if (flags.includes('N') && !flags.includes('Y')) { skip(partyId, address.contactMechId, 'does not allow solicitation'); continue }
+                const consents = Array.from(ec.entity.find('mantle.party.PartyConsent').condition('partyId', partyId)
+                        .condition('purposeEnumId', 'PcpMarketingEmail').condition('contactListId', null).list())
+                consents.sort(newestFirst)
+                const forAddress = consents.find((consent) => consent.contactMechId === address.contactMechId)
+                const forParty = consents.find((consent) => !consent.contactMechId)
+                if (forAddress?.statusId === 'PconWithdrawn' || (!forAddress && forParty?.statusId === 'PconWithdrawn')) {
+                    skip(partyId, address.contactMechId, 'marketing email withdrawn'); continue }
+                const key = String(address.infoString).trim().toLowerCase()
+                if (addresses.has(key)) { skip(partyId, address.contactMechId, 'address already sent to'); continue }
+                addresses.add(key)
+                recipients.push({partyId: partyId, contactMechId: address.contactMechId, emailAddress: address.infoString})
+            }
+
+            // the send's communication event, committed (in a transaction of its own, when the caller has one) before the
+            // members' rows refer to it from theirs
+            communicationEventId = ec.service.sync().name('create#mantle.party.communication.CommunicationEvent').requireNewTransaction(true).parameters({
+                communicationEventTypeId: 'Email', contactMechTypeEnumId: 'CmtEmailAddress', statusId: 'CeSent', fromPartyId: list.ownerPartyId || null,
+                contactListId: contactListId, subject: subject || template.subject || listName, contentType: body ? 'text/html' : (bodyText ? 'text/plain' : null),
+                body: body || bodyText || null, entryDate: ec.user.nowTimestamp, datetimeStarted: ec.user.nowTimestamp}).call()?.communicationEventId ?? null
+            if (ec.message.hasError() || !communicationEventId) return
+
+            for (const recipient of recipients) {
+                try {
+                    const out = ec.service.sync().name('mantle.marketing.ContactListServices.send#ContactListPartyEmail').parameters({
+                        contactListId: contactListId, communicationEventId: communicationEventId, partyId: recipient.partyId,
+                        contactMechId: recipient.contactMechId, emailAddress: recipient.emailAddress, emailTemplateId: emailTemplateId,
+                        body: body || null, bodyText: bodyText || null, bodyParameters: bodyParameters || null, baseUrl: root,
+                        unsubscribeMailto: unsubscribeMailto || null, validDays: validDays || null, contactListName: listName,
+                        organizationName: organizationName}).requireNewTransaction(true).call()
+                    if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                    recipientList.push(Object.assign({}, recipient, {emailMessageId: out.emailMessageId ?? null, messageId: out.messageId ?? null,
+                        unsubscribeUrl: out.unsubscribeUrl ?? null, listUnsubscribeHeaders: out.listUnsubscribeHeaders ?? null}))
+                    sentCount++
+                } catch (err) {
+                    ec.message.clearErrors()
+                    ec.logger.error(`List email ${communicationEventId} of list ${contactListId} to party ${recipient.partyId} failed: ${String(err && err.message ? err.message : err).trim()}`)
+                    failedPartyIdList.push(recipient.partyId)
+                }
+            }
+            ec.service.sync().name('update#mantle.party.communication.CommunicationEvent').parameters({communicationEventId: communicationEventId,
+                datetimeEnded: ec.user.nowTimestamp}).call()
+        ]]></script></actions>
+    </service>
+    <service verb="send" noun="ContactListPartyEmail" allow-remote="false">
+        <description>
+            Internal, for send#ContactListEmail: one member's email of a list send, in its own transaction: the unsubscribe
+            token, the email (send#EmailTemplate with the List-Unsubscribe headers as extraHeaders), its ContactListCommStatus
+            (CeSent with the Message-ID, CeReady when the server sent nothing) and the Message-ID on the token.
+        </description>
+        <in-parameters>
+            <parameter name="contactListId" required="true"/>
+            <parameter name="communicationEventId" required="true"/>
+            <parameter name="partyId" required="true"/>
+            <parameter name="contactMechId" required="true"/>
+            <parameter name="emailAddress" required="true"/>
+            <parameter name="emailTemplateId" required="true"/>
+            <parameter name="body" allow-html="any"/>
+            <parameter name="bodyText" allow-html="any"/>
+            <parameter name="bodyParameters" type="Map"/>
+            <parameter name="baseUrl"/>
+            <parameter name="unsubscribeMailto"/>
+            <parameter name="validDays" type="Integer"/>
+            <parameter name="contactListName"/>
+            <parameter name="organizationName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="emailMessageId"/>
+            <parameter name="messageId"/>
+            <parameter name="unsubscribeUrl"/>
+            <parameter name="listUnsubscribeHeaders" type="Map"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const link = ec.service.sync().name('mantle.party.ConsentServices.create#UnsubscribeToken').parameters({contactListId: contactListId,
+                partyId: partyId, contactMechId: contactMechId, communicationEventId: communicationEventId, baseUrl: baseUrl || null,
+                mailtoAddress: unsubscribeMailto || null, validDays: validDays || null}).call()
+            if (ec.message.hasError()) return
+            unsubscribeUrl = link.unsubscribeUrl
+            listUnsubscribeHeaders = link.listUnsubscribeHeaders
+            const party = ec.entity.find('mantle.party.PartyDetail').condition('partyId', partyId).one()
+            const params = Object.assign({}, bodyParameters || {}, {partyId: partyId, firstName: party?.firstName ?? null, lastName: party?.lastName ?? null,
+                partyName: party == null ? null : (ec.resource.expand('PartyFullNameTemplate', '', party).trim() || null), contactListId: contactListId,
+                contactListName: contactListName || contactListId, organizationName: organizationName || null, communicationEventId: communicationEventId,
+                unsubscribeUrl: unsubscribeUrl, listUnsubscribeHeaders: listUnsubscribeHeaders})
+            const encode = (text) => String(text == null ? '' : text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+            // ${name} of the parameters in a given body (HTML-encoded there), and the unsubscribe footer when the body has no link
+            const expand = (text, html) => String(text).replace(/\$\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}/g, (whole, name) =>
+                    Object.prototype.hasOwnProperty.call(params, name) ? (html ? encode(params[name]) : String(params[name] ?? '')) : whole)
+            const footerName = encode(params.contactListName)
+            let html = body ? expand(body, true) : null
+            if (html && !html.includes(unsubscribeUrl)) html += `<p style="font-size:12px;color:#666666">You receive this email because you subscribed to ${footerName}.`
+                    + ` <a href="${encode(unsubscribeUrl)}">Unsubscribe</a></p>`
+            let text = bodyText ? expand(bodyText, false) : null
+            if (text && !text.includes(unsubscribeUrl)) text += `\n\n--\nYou receive this email because you subscribed to ${params.contactListName}. Unsubscribe: ${unsubscribeUrl}\n`
+            const out = ec.service.sync().name('org.moqui.impl.EmailServices.send#EmailTemplate').parameters({emailTemplateId: emailTemplateId,
+                toAddresses: emailAddress, body: html, bodyText: text, bodyParameters: params, extraHeaders: listUnsubscribeHeaders,
+                createEmailMessage: true}).call()
+            if (ec.message.hasError()) return
+            emailMessageId = out?.emailMessageId || null
+            messageId = out?.messageId || null
+            ec.service.sync().name('store#mantle.marketing.contact.ContactListCommStatus').parameters({contactListId: contactListId,
+                communicationEventId: communicationEventId, contactMechId: contactMechId, partyId: partyId, messageId: messageId,
+                statusId: messageId ? 'CeSent' : 'CeReady'}).call()
+            if (ec.message.hasError()) return
+            if (messageId) {
+                const tokenRow = ec.entity.find('mantle.marketing.contact.ContactListToken').condition('contactListTokenId', link.contactListTokenId).one()
+                if (tokenRow != null) { tokenRow.set('messageId', messageId); tokenRow.update() }
+            }
+        ]]></script></actions>
+    </service>
 </services>

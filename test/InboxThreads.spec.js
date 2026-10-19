@@ -488,3 +488,123 @@ feature("a change of a message's unread state publishes the shell counts of its 
         deletedUnread.changed == true
     },
 })
+
+// The search line over both stores: find#InboxThreads reads searchText once (parse#SearchText), the mail gets the text and
+// the internal threads its terms, which find#InternalThreads applies to the parties, dates, subjects and bodies of the
+// internal messages and to the thread's state; what internal messages do not have (label:, larger:, bcc:, a mail-only in:)
+// matches none of them, and with a - all of them.
+feature("the search operators apply to the internal threads as they do to the mail", {
+    when() {
+        const old = effectiveTime - 3 * 1440 * minute
+        ec.user.setEffectiveTime(old)
+        send("Ben", { toPartyId: party.Ada, subject: "IBX old news", body: "From three days ago" })
+        at(300)
+        send("Ben", { toPartyId: party.Ada, ccPartyIdList: [party.Cy], subject: "IBX zeppelin plans", body: "The airship hangar is ready" })
+        at(301)
+        const lunch = send("Cy", { toPartyId: party.Ada, subject: "IBX lunch", body: "Zeppelins at noon" })
+        at(302)
+        const budget = send("Ada", { toPartyId: party.Ben, subject: "IBX budget", body: "The numbers are attached" })
+        call("create#mantle.party.communication.CommunicationEventContent", { communicationEventId: budget.communicationEventId,
+            contentLocation: "dbresource://ibx/budget.xlsx", description: "budget.xlsx" })
+        at(303)
+        send("Ben", { toPartyId: party.Ada, communicationEventTypeId: "Comment", subject: "IBX note on the request", body: "See the request" })
+        as("Ada", () => call(`${COMM}.set#InternalMessageState`, { rootCommEventId: lunch.communicationEventId, flagged: true }))
+        at(305)
+        const day = (millis) => ec.l10n.format(String(millis), "yyyy/MM/dd")
+        const subjects = (params) => as("Ada", () => inbox(Object.assign({ store: "internal", view: "all" }, params)).threadList.map((row) => row.subject))
+        const found = {
+            fromWord: subjects({ searchText: "from:ben zeppelin" }),
+            word: subjects({ searchText: "zeppelin" }),
+            excluded: subjects({ searchText: "zeppelin -hangar" }),
+            phrase: subjects({ searchText: '"airship hangar"' }),
+            notFrom: subjects({ searchText: "zeppelin -from:ben" }),
+            to: subjects({ searchText: "to:cy zeppelin" }),
+            cc: subjects({ searchText: "cc:Inboxer subject:zeppelin" }),
+            flagged: subjects({ searchText: "is:flagged" }),
+            sentAttachment: subjects({ searchText: "in:sent has:attachment" }),
+            filename: subjects({ searchText: "in:sent filename:budget" }),
+            older: subjects({ searchText: "older_than:2d" }),
+            newer: subjects({ searchText: "newer_than:2d subject:\"IBX old\"" }),
+            before: subjects({ searchText: `before:${day(old + 1440 * minute)}` }),
+            after: subjects({ searchText: `after:${day(old + 1440 * minute)} subject:"IBX old"` }),
+            label: subjects({ searchText: "label:news" }),
+            notLabel: subjects({ searchText: "-label:news subject:zeppelin" }),
+            larger: subjects({ searchText: "larger:1M" }),
+            unreadZeppelin: subjects({ searchText: "is:unread zeppelin" }),
+            comments: subjects({ view: "comments" }),
+            needsReply: subjects({ view: "received", needsReply: true }),
+        }
+        const unified = as("Ada", () => ({
+            sent: inbox({ searchText: "in:sent budget" }),
+            trash: inbox({ searchText: "in:trash zeppelin" }),
+            mixed: inbox({ searchText: "subject:zeppelin" }),
+        }))
+        const refused = {
+            date: as("Ada", () => errorOf(`${COMM}.find#InboxThreads`, { searchText: "before:someday" })),
+            size: as("Ada", () => errorOf(`${COMM}.find#InboxThreads`, { searchText: "larger:huge" })),
+            is: as("Ada", () => errorOf(`${COMM}.find#InboxThreads`, { searchText: "is:purple" })),
+        }
+        return { found, unified, refused }
+    },
+    then({ found, unified, refused }) {
+        found.fromWord == ["IBX zeppelin plans"]
+        found.word == ["IBX lunch", "IBX zeppelin plans"]
+        found.excluded == ["IBX lunch"]
+        found.phrase == ["IBX zeppelin plans"]
+        found.notFrom == ["IBX lunch"]
+        found.to == ["IBX zeppelin plans"]
+        found.cc.includes("IBX zeppelin plans")
+        found.flagged == ["IBX lunch"]
+        found.sentAttachment == ["IBX budget"]
+        found.filename == ["IBX budget"]
+        found.older == ["IBX old news"]
+        found.newer == []
+        found.before == ["IBX old news"]
+        found.after == []
+        found.label == []
+        found.notLabel == ["IBX zeppelin plans"]
+        found.larger == []
+        found.unreadZeppelin == ["IBX lunch", "IBX zeppelin plans"]
+        found.comments == ["IBX note on the request"]
+        found.needsReply == ["IBX old news"]
+        unified.sent.storeList == ["email", "internal"]
+        unified.sent.threadList.filter((row) => row.store == "internal").map((row) => row.subject) == ["IBX budget"]
+        unified.sent.termList == [{ operator: "in", value: "sent", negate: false }]
+        unified.trash.storeList == ["email"]
+        unified.mixed.threadList.filter((row) => row.store == "internal").map((row) => row.subject) == ["IBX zeppelin plans"]
+        refused.date.includes("before:someday needs a date")
+        refused.size.includes("larger:huge needs a size")
+        refused.is.includes("is:purple is not a search term")
+    },
+})
+
+feature("Needs reply for mail: the Inbox threads a day old or more that are not answered, and none with a reply sent after", {
+    when() {
+        at(3 * 1440)
+        const before = as("Ada", () => inbox({ emailAccountId: account.sales, needsReply: true, pageSize: 100 })).threadList.map(shape)
+        // a reply to E2 that waits in the Outbox (no server answers) counts as answered
+        as("Ada", () => {
+            const draftId = call(`${MAIL}.save#Draft`, { emailAccountId: account.sales, parentEmailMessageId: "IBX_E2", toAddresses: "ibx_e2@outside.example.com",
+                body: "<p>Answered</p>" }).emailMessageId
+            call(`${MAIL}.send#Draft`, { emailMessageId: draftId })
+        })
+        const after = as("Ada", () => inbox({ emailAccountId: account.sales, needsReply: true, pageSize: 100 })).threadList.map(shape)
+        const paged = []
+        as("Ada", () => {
+            let cursor = null
+            do {
+                const page = inbox({ emailAccountId: account.sales, needsReply: true, pageSize: 3, cursor })
+                paged.push(...page.threadList.map(shape))
+                cursor = page.nextCursor
+            } while (cursor && paged.length < 100)
+        })
+        return { before, after, paged }
+    },
+    then({ before, after, paged }) {
+        before.includes("E2")
+        before.includes("E1")
+        !after.includes("E2")
+        after.length == before.length - 1
+        paged == after
+    },
+})

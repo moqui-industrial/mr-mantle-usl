@@ -83,9 +83,11 @@ feature("update a milestone, a task, its milestone, and the task comments", {
         call("mantle.work.ProjectServices.update#Milestone", { workEffortId: "WPS-MS-1", workEffortName: "Milestone 1 renamed" })
         call("mantle.work.TaskServices.update#Task", { workEffortId: "WPS-2", workEffortName: "Task 2 renamed", estimatedCompletionDate: day(2026, 11, 25) })
         call("mantle.work.TaskServices.set#TaskMilestone", { workEffortId: "WPS-2", milestoneWorkEffortId: "WPS-MS-1" })
-        call("mantle.work.TaskServices.add#TaskComment", { workEffortId: "WPS-2", subject: "First", body: "A comment" })
+        const added = call("mantle.work.TaskServices.add#TaskComment", { workEffortId: "WPS-2", subject: "First", body: "A comment" })
         const comments = Array.from(ec.entity.find("mantle.work.effort.WorkEffortCommEvent").condition("workEffortId", "WPS-2").list())
         const commId = comments[0].communicationEventId
+        // the new comment's id comes back (Chatter shows it at once)
+        assert(added.communicationEventId === commId, `add#TaskComment answered ${added.communicationEventId}, the join has ${commId}`)
         call("mantle.work.TaskServices.update#TaskComment", { workEffortId: "WPS-2", communicationEventId: commId, subject: "First edited", body: "Edited" })
         const edited = ec.entity.find("mantle.party.communication.CommunicationEvent").condition("communicationEventId", commId).one()
         call("mantle.work.TaskServices.delete#TaskComment", { workEffortId: "WPS-2", communicationEventId: commId })

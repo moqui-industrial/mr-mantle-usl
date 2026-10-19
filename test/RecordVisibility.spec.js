@@ -3,7 +3,9 @@
 // a communication event and an order have no entity filter of their own, so under an organization filter they follow
 // per-user rules (IronStone R4, R5); ADMIN and an explicit entity authorization see them all; without an organization filter
 // they are seen as found, except a post of a mailbox the user may not read. A wiki page follows the wiki's own view rule for
-// every user. The universal search's organization limit under the active organization filter with no active organization,
+// every user (org.moqui.impl.WikiServices.get#WikiPageAccess and get#WikiViewScope: a member of a restricted space with view
+// or admin, a restricted page's own viewers, the ADMIN group). The universal search's organization limit under the active
+// organization filter with no active organization,
 // and its wiki rule. And the timeline cursor (beforeDate with seenKeys) across entries of one date. New spec, no Groovy
 // original.
 function errorOf(name, params) {
@@ -379,8 +381,9 @@ feature("an order is seen by its organizations' members, its parties and its ent
         pat == { O1: true, O2: true, ceOrder: true, WP1: true, WP2: false, WP3: true, ceWiki: false }
         // Mo: RV-O1 by its vendor organization; the restricted space as a member, and the comment on its page
         mo == { O1: true, O2: false, ceOrder: true, WP1: true, WP2: true, WP3: false, ceWiki: true }
-        // Oz: RV-O2 as its enterer; a space row without allowView is not a view
-        oz == { O1: false, O2: true, ceOrder: false, WP1: true, WP2: false, WP3: false, ceWiki: false }
+        // Oz: RV-O2 as its enterer; the restricted space as its administrator (a row with allowAdmin, without allowView), and
+        // so the comment on its page
+        oz == { O1: false, O2: true, ceOrder: false, WP1: true, WP2: true, WP3: false, ceWiki: true }
         // Stan: request staff only
         stan == { O1: false, O2: false, ceOrder: false, WP1: true, WP2: false, WP3: false, ceWiki: false }
         // the active organization filter with no active organization: all of Ace's organizations, none of Axel's
@@ -388,8 +391,8 @@ feature("an order is seen by its organizations' members, its parties and its ent
         axel == { O1: false, O2: false, ceOrder: false, WP1: true, WP2: false, WP3: false, ceWiki: false }
         // no organization filter: every order, and still the wiki's rule, also for a comment on a page Opal may not see
         opal == { O1: true, O2: true, ceOrder: true, WP1: true, WP2: false, WP3: false, ceWiki: false }
-        // ADMIN: every order and message, but restricted wiki pages only as a member, as the wiki screens
-        admin == { O1: true, O2: true, ceOrder: true, WP1: true, WP2: false, WP3: false, ceWiki: true }
+        // ADMIN: every order and message, and every wiki page, as the wiki's own rule
+        admin == { O1: true, O2: true, ceOrder: true, WP1: true, WP2: true, WP3: true, ceWiki: true }
         // authorization disabled: all
         internal == { O1: true, O2: true, ceOrder: true, WP1: true, WP2: true, WP3: true, ceWiki: true }
     },
@@ -401,14 +404,14 @@ feature("a user who may not see an order or a wiki page reads none of its timeli
             timeline: errorOf(`${COMM}.get#RecordTimeline`, { recordEntityName, recordId }),
             followers: errorOf(`${COMM}.get#RecordFollowers`, { recordEntityName, recordId }),
             follow: errorOf(`${COMM}.follow#Record`, { recordEntityName, recordId }) })
-        const oz = as("rv.oz", () => ({ order: read(ORDER, "RV-O1"), page: read(WIKI, "RV_WP2") }))
+        const oz = as("rv.oz", () => ({ order: read(ORDER, "RV-O1"), page: read(WIKI, "RV_WP3") }))
         const mo = as("rv.mo", () => call(`${COMM}.get#RecordTimeline`, { recordEntityName: WIKI, recordId: "RV_WP2", kinds: "messages,notes" })
                 .entryList.map((entry) => entry.title))
         return { oz, mo }
     },
     then({ oz, mo }) {
         Object.values(oz.order).every((error) => error != null && error.includes("RV-O1 not found"))
-        Object.values(oz.page).every((error) => error != null && error.includes("RV_WP2 not found"))
+        Object.values(oz.page).every((error) => error != null && error.includes("RV_WP3 not found"))
         mo.includes("On the shut page")
     },
 })
@@ -464,7 +467,8 @@ feature("search#Universal limits the active organization filter with no active o
         // the user organization filter: Mo a member of the restricted space, Pat the viewer of the restricted page
         mo == ["RV-O1", "RV-R1", "RV-T1", "RV_WP1", "RV_WP2"]
         pat == ["RV-R1", "RV-T1", "RV_WP1", "RV_WP3"]
-        oz == ["RV_WP1"]
+        // Oz administers the restricted space
+        oz == ["RV_WP1", "RV_WP2"]
         // no organization filter: every task, request and order, and the wiki's rule still
         opal == ["RV-O1", "RV-O2", "RV-R1", "RV-T1", "RV-T2", "RV_WP1"]
     },

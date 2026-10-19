@@ -44,14 +44,16 @@ for (let n = 1; n <= 2; n++) {
 }
 for (let n = 1; n <= 2; n++) targetFieldList.push({fieldName: `website${n}`, description: `Website ${n}`})
 
-// ===== the file's text
+// ===== the file's text, in its character set (a UTF-16 byte order mark wins)
 let content = fileText
 let name = fileName || null
-if (content == null && contactFile != null) {
-    content = contactFile.getString(characterSet || "UTF-8")
-    if (!name) name = contactFile.getName()
+if (content == null && (contactFile != null || fileLocation)) {
+    const read = ec.service.sync().name("mantle.party.ContactImportServices.read#ContactFileText").parameters({contactFile: contactFile,
+        fileLocation: contactFile != null ? null : fileLocation, characterSet: characterSet || "UTF-8"}).call()
+    if (ec.message.hasError()) return
+    content = read.text
+    if (!name && contactFile != null) name = contactFile.getName()
 }
-if (content == null && fileLocation) content = ec.resource.getLocationText(fileLocation, false)
 if (content == null || String(content).trim() === "") { ec.message.addError("The contact file is empty"); return }
 content = String(content)
 if (content.charCodeAt(0) === 0xFEFF) content = content.substring(1)

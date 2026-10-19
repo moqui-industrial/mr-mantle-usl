@@ -404,8 +404,23 @@ along with this software (see the LICENSE.md file). If not, see
             row of the user's in the thread archived), all (any thread with a row of the user's). With contactListId, the
             threads of that mailbox (view all is its default; the other views then go by the user's rows on its posts): every
             thread for a member or a public mailbox, the user's own in a help mailbox, none for a party with only a join
-            request; a post with no row of the user's is read. unreadOnly keeps threads with an unread message for the
-            user; searchText matches the subject or body of the view's messages.
+            request; a post with no row of the user's is read. comments is the view of the internal notes (Comment, such as
+            a Chatter note that mentions the user) with a row of the user's. unreadOnly keeps threads with an unread message
+            for the user. needsReply keeps the threads whose last message is to the user (a to or cc row, not a mailbox
+            delivery), not from the user, a day old or more, and not archived (Comms Home's Needs reply).
+
+            The search line: searchText, read by org.moqui.impl.EmailClientServices.parse#SearchText, or searchTermMap,
+            what that service answered (find#InboxThreads parses once for both stores). A message puts its thread in the
+            view when it matches every term; the operators mean what they mean for mail (find#Messages), over the internal
+            fields: from: the party it is from, to: its to or cc recipients (and toPartyId), cc: its cc recipients, each a
+            party whose name, user name or email address has the text; subject:; before:, after:, older_than: and
+            newer_than: its date; in: the view (inbox received, sent, flagged or starred, snoozed, archive, all or
+            anywhere). The thread's state: is:unread, is:read, is:flagged (starred), is:snoozed, has:attachment and
+            filename: (an attachment's name). A word is in the subject or body or the sender's name, a "phrase" in the
+            subject or body, and a -word in neither. What internal messages do not have matches none of them, and with a -
+            matches all: bcc:, label: (internal messages have no labels), larger: and smaller: (no size), is:answered, and an
+            in: of a mail-only view (drafts, scheduled, outbox, spam, trash) or a folder. A date or size the operator does not
+            understand is an error.
 
             Paging: pageSize threads, and beforeDate, the sortDate of the last thread shown (nextBeforeDate), for the
             next page. A row is {store (internal), threadId and rootCommEventId (the root's id), lastCommEventId,
@@ -415,10 +430,12 @@ along with this software (see the LICENSE.md file). If not, see
             contactListName, isClosed}; the store and the date cursor let find#InboxThreads merge it with the framework's mail.
         </description>
         <in-parameters>
-            <parameter name="view"><description>received, sent, flagged, snoozed, archived or all</description></parameter>
+            <parameter name="view"><description>received, sent, flagged, snoozed, archived, comments or all</description></parameter>
             <parameter name="contactListId"/>
             <parameter name="unreadOnly" type="Boolean" default="false"/>
-            <parameter name="searchText"/>
+            <parameter name="needsReply" type="Boolean" default="false"/>
+            <parameter name="searchText" allow-html="any"/>
+            <parameter name="searchTermMap" type="Map"><description>The answer of parse#SearchText, in place of searchText</description></parameter>
             <parameter name="beforeDate" type="Timestamp"/>
             <parameter name="pageSize" type="Integer" default="50"/>
         </in-parameters>
@@ -431,7 +448,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions><script><![CDATA[
             const cf = ec.entity.conditionFactory
             const DELIVERY = ['MessageTo', 'MessageCc', 'MessageMailbox']
-            const TYPES = ['Message', 'Comment']
+            let TYPES = ['Message', 'Comment']
             const toMillis = (value) => {
                 if (value == null || value === '') return null
                 if (typeof value === 'number') return value
@@ -444,12 +461,151 @@ along with this software (see the LICENSE.md file). If not, see
             nextBeforeDate = null
             const partyId = ec.user.userAccount?.partyId || null
             if (!partyId) { ec.message.addError('Internal messages need a user with a party'); return }
-            if (!view) view = contactListId ? 'all' : 'received'
-            if (!['received', 'sent', 'flagged', 'snoozed', 'archived', 'all'].includes(view)) {
-                ec.message.addError(`Unknown view ${view}: received, sent, flagged, snoozed, archived or all`); return }
             if (!(pageSize > 0)) pageSize = 50
             const now = ec.user.nowTimestamp
             const nowMillis = toMillis(now)
+
+            // the search line: its terms once (find#InboxThreads passes them parsed), as conditions on the messages that put a
+            // thread in the view and as filters of the thread
+            let terms = searchTermMap || null
+            if (terms == null && searchText && String(searchText).trim()) {
+                terms = ec.service.sync().name('org.moqui.impl.EmailClientServices.parse#SearchText').parameter('searchText', searchText).call()
+                if (ec.message.hasError()) return
+            }
+            const messageConditions = []
+            const threadFilters = []
+            let matchesNothing = false
+            if (terms) {
+                const like = (field, text) => cf.makeCondition(field, 'like', `%${text}%`, false, true)
+                const notLike = (field, text) => cf.makeCondition(field, 'not-like', `%${text}%`, true, true)
+                const idsIn = (field, ids) => ids.length ? cf.makeCondition(field, 'in', ids) : null
+                // the parties whose name (every part of the text in a first, last or organization name), user name or email
+                // address has the text; only ids, to match the messages the user sees
+                const partyCache = {}
+                const partiesMatching = (text) => {
+                    const key = String(text).toLowerCase().trim()
+                    if (partyCache[key]) return partyCache[key]
+                    const found = new Set()
+                    const parts = key.split(/\s+/).filter((part) => part)
+                    if (parts.length) {
+                        const nameCondition = cf.makeCondition(parts.map((part) => cf.makeCondition([like('firstName', part), like('lastName', part),
+                            like('organizationName', part)], 'or')), 'and')
+                        for (const row of ec.entity.find('mantle.party.PartyDetail').condition(nameCondition).selectField('partyId').limit(500)
+                                .disableAuthz().list()) found.add(row.partyId)
+                    }
+                    for (const row of ec.entity.find('moqui.security.UserAccount').condition(cf.makeCondition([like('username', key),
+                            like('emailAddress', key), like('userFullName', key)], 'or')).condition('partyId', 'not-equals', null)
+                            .selectField('partyId').limit(500).disableAuthz().list()) found.add(row.partyId)
+                    const mechIds = Array.from(ec.entity.find('mantle.party.contact.ContactMech').condition('contactMechTypeEnumId', 'CmtEmailAddress')
+                            .condition(like('infoString', key)).selectField('contactMechId').limit(500).disableAuthz().list()).map((row) => row.contactMechId)
+                    if (mechIds.length) for (const row of ec.entity.find('mantle.party.contact.PartyContactMech').condition('contactMechId', 'in', mechIds)
+                            .selectField('partyId').disableAuthz().list()) found.add(row.partyId)
+                    partyCache[key] = Array.from(found)
+                    return partyCache[key]
+                }
+                // the messages with a recipient row of those parties in those roles
+                const eventsWithRows = (ids, roles) => ids.length ? Array.from(new Set(Array.from(ec.entity.find('mantle.party.communication.CommunicationEventParty')
+                        .condition('partyId', 'in', ids).condition('roleTypeId', 'in', roles).selectField('communicationEventId').limit(5000).list())
+                        .map((row) => row.communicationEventId))) : []
+                const DAY = 86400000
+                const dayOf = (text) => {
+                    let match = /^(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})$/.exec(text)
+                    let parts = match ? [match[1], match[2], match[3]] : null
+                    if (!parts && (match = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(text))) parts = [match[3], match[1], match[2]]
+                    if (!parts) return null
+                    const pad = (value) => String(value).padStart(2, '0')
+                    return ec.l10n.parseTimestamp(`${parts[0]}-${pad(parts[1])}-${pad(parts[2])} 00:00:00`, 'yyyy-MM-dd HH:mm:ss')
+                }
+                const agoOf = (text) => {
+                    const match = /^(\d+)\s*([dwmy])$/i.exec(text)
+                    if (!match) return null
+                    return new Date(nowMillis - Number(match[1]) * {d: DAY, w: 7 * DAY, m: 30 * DAY, y: 365 * DAY}[match[2].toLowerCase()])
+                }
+                const IN_VIEWS = {inbox: 'received', sent: 'sent', flagged: 'flagged', starred: 'flagged', snoozed: 'snoozed', archive: 'archived',
+                    archived: 'archived', all: 'all', allmail: 'all', 'all mail': 'all', anywhere: 'all'}
+                for (const term of Array.from(terms.termList || [])) {
+                    const value = String(term.value)
+                    const negate = term.negate === true
+                    switch (term.operator) {
+                        case 'in':
+                            if (IN_VIEWS[value]) view = IN_VIEWS[value]
+                            else matchesNothing = true
+                            break
+                        case 'from': {
+                            const ids = partiesMatching(value)
+                            if (negate) { if (ids.length) messageConditions.push(cf.makeCondition('fromPartyId', 'not-in', ids, true)) }
+                            else if (ids.length) messageConditions.push(cf.makeCondition('fromPartyId', 'in', ids))
+                            else matchesNothing = true
+                            break
+                        }
+                        case 'to': case 'cc': {
+                            const ids = partiesMatching(value)
+                            const rowIds = eventsWithRows(ids, term.operator === 'cc' ? ['MessageCc'] : ['MessageTo', 'MessageCc'])
+                            const toCondition = term.operator === 'cc' ? null : idsIn('toPartyId', ids)
+                            const either = [toCondition, idsIn('communicationEventId', rowIds)].filter((condition) => condition)
+                            if (negate) {
+                                if (ids.length && term.operator !== 'cc') messageConditions.push(cf.makeCondition('toPartyId', 'not-in', ids, true))
+                                if (rowIds.length) messageConditions.push(cf.makeCondition('communicationEventId', 'not-in', rowIds))
+                            } else if (either.length) messageConditions.push(cf.makeCondition(either, 'or'))
+                            else matchesNothing = true
+                            break
+                        }
+                        case 'subject': messageConditions.push(negate ? notLike('subject', value) : like('subject', value)); break
+                        case 'before': case 'after': {
+                            const day = dayOf(value)
+                            if (day == null) { ec.message.addError(`${term.operator}:${value} needs a date, such as ${term.operator}:2026/10/19`); return }
+                            const before = (term.operator === 'before') !== negate
+                            messageConditions.push(cf.makeCondition('entryDate', before ? 'less' : 'greater-equals', day))
+                            break
+                        }
+                        case 'older_than': case 'newer_than': {
+                            const at = agoOf(value)
+                            if (at == null) { ec.message.addError(`${term.operator}:${value} needs a count of days, weeks, months or years, such as ${term.operator}:2d`); return }
+                            const older = (term.operator === 'older_than') !== negate
+                            messageConditions.push(cf.makeCondition('entryDate', older ? 'less' : 'greater-equals', at))
+                            break
+                        }
+                        case 'has': threadFilters.push((summary) => summary.hasAttachment !== negate); break
+                        case 'filename': {
+                            const needle = value.toLowerCase()
+                            const named = (thread) => thread.messageList.some((message) => message.attachmentList.some((item) =>
+                                    String(item.description || item.contentLocation || '').toLowerCase().includes(needle)))
+                            threadFilters.push((summary, thread) => named(thread) !== negate)
+                            break
+                        }
+                        case 'is':
+                            if (value === 'unread') threadFilters.push((summary) => summary.isUnread !== negate)
+                            else if (value === 'read') threadFilters.push((summary) => summary.isUnread === negate)
+                            else if (value === 'flagged' || value === 'starred') threadFilters.push((summary) => summary.isFlagged !== negate)
+                            else if (value === 'snoozed') threadFilters.push((summary) => (summary.snoozedThruDate != null) !== negate)
+                            else if (!negate) matchesNothing = true
+                            break
+                        // what internal messages do not have: none match, and all with a -
+                        case 'bcc': case 'label': case 'larger': case 'smaller':
+                            if (!negate) matchesNothing = true
+                            break
+                        default: ec.message.addError(`${term.operator}: is not a search term`); return
+                    }
+                }
+                // the free text: each word in the subject, the body or the sender's name; each phrase in the subject or body;
+                // no -word in either
+                for (const word of Array.from(terms.wordList || [])) {
+                    const ids = partiesMatching(word)
+                    messageConditions.push(cf.makeCondition([like('subject', word), like('body', word)].concat(ids.length ? [cf.makeCondition('fromPartyId', 'in', ids)] : []), 'or'))
+                }
+                for (const phrase of Array.from(terms.phraseList || [])) messageConditions.push(cf.makeCondition([like('subject', phrase), like('body', phrase)], 'or'))
+                for (const text of Array.from(terms.excludeList || [])) messageConditions.push(cf.makeCondition([notLike('subject', text), notLike('body', text)], 'and'))
+            }
+            if (!view) view = contactListId ? 'all' : 'received'
+            if (!['received', 'sent', 'flagged', 'snoozed', 'archived', 'comments', 'all'].includes(view)) {
+                ec.message.addError(`Unknown view ${view}: received, sent, flagged, snoozed, archived, comments or all`); return }
+            if (view === 'comments') TYPES = ['Comment']
+            if (needsReply) threadFilters.push((summary, thread) => {
+                const last = thread.messageList[thread.messageList.length - 1]
+                return !summary.isArchived && last.fromPartyId !== partyId && toMillis(last.entryDate) <= nowMillis - 86400000 &&
+                        last.myRowList.some((row) => row.roleTypeId === 'MessageTo' || row.roleTypeId === 'MessageCc')
+            })
+            if (matchesNothing) return
 
             if (contactListId) {
                 const access = ec.service.sync().name('mantle.marketing.ContactListServices.get#ContactListAccess')
@@ -472,8 +628,6 @@ along with this software (see the LICENSE.md file). If not, see
             }
 
             const notCancelled = cf.makeCondition('statusId', 'not-equals', 'CeCancelled', true)
-            const textCondition = searchText ? cf.makeCondition([cf.makeCondition('subject', 'like', `%${searchText}%`, false, true),
-                cf.makeCondition('body', 'like', `%${searchText}%`, false, true)], 'or') : null
             // the messages that put a thread in the view
             const byEvents = view === 'sent' || (contactListId && view === 'all')
             const makeFind = () => {
@@ -499,7 +653,7 @@ along with this software (see the LICENSE.md file). If not, see
                 }
                 find = find.condition('communicationEventTypeId', 'in', TYPES).condition(notCancelled)
                 if (contactListId) find = find.condition('contactListId', contactListId)
-                if (textCondition) find = find.condition(textCondition)
+                for (const condition of messageConditions) find = find.condition(condition)
                 return find.selectField('communicationEventId').selectField('rootCommEventId').selectField('entryDate')
             }
 
@@ -520,7 +674,7 @@ along with this software (see the LICENSE.md file). If not, see
                 const first = messages[0]
                 const last = messages[messages.length - 1]
                 const snippet = textOf(last.body)
-                return {store: 'internal', threadId: thread.rootCommEventId, rootCommEventId: thread.rootCommEventId,
+                const summary = {store: 'internal', threadId: thread.rootCommEventId, rootCommEventId: thread.rootCommEventId,
                     lastCommEventId: last.communicationEventId, communicationEventTypeId: (thread.root || first).communicationEventTypeId,
                     subject: thread.subject, snippet: snippet.length > 140 ? snippet.substring(0, 137) + '...' : snippet,
                     sortDate: sortDate, lastDate: toMillis(last.entryDate), firstDate: toMillis(first.entryDate),
@@ -530,6 +684,7 @@ along with this software (see the LICENSE.md file). If not, see
                     hasAttachment: messages.some((message) => message.attachmentList.length > 0), fromPartyId: last.fromPartyId ?? null,
                     participantPartyIdList: participants, participantList: [], contactListId: thread.isMailbox ? thread.contactListId : null,
                     contactListName: thread.isMailbox ? thread.contactListName : null, isClosed: thread.isClosed}
+                return threadFilters.every((filter) => filter(summary, thread)) ? summary : null
             }
 
             // scan the view's messages newest first; a thread comes at its newest one
@@ -868,9 +1023,18 @@ along with this software (see the LICENSE.md file). If not, see
               (or inbox, the default), sent, flagged, snoozed, archived (or archive) or all; a view with no internal
               counterpart (drafts) lists nothing.
             - contactListId: the threads of that mailbox only (view all by default, else an internal view).
-            - store email keeps the mail of a view that reads both stores.
-            Filters: searchText and unreadOnly go to both stores. fromAddress, toAddress, subject, hasAttachment, fromDate,
-            thruDate, minSize and maxSize are the mail's only; with any of them the internal store is not read. threadMode
+            - store email keeps the mail of a view that reads both stores; view comments (the internal notes to the user)
+              reads only the internal threads.
+            Filters: searchText, the search line, is read once by org.moqui.impl.EmailClientServices.parse#SearchText: the
+            mail gets the text (find#Messages applies its operators) and the internal threads its terms (find#InternalThreads
+            says what each operator means there), so both stores answer the same search; termList is the operators, for
+            the query chips. A term that is not understood (before:someday, larger:huge) is an error before any store is
+            read. An in: of a view that has an internal counterpart (inbox, sent, flagged, snoozed, archive, all) is the
+            internal view too; one of a mail-only view (drafts, scheduled, outbox, spam, trash) or a folder reads only the
+            mail. unreadOnly and needsReply (the threads waiting for the user's answer a day or more: Comms Home's Needs
+            reply; for mail, the newest message in the view not answered and no message sent in the thread after it) go
+            to both stores. fromAddress, toAddress, subject, hasAttachment, fromDate, thruDate, minSize and maxSize (the
+            fields of a mail search form) are the mail's only; with any of them the internal store is not read. threadMode
             false lists the mail by message; internal rows are always threads.
 
             Paging: pageSize rows (default 50), then cursor, the nextCursor of the page before. The cursor holds each store's
@@ -898,6 +1062,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="contactListId"/>
             <parameter name="searchText" allow-html="any"/>
             <parameter name="unreadOnly" type="Boolean" default="false"/>
+            <parameter name="needsReply" type="Boolean" default="false"/>
             <parameter name="threadMode" type="Boolean" default="true"/>
             <parameter name="fromAddress" allow-html="any"/>
             <parameter name="toAddress" allow-html="any"/>
@@ -916,6 +1081,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="nextCursor"/>
             <parameter name="storeList" type="List"><description>The stores the view reads: email, internal</description></parameter>
             <parameter name="failedStores" type="List"/>
+            <parameter name="termList" type="List"><description>The operators of searchText, each {operator, value, negate}</description></parameter>
         </out-parameters>
         <actions><script><![CDATA[
             const toMillis = (value) => {
@@ -930,14 +1096,45 @@ along with this software (see the LICENSE.md file). If not, see
             nextCursor = null
             storeList = []
             failedStores = []
+            termList = []
             if (!(pageSize > 0)) pageSize = 50
             const STORES = ['email', 'internal']
             const EMAIL_VIEWS = ['inbox', 'flagged', 'snoozed', 'scheduled', 'outbox', 'drafts', 'sent', 'archive', 'junk', 'trash', 'all', 'folder', 'label']
             // the internal view of each view that has one
             const INTERNAL_VIEWS = {inbox: 'received', received: 'received', sent: 'sent', flagged: 'flagged', snoozed: 'snoozed',
-                archive: 'archived', archived: 'archived', all: 'all'}
+                archive: 'archived', archived: 'archived', all: 'all', comments: 'comments'}
             const EMAIL_ALIASES = {received: 'inbox', archived: 'archive'}
             if (store && !STORES.includes(store)) { ec.message.addError(`Unknown store ${store}: email or internal`); return }
+            if (view === 'comments') {
+                if (store === 'email' || emailFolderId || emailLabelId) { ec.message.addError('The comments view is of the internal messages'); return }
+                if (!emailAccountId) store = 'internal'
+            }
+
+            // the search line, read once: the text for the mail, its terms for the internal threads
+            let searchTerms = null
+            let internalSearchOff = false
+            if (searchText && String(searchText).trim()) {
+                searchTerms = ec.service.sync().name('org.moqui.impl.EmailClientServices.parse#SearchText').parameter('searchText', searchText).call()
+                if (ec.message.hasError()) return
+                termList = Array.from(searchTerms.termList || [])
+                // a value an operator does not understand is the user's error, not a store that fails
+                for (const term of termList) {
+                    const value = String(term.value)
+                    if ((term.operator === 'before' || term.operator === 'after') && !/^(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})$|^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.test(value)) {
+                        ec.message.addError(`${term.operator}:${value} needs a date, such as ${term.operator}:2026/10/19`); return }
+                    if ((term.operator === 'older_than' || term.operator === 'newer_than') && !/^(\d+)\s*([dwmy])$/i.test(value)) {
+                        ec.message.addError(`${term.operator}:${value} needs a count of days, weeks, months or years, such as ${term.operator}:2d`); return }
+                    if ((term.operator === 'larger' || term.operator === 'smaller') && !/^(\d+(?:\.\d+)?)\s*([kmg]?)b?$/i.test(value)) {
+                        ec.message.addError(`${term.operator}:${value} needs a size, such as ${term.operator}:5M`); return }
+                    if (term.operator === 'in' && term.negate) { ec.message.addError(`-in:${value} is not a search term; in: names one view or folder`); return }
+                    // in: a view of the internal store too, else the mail only
+                    if (term.operator === 'in') {
+                        const IN_INTERNAL = {inbox: 'received', sent: 'sent', flagged: 'flagged', starred: 'flagged', snoozed: 'snoozed', archive: 'archived',
+                            archived: 'archived', all: 'all', allmail: 'all', 'all mail': 'all', anywhere: 'all'}
+                        internalSearchOff = !IN_INTERNAL[value.toLowerCase()]
+                    }
+                }
+            }
 
             // each store's own date, or 'end'
             const cursorOf = {}
@@ -955,7 +1152,9 @@ along with this software (see the LICENSE.md file). If not, see
             let internalParameters = null
             const emailOnlyFilter = !!(fromAddress || toAddress || subject || hasAttachment != null || fromDate != null || thruDate != null ||
                     minSize != null || maxSize != null)
-            const shared = {searchText: searchText, unreadOnly: unreadOnly}
+            const emailShared = {searchText: searchText, unreadOnly: unreadOnly}
+            const internalShared = {searchTermMap: searchTerms, unreadOnly: unreadOnly, needsReply: needsReply}
+            const internalOff = emailOnlyFilter || internalSearchOff
             if (contactListId) {
                 if (emailAccountId || emailFolderId || emailLabelId || store === 'email') {
                     ec.message.addError('A mailbox is listed without an email account, folder or label'); return }
@@ -965,7 +1164,7 @@ along with this software (see the LICENSE.md file). If not, see
                 if (!access.exists || !access.isMailbox || !access.canSeeHeader) { ec.message.addError(`Mailbox ${contactListId} not found`); return }
                 const internalView = view ? INTERNAL_VIEWS[view] : 'all'
                 if (!internalView) { ec.message.addError(`Unknown mailbox view ${view}: received, sent, flagged, snoozed, archived or all`); return }
-                if (!emailOnlyFilter) internalParameters = Object.assign({view: internalView, contactListId: contactListId}, shared)
+                if (!internalOff) internalParameters = Object.assign({view: internalView, contactListId: contactListId}, internalShared)
             } else {
                 // the account, folder and label must be ones the user reaches: an input error, not a store that fails
                 let account = null
@@ -984,7 +1183,7 @@ along with this software (see the LICENSE.md file). If not, see
                     if (emailFolderId || emailLabelId) { ec.message.addError('The Internal account has no folders or labels'); return }
                     const internalView = INTERNAL_VIEWS[view || 'received']
                     if (!internalView && !EMAIL_VIEWS.includes(view)) { ec.message.addError(`Unknown view ${view}`); return }
-                    if (internalView && !emailOnlyFilter) internalParameters = Object.assign({view: internalView}, shared)
+                    if (internalView && !internalOff) internalParameters = Object.assign({view: internalView}, internalShared)
                 } else {
                     const emailView = view ? (EMAIL_ALIASES[view] || view) : (emailFolderId ? 'folder' : (emailLabelId ? 'label' : 'inbox'))
                     if (!EMAIL_VIEWS.includes(emailView)) { ec.message.addError(`Unknown view ${view}: ${EMAIL_VIEWS.join(', ')}`); return }
@@ -1002,10 +1201,10 @@ along with this software (see the LICENSE.md file). If not, see
                     if (emailLabelId && !reaches('moqui.basic.email.EmailLabel', 'emailLabelId', emailLabelId, 'Email label')) return
                     emailParameters = Object.assign({view: emailView, emailAccountId: emailAccountId, emailFolderId: emailFolderId,
                         emailLabelId: emailLabelId, threadMode: threadMode, fromAddress: fromAddress, toAddress: toAddress, subject: subject,
-                        hasAttachment: hasAttachment, fromDate: fromDate, thruDate: thruDate, minSize: minSize, maxSize: maxSize}, shared)
+                        hasAttachment: hasAttachment, fromDate: fromDate, thruDate: thruDate, minSize: minSize, maxSize: maxSize}, emailShared)
                     const internalView = INTERNAL_VIEWS[emailView]
-                    if (!account && !emailFolderId && !emailLabelId && store !== 'email' && internalView && !emailOnlyFilter)
-                        internalParameters = Object.assign({view: internalView}, shared)
+                    if (!account && !emailFolderId && !emailLabelId && store !== 'email' && internalView && !internalOff)
+                        internalParameters = Object.assign({view: internalView}, internalShared)
                 }
             }
             const stores = []
@@ -1014,6 +1213,30 @@ along with this software (see the LICENSE.md file). If not, see
                 parameters: internalParameters})
             storeList = stores.map((entry) => entry.name)
             if (stores.length === 0) return
+
+            // Needs reply for mail: the thread's newest message in the view is a day old or more, not answered, and nothing
+            // was sent in the thread after it (a reply waiting in the Outbox counts)
+            const waitingForReply = (rows) => {
+                const cf = ec.entity.conditionFactory
+                const dayAgo = toMillis(ec.user.nowTimestamp) - 86400000
+                const candidates = rows.filter((row) => toMillis(row.sortDate) <= dayAgo)
+                if (candidates.length === 0) return []
+                const lastIds = candidates.map((row) => row.emailMessageId)
+                const answered = new Set(Array.from(ec.entity.find('moqui.basic.email.EmailMessage').condition('emailMessageId', 'in', lastIds)
+                        .condition('isAnswered', 'Y').selectField('emailMessageId').list()).map((row) => row.emailMessageId))
+                const roots = Array.from(new Set(candidates.map((row) => row.rootEmailMessageId || row.threadId)))
+                const sentAt = {}
+                for (const message of ec.entity.find('moqui.basic.email.EmailMessage').condition(cf.makeCondition([
+                        cf.makeCondition('rootEmailMessageId', 'in', roots), cf.makeCondition('emailMessageId', 'in', roots)], 'or'))
+                        .condition('statusId', 'in', ['ES_SENT', 'ES_SCHEDULED', 'ES_READY']).selectField('emailMessageId')
+                        .selectField('rootEmailMessageId').selectField('messageDate').selectField('sentDate').list()) {
+                    const root = message.rootEmailMessageId || message.emailMessageId
+                    const at = toMillis(message.sentDate || message.messageDate)
+                    if (at != null && !(sentAt[root] >= at)) sentAt[root] = at
+                }
+                return candidates.filter((row) => !answered.has(row.emailMessageId) &&
+                        !(sentAt[row.rootEmailMessageId || row.threadId] > toMillis(row.sortDate)))
+            }
 
             // pageSize + 1 rows of each store still going, each on its own
             const lists = []
@@ -1027,7 +1250,12 @@ along with this software (see the LICENSE.md file). If not, see
                     const out = ec.service.sync().name(entry.service).parameters(parameters).requireNewTransaction(true).call()
                     if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
                     if (out == null) throw new Error(`${entry.service} answered nothing`)
-                    lists.push({name: entry.name, rows: Array.from(out.threadList || []), hasMore: out.hasMore === true, taken: 0})
+                    const raw = Array.from(out.threadList || [])
+                    // a filtered store keeps its row past the page (read to see where a run of one date ends) unfiltered
+                    const read = raw.length > pageSize ? raw.slice(0, pageSize) : raw
+                    const rows = entry.name === 'email' && needsReply ? waitingForReply(read) : raw
+                    lists.push({name: entry.name, raw: raw, rows: rows, hasMore: out.hasMore === true, taken: 0,
+                        lastRawDate: read.length ? toMillis(read[read.length - 1].sortDate) : null})
                 } catch (err) {
                     failedStores.push(entry.name)
                     ec.logger.error(`Inbox of user ${ec.user.userId}: the ${entry.name} store failed and is left out: ${err && err.message ? err.message : err}`)
@@ -1054,9 +1282,13 @@ along with this software (see the LICENSE.md file). If not, see
             let cutDate = null
             const runDate = {}
             for (const list of lists) {
-                if (list.taken === 0 || list.taken >= list.rows.length) continue
-                const last = toMillis(list.rows[list.taken - 1].sortDate)
-                if (last === toMillis(list.rows[list.taken].sortDate)) {
+                if (list.taken === 0) continue
+                // the row read after the last one kept (a row filtered out counts: the next page starts before its date)
+                const lastKept = list.rows[list.taken - 1]
+                const nextRow = list.raw[list.raw.indexOf(lastKept) + 1]
+                if (nextRow === undefined) continue
+                const last = toMillis(lastKept.sortDate)
+                if (last === toMillis(nextRow.sortDate)) {
                     runDate[list.name] = last
                     if (cutDate == null || last > cutDate) cutDate = last
                 }
@@ -1079,6 +1311,8 @@ along with this software (see the LICENSE.md file). If not, see
                 const keptRows = page.filter((candidate) => candidate.store === name)
                 if (keptRows.length === list.rows.length && !list.hasMore) { nextOf[name] = 'end'; continue }
                 if (keptRows.length) nextOf[name] = keptRows[keptRows.length - 1].date
+                // every row read was filtered out (needsReply): the next page reads after them
+                else if (list.rows.length === 0 && list.lastRawDate != null) nextOf[name] = list.lastRawDate
                 else if (cursorOf[name] != null) nextOf[name] = cursorOf[name]
                 hasMore = true
             }
@@ -1332,6 +1566,32 @@ along with this software (see the LICENSE.md file). If not, see
                     in-map="{wikiPageId:wikiPageId, communicationEventId:communicationEventId}"/>
         </actions>
     </service>
+    <service verb="delete" noun="WikiPageJoins" allow-remote="false">
+        <description>Mantle's rows that name a wiki page, removed before org.moqui.impl.WikiServices.delete#WikiPage deletes
+            the page (the SECA WikiPageDeleteJoins), which would otherwise fail on their foreign keys: its comments'
+            WikiPageCommunicationEvent joins (the comments themselves stay), its WikiPageWorkEffort and WikiPageRequest
+            joins, and its followers (RecordFollower). The page is wikiPageId, or wikiSpaceId and pagePath as the delete
+            finds it (get#WikiPageId, an alias of a moved page included). Only for a user who may update the page
+            (get#WikiPageAccess); the delete refuses anyone else, and a refused delete is an error that rolls this back.</description>
+        <in-parameters>
+            <parameter name="wikiPageId"/>
+            <parameter name="wikiSpaceId"/>
+            <parameter name="pagePath"/>
+        </in-parameters>
+        <actions><script><![CDATA[
+            let pageId = wikiPageId || null
+            if (!pageId && wikiSpaceId && pagePath) pageId = ec.service.sync().name('org.moqui.impl.WikiServices.get#WikiPageId')
+                    .parameters({wikiSpaceId: wikiSpaceId, pagePath: pagePath}).call()?.wikiPageId || null
+            if (!pageId) return
+            const access = ec.service.sync().name('org.moqui.impl.WikiServices.get#WikiPageAccess').parameter('wikiPageId', pageId).call()
+            if (!access?.canUpdate) return
+            for (const entityName of ['mantle.party.communication.WikiPageCommunicationEvent', 'mantle.work.effort.WikiPageWorkEffort',
+                    'mantle.request.WikiPageRequest'])
+                ec.entity.find(entityName).condition('wikiPageId', pageId).disableAuthz().deleteAll()
+            ec.entity.find('mantle.party.communication.RecordFollower').condition({recordEntityName: 'moqui.resource.wiki.WikiPage',
+                recordId: pageId}).disableAuthz().deleteAll()
+        ]]></script></actions>
+    </service>
 
     <!-- ================================================ -->
     <!-- ========== Record Links, Timeline and Followers ========== -->
@@ -1363,7 +1623,9 @@ along with this software (see the LICENSE.md file). If not, see
             active (the set's applyCond leaves it off then, but the user still has the filter here).
             - A work effort (task, event, project, ...): its ownerPartyId, or that of its root work effort, is the user's
               party or one of the user's organizations, or one of those is a current WorkEffortParty of it or of its root
-              work effort.
+              work effort; or it is in a calendar (CalendarWorkEffort, the series' for an instance changed on its own) the
+              user may view (mantle.work.CalendarServices.check#CalendarAccess: view, edit or manage, not free/busy only),
+              or it is visible to all users (visibilityEnumId WevAllUsers), as check#EventAccess has it.
             - A request: the user's party filed it (filedByPartyId), or the user's party or one of the user's
               organizations (such as the customer organization) is a current RequestParty, or the organization of its
               product store or the owner of its facility is one of the user's organizations.
@@ -1390,11 +1652,11 @@ along with this software (see the LICENSE.md file). If not, see
             group, ADMIN included, has an entity authorization by default.
 
             A wiki page (moqui.resource.wiki.WikiPage, a framework entity, which no entity filter covers) follows the wiki's
-            own view rule whenever authorization is on, for every user, ADMIN and staff included as in the wiki screens,
-            with or without an organization filter: the rule of org.moqui.impl.WikiServices.get#WikiPageInfo, replicated
-            here because that service also reads the page's file. A space with restrictView Y needs a WikiSpaceUser row of
-            the user with allowView Y, and a page with restrictView Y a WikiPageUser row of the user with allowView Y; a page
-            whose space is not found is not seen.
+            own view rule whenever authorization is on, for every user, staff included as in the wiki screens, with or
+            without an organization filter: org.moqui.impl.WikiServices.get#WikiPageAccess, its canView. A space with
+            restrictView Y needs a WikiSpaceUser row of the user with allowView or allowAdmin Y, and a page with
+            restrictView Y a WikiPageUser row of the user with allowView Y; the ADMIN group sees every page; a page whose
+            space is not found is not seen.
         </description>
         <in-parameters>
             <parameter name="recordEntityName" required="true"/>
@@ -1574,8 +1836,19 @@ along with this software (see the LICENSE.md file). If not, see
                     root = ec.entity.find(WORK_EFFORT).condition('workEffortId', workEffort.rootWorkEffortId).disableAuthz().one()
                 }
                 if ([workEffort.ownerPartyId, root?.ownerPartyId].some((partyId) => partyId && s.partyIds.includes(partyId))) return true
-                return ec.entity.find('mantle.work.effort.WorkEffortParty').condition('workEffortId', 'in', ids)
-                        .condition('partyId', 'in', s.partyIds).condition(current()).disableAuthz().count() > 0
+                if (ec.entity.find('mantle.work.effort.WorkEffortParty').condition('workEffortId', 'in', ids)
+                        .condition('partyId', 'in', s.partyIds).condition(current()).disableAuthz().count() > 0) return true
+                // an event the user sees on the calendar: visible to all users, or in a calendar the user may view (an
+                // instance changed on its own is in its series' calendars)
+                if (workEffort.visibilityEnumId === 'WevAllUsers') return true
+                const calendarOf = ids.concat(Array.from(ec.entity.find('mantle.work.effort.WorkEffortAssoc').condition('toWorkEffortId', workEffort.workEffortId)
+                        .condition('workEffortAssocTypeEnumId', 'WeatRecurrenceInstance').disableAuthz().list()).map((assoc) => assoc.workEffortId))
+                const calendarIds = Array.from(new Set(Array.from(ec.entity.find('mantle.work.calendar.CalendarWorkEffort')
+                        .condition('workEffortId', 'in', calendarOf).disableAuthz().list()).map((row) => row.calendarId)))
+                if (!calendarIds.length) return false
+                const access = ec.service.sync().name('mantle.work.CalendarServices.check#CalendarAccess')
+                        .parameters({calendarIdList: calendarIds}).disableAuthz().call()
+                return calendarIds.some((id) => ['CalpView', 'CalpEdit', 'CalpManage'].includes(access?.permissionMap?.[id]))
             }
             const requestVisible = (request, s) => {
                 if (s.userPartyId && request.filedByPartyId === s.userPartyId) return true
@@ -1598,17 +1871,13 @@ along with this software (see the LICENSE.md file). If not, see
                 return ec.entity.find('mantle.order.OrderPartParty').condition('orderId', order.orderId)
                         .condition('partyId', 'in', s.partyIds).disableAuthz().count() > 0
             }
-            // the view rule of org.moqui.impl.WikiServices.get#WikiPageInfo (see the description)
+            // the wiki's own view rule, org.moqui.impl.WikiServices.get#WikiPageAccess (see the description), once a page
+            const wikiViews = {}
             const wikiPageVisible = (page) => {
-                const userId = ec.user.userId || null
-                const space = page.wikiSpaceId ? ec.entity.find('moqui.resource.wiki.WikiSpace').condition('wikiSpaceId', page.wikiSpaceId)
-                        .disableAuthz().one() : null
-                if (space == null) return false
-                if (space.restrictView === 'Y' && !(userId && ec.entity.find('moqui.resource.wiki.WikiSpaceUser')
-                        .condition({wikiSpaceId: page.wikiSpaceId, userId: userId, allowView: 'Y'}).disableAuthz().count() > 0)) return false
-                if (page.restrictView === 'Y' && !(userId && ec.entity.find('moqui.resource.wiki.WikiPageUser')
-                        .condition({wikiPageId: page.wikiPageId, userId: userId, allowView: 'Y'}).disableAuthz().count() > 0)) return false
-                return true
+                const pageId = page.wikiPageId
+                if (!Object.prototype.hasOwnProperty.call(wikiViews, pageId)) wikiViews[pageId] = !!ec.service.sync()
+                        .name('org.moqui.impl.WikiServices.get#WikiPageAccess').parameter('wikiPageId', pageId).call()?.canView
+                return wikiViews[pageId]
             }
             let visible
             const commEventVisible = (commEvent, depth) => {
@@ -1640,6 +1909,8 @@ along with this software (see the LICENSE.md file). If not, see
                 }
                 for (const row of ec.entity.find('mantle.party.communication.CommunicationEventRecord')
                         .condition('communicationEventId', 'in', eventIds).disableAuthz().list()) {
+                    // the chat message an event was made from (findOrCreate#ChatCommunicationEvent) names it, it is no record
+                    if (row.recordEntityName === 'moqui.chat.ChatEvent') continue
                     let keyField = null
                     try {
                         const keys = Object.keys(ec.entity.makeValue(row.recordEntityName).getPrimaryKeys())
@@ -2302,11 +2573,13 @@ along with this software (see the LICENSE.md file). If not, see
             or a party to (find#PartyCommunicationEvents, mailbox posts left out unless includeListPosts); its *Note rows
             as notes (PartyNote, WorkEffortNote, RequestNote, OrderNote, FacilityNote); its done activities (work efforts
             with the purpose WepPhoneCall, WepEmail, WepToDo or WepMeeting through RequestWorkEffort, WikiPageWorkEffort
-            or WorkEffortRecord); its changes from the entity audit log; and its files (the *Content rows). The open
-            activities come apart in plannedActivities, soonest due first, with the assignee.
+            or WorkEffortRecord); its changes from the entity audit log; its files (the *Content rows); and the messages of
+            the chat room bound to it (org.moqui.impl.ChatServices.get#Timeline by the record: none when there is no room or
+            the user may not read it). The open activities come apart in plannedActivities, soonest due first, with the
+            assignee.
 
-            kinds limits the entries to messages, notes, activities, changes and files (a list or comma-separated text;
-            empty is all). Page with pageIndex and pageSize, or by a cursor: beforeDate with seenKeys, which are
+            kinds limits the entries to messages, notes, activities, changes, files and chat (a list or comma-separated
+            text; empty is all; messages includes chat). Page with pageIndex and pageSize, or by a cursor: beforeDate with seenKeys, which are
             nextBeforeDate and nextSeenKeys of the page before, gives the entries before that date and those of that date
             not shown yet, so the pages neither skip nor repeat an entry when entries share a date. beforeDate alone
             gives the entries strictly before it, as before seenKeys (an entry of the same date as the last one shown is
@@ -2321,10 +2594,14 @@ along with this software (see the LICENSE.md file). If not, see
             stable for the entry: the cursor's seenKeys), authorPartyId, authorUserId, title, body, contentType, statusId,
             source (the entity or service it came from)} with the fields of its kind:
             communicationEventId, communicationEventTypeId, fromPartyId, toPartyId, parentCommEventId, rootCommEventId,
-            emailMessageId, contactListId and attachments (the CommunicationEventContent rows) for a message or a Comment
-            note; noteDate and internalNote for a *Note row; workEffortId and purposeEnumId for an activity;
+            emailMessageId, contactListId, editedDate (when its author last changed its text, update#RecordNote) and
+            attachments (the CommunicationEventContent rows) for a message or a Comment note; noteDate and internalNote for a *Note row; workEffortId and purposeEnumId for an activity;
             auditHistorySeqId, fieldName, oldValue, newValue, oldValueDescription and newValueDescription (status
-            descriptions) and changeReason for a change; contentKey, contentLocation and contentTypeEnumId for a file.
+            descriptions) and changeReason for a change; contentKey, contentLocation and contentTypeEnumId for a file;
+            for a chat message (kind chat, source moqui.chat.ChatEvent: the room's messages of the main timeline, not
+            removed, edits applied) chatRoomId, eventSeq, roomName (also the title), authorName, bodyText (the body is the
+            message's HTML), edited, threadReplyCount, chatAttachments and records (as get#Timeline has them), and url,
+            the room at the message when chatRoomUrl is given.
         </description>
         <in-parameters>
             <parameter name="recordEntityName" required="true"/>
@@ -2336,6 +2613,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="seenKeys" type="List"><description>With beforeDate: the entryKey of each entry shown whose date is
                 beforeDate (nextSeenKeys); the other entries of that date come too. A list or comma-separated.</description></parameter>
             <parameter name="includeListPosts" type="Boolean" default="false"/>
+            <parameter name="chatRoomUrl"><description>The app's chat screen (such as /qapps/Comms/Chat): a chat entry's url is
+                it with chatRoomId and eventSeq</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="recordEntityName"/>
@@ -2373,10 +2652,11 @@ along with this software (see the LICENSE.md file). If not, see
                 return Number.isNaN(number) ? new Date(String(value)).getTime() : number
             }
             const kindNames = {message: 'message', messages: 'message', note: 'note', notes: 'note', activity: 'activity',
-                activities: 'activity', change: 'change', changes: 'change', file: 'file', files: 'file'}
+                activities: 'activity', change: 'change', changes: 'change', file: 'file', files: 'file', chat: 'chat'}
             const kindValues = kinds == null ? [] : (typeof kinds === 'string' ? kinds.split(',') : Array.from(kinds))
             const wanted = new Set(kindValues.map((kind) => kindNames[String(kind).trim()]).filter((kind) => kind))
-            const wants = (kind) => wanted.size === 0 || wanted.has(kind)
+            // the chat messages are messages too
+            const wants = (kind) => wanted.size === 0 || wanted.has(kind) || (kind === 'chat' && wanted.has('message'))
             const start = pageIndex * pageSize
             const need = start + pageSize + 1
             const beforeMillis = toMillis(beforeDate)
@@ -2443,7 +2723,7 @@ along with this software (see the LICENSE.md file). If not, see
                         communicationEventTypeId: commEvent.communicationEventTypeId, fromPartyId: commEvent.fromPartyId ?? null,
                         toPartyId: commEvent.toPartyId ?? null, parentCommEventId: commEvent.parentCommEventId ?? null,
                         rootCommEventId: commEvent.rootCommEventId ?? null, emailMessageId: commEvent.emailMessageId ?? null,
-                        contactListId: commEvent.contactListId ?? null})
+                        contactListId: commEvent.contactListId ?? null, editedDate: commEvent.editedDate ?? null})
                 }
             })
 
@@ -2545,7 +2825,38 @@ along with this software (see the LICENSE.md file). If not, see
                 }
             })
 
-            // registered sources, such as a chat room bound to the record
+            // chat: the messages of the room bound to the record, newest first back to the cursor, a page of the room's
+            // timeline at a time (get#Timeline pages by eventSeq, oldest first in each page)
+            if (wants('chat')) runSource('chatRoom', () => {
+                let beforeSeq = null
+                let found = 0
+                for (let pages = 0; pages < 20; pages++) {
+                    const parameters = {recordEntityName: recordEntityName, recordId: recordId, limit: Math.min(200, Math.max(fetch, 20))}
+                    if (beforeSeq != null) parameters.beforeSeq = beforeSeq
+                    const out = callSource('org.moqui.impl.ChatServices.get#Timeline', parameters)
+                    if (ec.message.hasError() || !out?.room) return
+                    const room = out.room
+                    const events = Array.from(out.eventList ?? [])
+                    for (const event of events) {
+                        if (event.type !== 'message' || event.redacted) continue
+                        const sentMillis = toMillis(event.sentDate)
+                        if (before && sentMillis >= before.getTime()) continue
+                        entries.push({kind: 'chat', date: sentMillis, entryKey: `chat:${room.chatRoomId}:${event.eventSeq}`,
+                            authorPartyId: null, authorUserId: event.senderUserId ?? null, authorName: event.senderName ?? null,
+                            title: room.roomName ?? null, body: event.body ?? null, contentType: 'text/html', bodyText: event.bodyText ?? null,
+                            statusId: null, source: 'moqui.chat.ChatEvent', chatRoomId: room.chatRoomId, eventSeq: event.eventSeq,
+                            roomName: room.roomName ?? null, edited: !!event.edited, threadReplyCount: event.threadReplyCount ?? 0,
+                            chatAttachments: event.attachments ?? [], records: event.records ?? [],
+                            url: chatRoomUrl ? `${chatRoomUrl}${String(chatRoomUrl).includes('?') ? '&' : '?'}chatRoomId=` +
+                                `${encodeURIComponent(room.chatRoomId)}&eventSeq=${event.eventSeq}` : null})
+                        found++
+                    }
+                    if (!out.hasMoreBefore || !events.length || found >= fetch) return
+                    beforeSeq = events[0].eventSeq
+                }
+            })
+
+            // registered sources
             const registered = ec.entity.find('moqui.service.ServiceRegister').condition('serviceTypeEnumId', 'RecordTimelineSource')
                     .useCache(true).list()
             for (const register of registered) runSource(register.serviceRegisterId, () => {
@@ -2663,6 +2974,226 @@ along with this software (see the LICENSE.md file). If not, see
                     .parameters(Object.assign({kind: 'notes', excludeUserIds: mentionedUserIds}, notifyParameters)).call()
             if (ec.message.hasError()) return
             notifiedFollowerUserIds = followerOut.notifiedUserIds
+        ]]></script></actions>
+    </service>
+
+    <service verb="check" noun="RecordNoteAccess" allow-remote="false">
+        <description>
+            Whether the current user may change (action update) or delete (action delete) a note on a record's timeline: a
+            Comment communication event (a note, a comment or a reply to one, not cancelled; a Message or an email once sent
+            stays as it is) on a record the user may see (get#RecordLinkInfo with checkRecord: the entity filters and the
+            per-user rules of IronStone R5 and R28). The note is on the record through the record's own join or a
+            CommunicationEventRecord, of the note or of the root of its thread; for a party the note is from or to it or has
+            a CommunicationEventParty row of it. Its author (the from party is the user's party) changes it; its author or a
+            user in the ADMIN group deletes it, and not while it has replies. An error otherwise; a note that is not on the
+            record is not found.
+        </description>
+        <in-parameters>
+            <parameter name="recordEntityName" required="true"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="communicationEventId" required="true"/>
+            <parameter name="action" default-value="update"><description>update or delete</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="recordEntityName"><description>The full entity name</description></parameter>
+            <parameter name="commEvent" type="Map"/>
+            <parameter name="ownJoin" type="Map"><description>{entityName, keyField} when the note itself has the record's own
+                join row (RequestCommEvent for a request); null when it is on the record otherwise</description></parameter>
+            <parameter name="isAuthor" type="Boolean"/>
+            <parameter name="isAdmin" type="Boolean"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            isAuthor = false
+            isAdmin = false
+            ownJoin = null
+            if (action !== 'update' && action !== 'delete') { ec.message.addError(`Note action ${action} is not update or delete`); return }
+            const info = ec.service.sync().name('mantle.party.CommunicationServices.get#RecordLinkInfo')
+                    .parameters({recordEntityName: recordEntityName, recordId: recordId}).call()
+            if (ec.message.hasError()) return
+            recordEntityName = info.recordEntityName
+            const notFound = () => ec.message.addError(`Note ${communicationEventId} not found on ${info.recordTypeName} ${recordId}`)
+            const value = ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', communicationEventId).one()
+            if (value == null || value.statusId === 'CeCancelled') { notFound(); return }
+            const found = (entityName, keys) => ec.entity.find(entityName).condition(keys).count() > 0
+            let on = false
+            if (info.isParty) {
+                on = value.fromPartyId === recordId || value.toPartyId === recordId ||
+                        found('mantle.party.communication.CommunicationEventParty', {communicationEventId: communicationEventId, partyId: recordId})
+            } else {
+                for (const id of [value.communicationEventId, value.rootCommEventId].filter((item) => item)) {
+                    if (info.commEventJoin && found(info.commEventJoin.entityName, {communicationEventId: id, [info.commEventJoin.keyField]: recordId})) {
+                        on = true
+                        if (id === value.communicationEventId) ownJoin = info.commEventJoin
+                    } else if (found('mantle.party.communication.CommunicationEventRecord', {communicationEventId: id,
+                            recordEntityName: recordEntityName, recordId: recordId})) {
+                        on = true
+                    }
+                    if (on) break
+                }
+            }
+            if (!on) { notFound(); return }
+            if (value.communicationEventTypeId !== 'Comment') {
+                ec.message.addError(action === 'update' ? 'Only a note or a comment can be changed: a message once sent stays as it is'
+                        : 'Only a note or a comment can be deleted: take a message off the record instead')
+                return
+            }
+            const partyId = ec.user.userAccount?.partyId || null
+            isAuthor = !!partyId && value.fromPartyId === partyId
+            isAdmin = !!ec.user.userId && ec.user.isInGroup('ADMIN')
+            if (action === 'update' && !isAuthor) { ec.message.addError('You may change only your own notes'); return }
+            if (action === 'delete') {
+                if (!isAuthor && !isAdmin) { ec.message.addError('You may delete only your own notes'); return }
+                const cf = ec.entity.conditionFactory
+                const replies = ec.entity.find('mantle.party.communication.CommunicationEvent').condition(cf.makeCondition([
+                    cf.makeCondition('parentCommEventId', 'equals', communicationEventId),
+                    cf.makeCondition('rootCommEventId', 'equals', communicationEventId)], 'or'))
+                        .condition(cf.makeCondition('communicationEventId', 'not-equals', communicationEventId)).count()
+                if (replies > 0) { ec.message.addError('This note has replies: delete the replies first'); return }
+            }
+            commEvent = value.getMap()
+        ]]></script></actions>
+    </service>
+    <service verb="update" noun="RecordNote">
+        <description>
+            Chatter's edit of a note: its author changes the text, and the subject when given, of a note or comment on a
+            record (check#RecordNoteAccess, action update), and editedDate is set, which the timeline shows as edited. A note
+            on a request through its own join is changed by mantle.request.RequestServices.update#RequestComment, any other by
+            the communication event's update. Only the users mentioned now who were not mentioned before are notified, on
+            topic ChatterMention (notify#RecordMention): a mention in the old body is a data-mention-id of its rich text (a
+            userId, or a partyId whose users count). The record's followers are not told again.
+        </description>
+        <in-parameters>
+            <parameter name="recordEntityName" required="true"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="communicationEventId" required="true"/>
+            <parameter name="body" required="true" allow-html="safe"/>
+            <parameter name="subject"><description>Empty keeps the subject</description></parameter>
+            <parameter name="contentType"><description>Empty keeps the content type</description></parameter>
+            <parameter name="mentionUserIds" type="List"><description>The users the new body mentions</description></parameter>
+            <parameter name="mentionPartyIds" type="List"><description>The parties the new body mentions, whose users count</description></parameter>
+            <parameter name="recordUrl"><description>The record's screen, for the notifications' link</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="communicationEventId"/>
+            <parameter name="editedDate" type="Timestamp"/>
+            <parameter name="mentionedUserIds" type="List"><description>The users notified: mentioned now and not before</description></parameter>
+        </out-parameters>
+        <actions><script><![CDATA[
+            mentionedUserIds = []
+            editedDate = null
+            const access = ec.service.sync().name('mantle.party.CommunicationServices.check#RecordNoteAccess').parameters({
+                recordEntityName: recordEntityName, recordId: recordId, communicationEventId: communicationEventId, action: 'update'}).call()
+            if (ec.message.hasError()) return
+            const old = access.commEvent
+            const text = String(body || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').trim()
+            if (!text) { ec.message.addError('A note needs its text: delete it instead'); return }
+            const newSubject = subject != null && String(subject).trim() !== '' ? subject : (old.subject ?? null)
+            const newType = contentType || old.contentType || 'text/plain'
+            if (access.ownJoin && access.recordEntityName === 'mantle.request.Request') {
+                ec.service.sync().name('mantle.request.RequestServices.update#RequestComment').parameters({requestId: recordId,
+                    communicationEventId: communicationEventId, subject: newSubject, body: body, contentType: newType}).call()
+            } else {
+                ec.service.sync().name('update#mantle.party.communication.CommunicationEvent').parameters({communicationEventId: communicationEventId,
+                    subject: newSubject, body: body, contentType: newType, editedDate: ec.user.nowTimestamp}).call()
+            }
+            if (ec.message.hasError()) return
+            editedDate = ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', communicationEventId)
+                    .one()?.editedDate ?? ec.user.nowTimestamp
+
+            // the users mentioned now and not before: a data-mention-id of the old body is a userId or a partyId
+            const cf = ec.entity.conditionFactory
+            const usersOf = (ids) => {
+                const list = Array.from(new Set(Array.from(ids || []).map((id) => String(id).trim()).filter((id) => id)))
+                if (!list.length) return new Set()
+                return new Set(Array.from(ec.entity.find('moqui.security.UserAccount').condition(cf.makeCondition([
+                    cf.makeCondition('userId', 'in', list), cf.makeCondition('partyId', 'in', list)], 'or'))
+                        .selectField('userId').disableAuthz().list()).map((account) => account.userId))
+            }
+            const before = usersOf(Array.from(String(old.body || '').matchAll(/data-mention-id="([^"]+)"/g)).map((match) => match[1]))
+            const now = new Set(Array.from(mentionUserIds || []).map((id) => String(id).trim()).filter((id) => id))
+            if (mentionPartyIds?.length) for (const account of ec.entity.find('moqui.security.UserAccount')
+                    .condition('partyId', 'in', Array.from(mentionPartyIds)).selectField('userId').disableAuthz().list()) now.add(account.userId)
+            const added = Array.from(now).filter((id) => !before.has(id) && id !== ec.user.userId)
+            if (added.length === 0) return
+            const mentionOut = ec.service.sync().name('mantle.party.CommunicationServices.notify#RecordMention').parameters({
+                recordEntityName: access.recordEntityName, recordId: recordId, communicationEventId: communicationEventId,
+                mentionUserIds: added, subject: newSubject, body: body, recordUrl: recordUrl}).call()
+            if (ec.message.hasError()) return
+            mentionedUserIds = Array.from(mentionOut?.notifiedUserIds || [])
+        ]]></script></actions>
+    </service>
+    <service verb="delete" noun="RecordNote">
+        <description>
+            Chatter's delete of a note: its author, or a user in the ADMIN group, deletes a note or comment on a record that
+            has no replies (check#RecordNoteAccess, action delete). A note on a request through its own join is deleted by
+            mantle.request.RequestServices.delete#RequestComment, any other by delete#CommunicationEventRows: the note, its
+            links to records, its party, purpose and product rows and its attachments (their files too).
+        </description>
+        <in-parameters>
+            <parameter name="recordEntityName" required="true"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="communicationEventId" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="deleted" type="Boolean"/></out-parameters>
+        <actions><script><![CDATA[
+            deleted = false
+            const access = ec.service.sync().name('mantle.party.CommunicationServices.check#RecordNoteAccess').parameters({
+                recordEntityName: recordEntityName, recordId: recordId, communicationEventId: communicationEventId, action: 'delete'}).call()
+            if (ec.message.hasError()) return
+            if (access.ownJoin && access.recordEntityName === 'mantle.request.Request') {
+                ec.service.sync().name('mantle.request.RequestServices.delete#RequestComment').parameters({requestId: recordId,
+                    communicationEventId: communicationEventId}).call()
+            } else {
+                ec.service.sync().name('mantle.party.CommunicationServices.delete#CommunicationEventRows')
+                        .parameter('communicationEventId', communicationEventId).call()
+            }
+            if (ec.message.hasError()) return
+            deleted = true
+        ]]></script></actions>
+    </service>
+    <service verb="delete" noun="CommunicationEventRows" allow-remote="false">
+        <description>
+            Deletes a communication event with the rows that name it: its links to records (CommunicationEventRecord,
+            RequestCommEvent, WorkEffortCommEvent, OrderCommunicationEvent, WikiPageCommunicationEvent), its
+            CommunicationEventParty, CommunicationEventPurpose and CommunicationEventProduct rows, and its
+            CommunicationEventContent rows with their files under the event's content folder (a file that cannot be
+            deleted is logged; its row is gone). An event with replies is not deleted. For the callers that checked who may
+            delete it (delete#RecordNote, mantle.request.RequestServices.delete#RequestComment).
+        </description>
+        <in-parameters><parameter name="communicationEventId" required="true"/></in-parameters>
+        <out-parameters><parameter name="deletedFileCount" type="Integer"/></out-parameters>
+        <actions><script><![CDATA[
+            deletedFileCount = 0
+            const COMM_EVENT = 'mantle.party.communication.CommunicationEvent'
+            const value = ec.entity.find(COMM_EVENT).condition('communicationEventId', communicationEventId).one()
+            if (value == null) { ec.message.addError(`Communication event ${communicationEventId} not found`); return }
+            const cf = ec.entity.conditionFactory
+            const replies = ec.entity.find(COMM_EVENT).condition(cf.makeCondition([
+                cf.makeCondition('parentCommEventId', 'equals', communicationEventId),
+                cf.makeCondition('rootCommEventId', 'equals', communicationEventId)], 'or'))
+                    .condition(cf.makeCondition('communicationEventId', 'not-equals', communicationEventId)).count()
+            if (replies > 0) { ec.message.addError('This note has replies: delete the replies first'); return }
+            for (const entityName of ['mantle.party.communication.CommunicationEventRecord', 'mantle.request.RequestCommEvent',
+                    'mantle.work.effort.WorkEffortCommEvent', 'mantle.order.OrderCommunicationEvent',
+                    'mantle.party.communication.WikiPageCommunicationEvent', 'mantle.party.communication.CommunicationEventParty',
+                    'mantle.party.communication.CommunicationEventPurpose', 'mantle.party.communication.CommunicationEventProduct']) {
+                ec.entity.find(entityName).condition('communicationEventId', communicationEventId).deleteAll()
+            }
+            // the attachments: a file of the event's own content folder goes with its row (save#CommunicationEventContentFile)
+            const folder = `/CommunicationEvent/${communicationEventId}/`
+            for (const content of ec.entity.find('mantle.party.communication.CommunicationEventContent')
+                    .condition('communicationEventId', communicationEventId).list()) {
+                const location = content.contentLocation ? String(content.contentLocation) : null
+                content.delete()
+                if (!location || !location.includes(folder)) continue
+                try {
+                    const ref = ec.resource.getLocationReference(location)
+                    if (ref && ref.getExists()) { ref.delete(); deletedFileCount++ }
+                } catch (err) {
+                    ec.logger.warn(`Communication event ${communicationEventId}: the row of ${location} is deleted, the file was not: ${err}`)
+                }
+            }
+            ec.service.sync().name('delete#' + COMM_EVENT).parameter('communicationEventId', communicationEventId).call()
         ]]></script></actions>
     </service>
 
@@ -2864,6 +3395,223 @@ along with this software (see the LICENSE.md file). If not, see
                     partyId: account?.partyId ?? null, notifyMessages: follower.notifyMessages, notifyNotes: follower.notifyNotes,
                     notifyActivities: follower.notifyActivities, notifyChanges: follower.notifyChanges, fromDate: follower.fromDate})
                 if (follower.userId === ec.user.userId) isFollowing = true
+            }
+        ]]></script></actions>
+    </service>
+
+    <!-- ================================================ -->
+    <!-- ========== Chat messages on records ========== -->
+    <!-- ================================================ -->
+
+    <!-- A chat message (the framework's moqui.chat store, org.moqui.impl.ChatServices) is not a communication event: it
+        becomes one only when a user files it on a record or turns it into a task, request or event (IronStone design §13).
+        A record room's messages show in the record's timeline as they are (get#RecordTimeline, kind chat). -->
+
+    <service verb="findOrCreate" noun="ChatCommunicationEvent">
+        <description>
+            A chat message as a communication event, made once per message: type Chat, from the sender's party, its date
+            the message's, the room's name as its subject and the message's HTML (its last edit) as its body. The user must
+            be able to read the room (org.moqui.impl.ChatServices.get#RoomAccess), and the message is one of the room's
+            messages that is not removed. The event names its message by a CommunicationEventRecord of moqui.chat.ChatEvent
+            whose recordId is chatRoomId::eventSeq (the key of the MoquiChatEvent document): it finds the event again, and is
+            no record a timeline or the record visibility rules read. Filing it on a record is link#CommunicationEventRecord
+            (create#RecordFromChatMessage does it for the record it makes). created is true when this call made the event;
+            chatMessage is the message: {chatRoomId, eventSeq, senderUserId, senderName, senderPartyId, sentDate, body,
+            bodyText, attachmentNames, roomName, roomRecordEntityName, roomRecordId}.
+        </description>
+        <in-parameters>
+            <parameter name="chatRoomId" required="true"/>
+            <parameter name="eventSeq" type="Integer" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="communicationEventId"/>
+            <parameter name="created" type="Boolean"/>
+            <parameter name="chatMessage" type="Map"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            communicationEventId = null
+            created = false
+            chatMessage = null
+            const parse = (text) => { if (!text) return {}; try { const value = JSON.parse(text); return value && typeof value === 'object' ? value : {} } catch (err) { return {} } }
+            const access = ec.service.sync().name('org.moqui.impl.ChatServices.get#RoomAccess').parameter('chatRoomId', chatRoomId).call()
+            if (ec.message.hasError()) return
+            if (!access?.canRead) { ec.message.addError(`Chat room ${chatRoomId} not found`); return }
+            const row = ec.entity.find('moqui.chat.ChatEvent').condition('chatRoomId', chatRoomId).condition('eventSeq', eventSeq).one()
+            if (row == null || row.eventTypeEnumId !== 'CetMessage' || row.redactedDate) {
+                ec.message.addError(`Message ${eventSeq} not found in the room`); return }
+            const content = parse(row.contentJson)
+            let html = content.body ?? null
+            if (row.lastEditEventSeq != null) {
+                const edit = ec.entity.find('moqui.chat.ChatEvent').condition('chatRoomId', chatRoomId).condition('eventSeq', row.lastEditEventSeq).one()
+                const edited = parse(edit?.contentJson)
+                if (edited.body != null) html = edited.body
+            }
+            const room = access.room
+            const sender = row.senderUserId ? ec.entity.find('moqui.security.UserAccount').condition('userId', row.senderUserId)
+                    .disableAuthz().one() : null
+            chatMessage = {chatRoomId: chatRoomId, eventSeq: Number(eventSeq), senderUserId: row.senderUserId ?? null,
+                senderName: sender ? (sender.userFullName || sender.username) : null, senderPartyId: sender?.partyId ?? null,
+                sentDate: row.sentDate, body: html, bodyText: row.bodyText ?? null,
+                attachmentNames: Array.from(content.attachments ?? []).map((file) => file.fileName).filter((name) => name),
+                roomName: room.roomName ?? null, roomRecordEntityName: room.recordEntityName ?? null, roomRecordId: room.recordId ?? null}
+
+            const messageKey = `${chatRoomId}::${eventSeq}`
+            const existing = Array.from(ec.entity.find('mantle.party.communication.CommunicationEventRecord')
+                    .condition('recordEntityName', 'moqui.chat.ChatEvent').condition('recordId', messageKey).list())
+            if (existing.length) { communicationEventId = existing[0].communicationEventId; return }
+            communicationEventId = ec.service.sync().name('create#mantle.party.communication.CommunicationEvent').parameters({
+                communicationEventTypeId: 'Chat', statusId: 'CeSent', fromPartyId: chatMessage.senderPartyId, entryDate: row.sentDate,
+                datetimeStarted: row.sentDate, subject: room.roomName ?? null, contentType: 'text/html', body: html}).call()?.communicationEventId
+            if (ec.message.hasError()) return
+            ec.service.sync().name('create#mantle.party.communication.CommunicationEventRecord').parameters({communicationEventId: communicationEventId,
+                recordEntityName: 'moqui.chat.ChatEvent', recordId: messageKey, linkedByUserId: ec.user.userId, linkedDate: ec.user.nowTimestamp}).call()
+            created = !ec.message.hasError()
+        ]]></script></actions>
+    </service>
+
+    <service verb="create" noun="RecordFromChatMessage">
+        <description>
+            A task, request or event made from a chat message (the Chat message actions, IronStone design §13): recordKind
+            task (mantle.work.TaskServices.create#SimpleTask, owned by the user and assigned to assignToPartyId, the user by
+            default), request (mantle.request.RequestServices.create#Request, filed by the user and submitted) or event
+            (mantle.work.EventServices.create#Event in calendarId, the user's default calendar by default, from
+            estimatedStartDate to estimatedCompletionDate, or on allDayStart to allDayEnd; with neither, the next whole hour
+            for an hour). Its name is name, by default the message's first line (at most 100 characters; the file names, or
+            "Message from" the sender, for a message without text), and its description description, by default the
+            message's text. The message becomes a communication event (findOrCreate#ChatCommunicationEvent) filed on the new
+            record (its own join, WorkEffortCommEvent or RequestCommEvent), so the record's timeline shows where it came from.
+            When the room is bound to a record, the new record is linked to it as well unless linkRoomRecord is false: a task
+            or event by link#WorkEffortRecord (the record's own join, such as RequestWorkEffort, else WorkEffortRecord), a
+            request to a work effort by RequestWorkEffort; a request has no link to another kind of record
+            (roomRecordLinked false). A failure of that link is logged and leaves roomRecordLinked false; the rest stands.
+        </description>
+        <in-parameters>
+            <parameter name="chatRoomId" required="true"/>
+            <parameter name="eventSeq" type="Integer" required="true"/>
+            <parameter name="recordKind" required="true"><description>task, request or event</description></parameter>
+            <parameter name="name"/>
+            <parameter name="description"/>
+            <parameter name="assignToPartyId"/>
+            <parameter name="purposeEnumId"><description>A task's (default WepTask) or an event's (default WepMeeting)</description></parameter>
+            <parameter name="priority" type="Long"/>
+            <parameter name="estimatedStartDate" type="Timestamp"/>
+            <parameter name="estimatedCompletionDate" type="Timestamp"><description>A task's due date, an event's end</description></parameter>
+            <parameter name="allDayStart" type="Date"/>
+            <parameter name="allDayEnd" type="Date"/>
+            <parameter name="calendarId"/>
+            <parameter name="requestTypeEnumId" default-value="RqtSupport"/>
+            <parameter name="linkRoomRecord" type="Boolean" default="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId"/>
+            <parameter name="workEffortId"/>
+            <parameter name="requestId"/>
+            <parameter name="communicationEventId"/>
+            <parameter name="roomRecordEntityName"/>
+            <parameter name="roomRecordId"/>
+            <parameter name="roomRecordLinked" type="Boolean"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            recordEntityName = null; recordId = null; workEffortId = null; requestId = null
+            roomRecordEntityName = null; roomRecordId = null; roomRecordLinked = false
+            const kind = String(recordKind || '').trim().toLowerCase()
+            if (!['task', 'request', 'event'].includes(kind)) { ec.message.addError(`A record from a chat message is a task, request or event, not ${recordKind}`); return }
+            const myPartyId = ec.user.userAccount?.partyId || null
+            if (!myPartyId) { ec.message.addError('Making a record from a chat message needs a user with a party'); return }
+            const found = ec.service.sync().name('mantle.party.CommunicationServices.findOrCreate#ChatCommunicationEvent')
+                    .parameters({chatRoomId: chatRoomId, eventSeq: eventSeq}).call()
+            if (ec.message.hasError()) return
+            communicationEventId = found.communicationEventId
+            const chatMessage = found.chatMessage
+            const text = String(chatMessage.bodyText ?? '').trim()
+
+            let title = name != null ? String(name).trim() : ''
+            if (!title) {
+                const firstLine = (text.split(/\r?\n/).map((line) => line.replace(/\s+/g, ' ').trim()).find((line) => line) || '')
+                title = firstLine.length > 100 ? firstLine.substring(0, 99) + '…' : firstLine
+            }
+            if (!title) title = chatMessage.attachmentNames.length ? chatMessage.attachmentNames.join(', ').substring(0, 100)
+                    : ec.resource.expand('Message from ${name}', '', {name: chatMessage.senderName || chatMessage.senderUserId || ''})
+            const details = description != null ? (String(description) || null) : (text || null)
+
+            if (kind === 'task') {
+                workEffortId = ec.service.sync().name('mantle.work.TaskServices.create#SimpleTask').parameters({workEffortName: title,
+                    description: details, purposeEnumId: purposeEnumId || 'WepTask', priority: priority ?? 5,
+                    estimatedCompletionDate: estimatedCompletionDate, assignToPartyId: assignToPartyId || myPartyId,
+                    ownerPartyId: myPartyId}).call()?.workEffortId
+                recordEntityName = 'mantle.work.effort.WorkEffort'; recordId = workEffortId
+            } else if (kind === 'event') {
+                const fields = {workEffortName: title, description: details, purposeEnumId: purposeEnumId || 'WepMeeting', priority: priority ?? 5,
+                    assignToPartyId: assignToPartyId || myPartyId, ownerPartyId: myPartyId}
+                if (allDayStart) Object.assign(fields, {allDayStart: allDayStart, allDayEnd: allDayEnd || null})
+                else {
+                    const toMillis = (value) => {
+                        if (value == null || value === '') return null
+                        if (typeof value === 'number') return value
+                        if (value instanceof Date) return value.getTime()
+                        const text = String(value)
+                        if (/^-?\d+$/.test(text)) return Number(text)
+                        const parsed = Date.parse(text)
+                        return Number.isNaN(parsed) ? null : parsed
+                    }
+                    // with no start, the next whole hour
+                    const startMs = toMillis(estimatedStartDate) ?? Math.floor(toMillis(ec.user.nowTimestamp) / 3600000) * 3600000 + 3600000
+                    let endMs = toMillis(estimatedCompletionDate)
+                    if (endMs == null || endMs <= startMs) endMs = startMs + 3600000
+                    Object.assign(fields, {estimatedStartDate: new Date(startMs), estimatedCompletionDate: new Date(endMs),
+                        estimatedWorkDuration: (endMs - startMs) / 3600000, timeUomId: 'TF_hr'})
+                }
+                let eventCalendarId = calendarId || null
+                if (!eventCalendarId) {
+                    eventCalendarId = ec.service.sync().name('mantle.work.CalendarServices.ensure#UserDefaultCalendar').call()?.calendarId || null
+                    if (ec.message.hasError()) return
+                }
+                fields.calendarId = eventCalendarId
+                workEffortId = ec.service.sync().name('mantle.work.EventServices.create#Event').parameters(fields).call()?.workEffortId
+                recordEntityName = 'mantle.work.effort.WorkEffort'; recordId = workEffortId
+            } else {
+                requestId = ec.service.sync().name('mantle.request.RequestServices.create#Request').parameters({requestName: title,
+                    description: details, statusId: 'ReqSubmitted', requestTypeEnumId: requestTypeEnumId || 'RqtSupport', priority: priority ?? 5,
+                    assignToPartyId: assignToPartyId || null}).call()?.requestId
+                recordEntityName = 'mantle.request.Request'; recordId = requestId
+            }
+            if (ec.message.hasError()) return
+            if (!recordId) { ec.message.addError(`The ${kind} was not made`); return }
+
+            // the message on the new record
+            ec.service.sync().name('mantle.party.CommunicationServices.link#CommunicationEventRecord').parameters({
+                communicationEventId: communicationEventId, recordEntityName: recordEntityName, recordId: recordId}).call()
+            if (ec.message.hasError()) return
+
+            // the room's record: linked as well, failure tolerant
+            roomRecordEntityName = chatMessage.roomRecordEntityName
+            roomRecordId = chatMessage.roomRecordId
+            if (!linkRoomRecord || !roomRecordEntityName || !roomRecordId) return
+            ec.message.pushErrors()
+            try {
+                if (workEffortId) {
+                    ec.service.sync().name('mantle.work.WorkEffortServices.link#WorkEffortRecord').parameters({workEffortId: workEffortId,
+                        recordEntityName: roomRecordEntityName, recordId: roomRecordId}).call()
+                    if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                    roomRecordLinked = true
+                } else if (roomRecordEntityName === 'mantle.work.effort.WorkEffort') {
+                    ec.service.sync().name('mantle.party.CommunicationServices.get#RecordLinkInfo').parameters({
+                        recordEntityName: roomRecordEntityName, recordId: roomRecordId}).call()
+                    if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                    const keys = {requestId: requestId, workEffortId: roomRecordId}
+                    if (ec.entity.find('mantle.request.RequestWorkEffort').condition(keys).one() == null)
+                        ec.service.sync().name('create#mantle.request.RequestWorkEffort').parameters(keys).call()
+                    if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                    roomRecordLinked = true
+                }
+            } catch (err) {
+                ec.logger.warn(`The ${kind} ${recordId} from chat message ${chatRoomId}::${eventSeq} is not linked to the room's record ` +
+                        `${roomRecordEntityName} ${roomRecordId}: ${err && err.message ? err.message : err}`)
+                roomRecordLinked = false
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
             }
         ]]></script></actions>
     </service>

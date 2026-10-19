@@ -1228,4 +1228,124 @@ along with this software (see the LICENSE.md file). If not, see
             }
         ]]></script></actions>
     </service>
+
+    <!-- ========== A user's contacts by email address ========== -->
+
+    <service verb="filter" noun="ContactAddresses" allow-remote="false">
+        <description>
+            Which of these email addresses are a user's contacts: the hook of the framework's
+            org.moqui.impl.EmailClientServices.filter#ContactAddresses (the email_contact_service property or the theme value
+            STRT_EMAIL_CONTACT_SERVICE), which an automatic reply to contacts only asks. A contact is a party, not disabled,
+            with the address (any case) on a current email contact mechanism, that is the user's personal contact
+            (privateOwnerUserId the user), a current member of one of the user's personal books or of a shared book shared now
+            with the user or one of the user's groups (any permission), or in the directory of the user's organizations
+            (IronStone design-drawers-commons §6: a party with a role and no private owner, owned by no organization, by _NA_,
+            or by an internal organization the user's party is an agent, employee or member of now, or one of its child
+            organizations). Another user's personal contact never counts (IronStone R7), whatever book it is in. The current
+            user's contacts; another user's only with authorization disabled, as the framework calls the hook. Out: the
+            addresses asked about that are contacts, in lower case and in their order.
+        </description>
+        <in-parameters>
+            <parameter name="userId" default="ec.user.userId"/>
+            <parameter name="emailAddressList" type="List"><parameter name="emailAddress"/></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="contactAddressList" type="List"><parameter name="emailAddress"/></parameter>
+        </out-parameters>
+        <actions><script><![CDATA[
+            contactAddressList = []
+            if (!userId) return
+            if (userId !== ec.user.userId && !ec.artifactExecution.authzDisabled()) {
+                ec.message.addError('The contacts of another user are read only with authorization disabled'); return }
+            const wanted = []
+            for (const value of Array.from(emailAddressList || [])) {
+                const address = String(value == null ? '' : value).trim().toLowerCase()
+                if (address.includes('@') && !wanted.includes(address)) wanted.push(address)
+            }
+            if (!wanted.length) return
+            const user = ec.entity.find('moqui.security.UserAccount').condition('userId', userId).one()
+            if (user == null) return
+            const cf = ec.entity.conditionFactory
+            const now = ec.user.nowTimestamp
+            const ids = (list, field) => Array.from(new Set(Array.from(list).map((row) => row[field]).filter((id) => id)))
+            const chunks = (list, size) => { const out = []; for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size)); return out }
+
+            // the parties of each address: its current email contact mechanisms, matched without regard to case
+            const addressOf = new Map()
+            for (const chunk of chunks(wanted, 100)) {
+                for (const mech of ec.entity.find('mantle.party.contact.ContactMech').condition('contactMechTypeEnumId', 'CmtEmailAddress')
+                        .condition(cf.makeCondition(chunk.map((address) => cf.makeCondition('infoString', 'equals', address, false, true)), 'or'))
+                        .selectField('contactMechId,infoString').list()) addressOf.set(mech.contactMechId, String(mech.infoString || '').trim().toLowerCase())
+            }
+            if (!addressOf.size) return
+            const partiesOf = new Map()
+            for (const chunk of chunks(Array.from(addressOf.keys()), 200)) {
+                for (const pcm of ec.entity.find('mantle.party.contact.PartyContactMech').condition('contactMechId', 'in', chunk)
+                        .condition(cf.makeConditionDate('fromDate', 'thruDate', now)).selectField('partyId,contactMechId').list()) {
+                    const address = addressOf.get(pcm.contactMechId)
+                    if (!partiesOf.has(address)) partiesOf.set(address, new Set())
+                    partiesOf.get(address).add(pcm.partyId)
+                }
+            }
+            const partyIds = []
+            for (const set of partiesOf.values()) for (const id of set) if (!partyIds.includes(id)) partyIds.push(id)
+            if (!partyIds.length) return
+
+            const contacts = new Set()
+            const others = new Map()
+            for (const party of ec.entity.find('mantle.party.Party').condition('partyId', 'in', partyIds)
+                    .selectField('partyId,privateOwnerUserId,ownerPartyId,disabled').list()) {
+                if (party.disabled === 'Y') continue
+                // a personal contact is its owner's only (R7)
+                if (party.privateOwnerUserId) { if (party.privateOwnerUserId === userId) contacts.add(party.partyId); continue }
+                others.set(party.partyId, party)
+            }
+
+            // the members of the user's personal books and of the shared books shared with the user or a group of the user's
+            if (others.size) {
+                const members = Array.from(ec.entity.find('mantle.party.contact.ContactBookParty').condition('partyId', 'in', Array.from(others.keys()))
+                        .condition(cf.makeConditionDate('fromDate', 'thruDate', now)).selectField('contactBookId,partyId').list())
+                const bookIds = ids(members, 'contactBookId')
+                if (bookIds.length) {
+                    const readable = new Set()
+                    const shared = []
+                    for (const book of ec.entity.find('mantle.party.contact.ContactBook').condition('contactBookId', 'in', bookIds)
+                            .selectField('contactBookId,ownerUserId,visibilityEnumId').list()) {
+                        if (book.visibilityEnumId === 'CbvShared') shared.push(book.contactBookId)
+                        else if (book.ownerUserId === userId) readable.add(book.contactBookId)
+                    }
+                    if (shared.length) {
+                        const groups = ['ALL_USERS'].concat(ids(ec.entity.find('moqui.security.UserGroupMember').condition('userId', userId)
+                                .condition(cf.makeConditionDate('fromDate', 'thruDate', now)).selectField('userGroupId').list(), 'userGroupId'))
+                        for (const share of ec.entity.find('mantle.party.contact.ContactBookShare').condition('contactBookId', 'in', shared)
+                                .condition(cf.makeCondition([cf.makeCondition('userId', 'equals', userId), cf.makeCondition('userGroupId', 'in', groups)], 'or'))
+                                .condition(cf.makeConditionDate('fromDate', 'thruDate', now)).selectField('contactBookId').list()) readable.add(share.contactBookId)
+                    }
+                    for (const member of members) if (readable.has(member.contactBookId)) contacts.add(member.partyId)
+                }
+            }
+
+            // the directory of the user's organizations: a party with a role, owned by none, _NA_ or one of those organizations
+            const rest = Array.from(others.keys()).filter((id) => !contacts.has(id))
+            if (rest.length) {
+                const withRole = new Set(ids(ec.entity.find('mantle.party.PartyRole').condition('partyId', 'in', rest).selectField('partyId').list(), 'partyId'))
+                const owners = new Set(['_NA_'])
+                if (user.partyId && withRole.size) {
+                    const orgIds = ids(ec.entity.find('mantle.party.PartyRelationship').condition('fromPartyId', user.partyId)
+                            .condition('relationshipTypeEnumId', 'in', ['PrtAgent', 'PrtEmployee', 'PrtMember']).condition('toRoleTypeId', 'OrgInternal')
+                            .condition(cf.makeConditionDate('fromDate', 'thruDate', now)).selectField('toPartyId').list(), 'toPartyId')
+                    orgIds.forEach((id) => owners.add(id))
+                    if (orgIds.length) ids(ec.entity.find('mantle.party.PartyRelationship').condition('relationshipTypeEnumId', 'PrtOrgRollup')
+                            .condition('toPartyId', 'in', orgIds).condition(cf.makeConditionDate('fromDate', 'thruDate', now))
+                            .selectField('fromPartyId').list(), 'fromPartyId').forEach((id) => owners.add(id))
+                }
+                for (const id of rest) {
+                    const owner = others.get(id).ownerPartyId
+                    if (withRole.has(id) && (!owner || owners.has(owner))) contacts.add(id)
+                }
+            }
+
+            contactAddressList = wanted.filter((address) => Array.from(partiesOf.get(address) || []).some((id) => contacts.has(id)))
+        ]]></script></actions>
+    </service>
 </services>

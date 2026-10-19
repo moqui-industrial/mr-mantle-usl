@@ -607,7 +607,8 @@ along with this software (see the LICENSE.md file). If not, see
             from its URL and parsed by the framework's ICalendar tool (parse), and its events written into its calendar
             (store#CalendarFeedEvents), each subscription in a transaction of its own. A subscription that fails gets
             lastFetchStatus error and the reason in lastFetchError, and the rest go on. Without the tool nothing is
-            fetched (logged once).
+            fetched (logged once). The job runs with authorization disabled and fetches every subscription due; a user
+            fetches only a subscription of a calendar they own or manage (calendarId, check#CalendarAccess CalpManage).
         </description>
         <in-parameters>
             <parameter name="calendarId"><description>Only this subscription</description></parameter>
@@ -621,6 +622,13 @@ along with this software (see the LICENSE.md file). If not, see
         <actions><script><![CDATA[
             fetchedCount = 0
             failedCount = 0
+            // the job (authorization disabled) fetches them all; a user only a calendar they manage
+            if (!ec.artifactExecution.authzDisabled()) {
+                if (!calendarId) { ec.message.addError('Name the subscription calendar to fetch (calendarId)'); return }
+                ec.service.sync().name('mantle.work.CalendarServices.check#CalendarAccess').parameters({calendarId: calendarId,
+                    permissionEnumId: 'CalpManage'}).call()
+                if (ec.message.hasError()) return
+            }
             toolAvailable = ec.factory.getToolFactory('ICalendar') != null
             if (!toolAvailable) {
                 let logged = false
@@ -669,7 +677,8 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="fetch" noun="CalendarSubscription" authenticate="anonymous-all">
         <description>One subscription of the fetch job: GET its URL (webcal as https) and read what it answered with
-            store#CalendarFeedText. Errors are the caller's to record.</description>
+            store#CalendarFeedText. Errors are the caller's to record. With authorization on, only for a calendar the user
+            owns or manages (check#CalendarAccess CalpManage).</description>
         <in-parameters><parameter name="calendarId" required="true"/></in-parameters>
         <out-parameters>
             <parameter name="createdCount" type="Integer"/>
@@ -677,6 +686,11 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="removedCount" type="Integer"/>
         </out-parameters>
         <actions><script><![CDATA[
+            if (!ec.artifactExecution.authzDisabled()) {
+                ec.service.sync().name('mantle.work.CalendarServices.check#CalendarAccess').parameters({calendarId: calendarId,
+                    permissionEnumId: 'CalpManage'}).call()
+                if (ec.message.hasError()) return
+            }
             const subscription = ec.entity.find('mantle.work.calendar.CalendarSubscription').condition('calendarId', calendarId).one()
             if (subscription == null || !subscription.url) { ec.message.addError(`Calendar subscription ${calendarId} not found`); return }
             if (ec.factory.getToolFactory('ICalendar') == null) { ec.message.addError('The ICalendar tool is not available'); return }

@@ -1,7 +1,8 @@
 // Record links, the record timeline, followers and mentions (mantle.party.CommunicationServices link#CommunicationEventRecord,
 // get#RecordTimeline, follow#Record, log#RecordNote, notify#RecordMention; mantle.work.WorkEffortServices.link#WorkEffortRecord),
-// find#PartyCommunicationEvents with the recipient rows and without mailbox posts, and add#WikiPageComment's
-// communicationEventId: the Mantle side of IronStone M3 (Chatter). New spec, no Groovy original.
+// find#PartyCommunicationEvents with the recipient rows and without mailbox posts, add#WikiPageComment's
+// communicationEventId, and the joins a wiki page's delete takes first (delete#WikiPageJoins): the Mantle side of IronStone
+// M3 (Chatter). New spec, no Groovy original.
 function errorOf(name, params) {
     try { call(name, params) } catch (e) { ec.message.clearErrors(); return String(e.message) }
     return null
@@ -431,5 +432,30 @@ feature("unfollow removes the follower", {
     },
     then({ followers }) {
         followers == ["EX_JOHN_DOE"]
+    },
+})
+
+feature("deleting a wiki page takes its comment, activity and follower joins first (the SECA on delete#WikiPage); the comments stay", {
+    when() {
+        at(17)
+        call("mantle.party.CommunicationServices.follow#Record", { recordEntityName: WIKI, recordId: wikiPageId })
+        linkActivity("RL-A3", WIKI, wikiPageId)
+        const eventIds = ec.entity.find("mantle.party.communication.WikiPageCommunicationEvent").condition("wikiPageId", wikiPageId).list()
+                .map((row) => row.communicationEventId)
+        const joins = () => ({ comments: count("mantle.party.communication.WikiPageCommunicationEvent", { wikiPageId }),
+            activities: count("mantle.work.effort.WikiPageWorkEffort", { wikiPageId }),
+            followers: count("mantle.party.communication.RecordFollower", { recordEntityName: WIKI, recordId: wikiPageId }) })
+        const before = joins()
+        call("org.moqui.impl.WikiServices.delete#WikiPage", { wikiPageId })
+        return { before, after: joins(), page: count(WIKI, { wikiPageId }), eventIds,
+            events: ec.entity.find("mantle.party.communication.CommunicationEvent").condition("communicationEventId", "in", eventIds).count() }
+    },
+    then({ before, after, page, eventIds, events }) {
+        before.comments == 2
+        before.activities == 1
+        before.followers == 1
+        after == { comments: 0, activities: 0, followers: 0 }
+        page == 0
+        events == eventIds.length
     },
 })
