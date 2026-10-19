@@ -6,6 +6,7 @@ const PROJECT = "GITP"
 let repositoryId, taskOne, taskTwo, taskThree
 
 spec({
+    requires: ["git"],
     stepwise: true,
     setupSpec() { login("john.doe") },
     setup() { ec.artifactExecution.disableAuthz() },
