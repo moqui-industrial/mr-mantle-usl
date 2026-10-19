@@ -184,6 +184,35 @@ along with this software (see the LICENSE.md file). If not, see
             showAlert="N" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="${authorName} on ${recordName}: ${summary}" linkTemplate=""/>
 
+    <!-- Notification: the other topics of the IronStone shell. No link templates: the app passes the link. Each title names
+        the message fields its sender puts in the message map, besides recordEntityName and recordId when it is on a
+        record. A topic that waits on a decision (an approval) is an app's, with the framework's approveServiceName and
+        refuseServiceName on its NotificationTopic; those services get recordEntityName, recordId, the message's
+        messageJson map and, for a refuse, reason. -->
+    <!-- a mention in a chat room: roomName, chatRoomId, authorUserId, authorName, summary -->
+    <moqui.security.user.NotificationTopic topic="ChatMention" description="Mentioned in a Chat Room" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${authorName} mentioned you in ${roomName}: ${summary}" linkTemplate=""/>
+    <!-- a task, activity or event coming due or starting: workEffortId, workEffortName, whenText (the due or start time in
+        the user's words, such as "due today" or "at 2:30 PM") -->
+    <moqui.security.user.NotificationTopic topic="WorkEffortReminder" description="Task or Event Reminder" typeString="info"
+            showAlert="Y" alertNoAutoHide="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Reminder: ${workEffortName}, ${whenText}" linkTemplate=""/>
+    <!-- a page to review: wikiSpaceId, pagePath, pageName, authorUserId, authorName -->
+    <moqui.security.user.NotificationTopic topic="WikiPageReview" description="Page to Review" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${authorName} asked you to review ${pageName}" linkTemplate=""/>
+    <!-- a file or folder shared with the user: fileName, location, authorUserId, authorName -->
+    <moqui.security.user.NotificationTopic topic="FileShare" description="File Shared with You" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${authorName} shared ${fileName} with you" linkTemplate=""/>
+    <!-- new mail in the Inbox (mail, internal messages and the mailbox posts delivered to the Inbox): fromName, subject,
+        communicationEventId or emailMessageId. An alert only: the Inbox count and the Inbox keep it, not the notification
+        list. -->
+    <moqui.security.user.NotificationTopic topic="NewMail" description="New Mail" typeString="info"
+            showAlert="Y" persistOnSend="N" receiveNotifications="Y" isPrivate="Y"
+            titleTemplate="${fromName}: ${subject}" linkTemplate=""/>
+
     <!-- ========== Registered Services ========== -->
 
     <!-- Registered Services: Store Promotion -->

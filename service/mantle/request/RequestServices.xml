@@ -180,6 +180,64 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
+    <service verb="get" noun="UserTodayRequests">
+        <description>
+            A today-source for mantle.work.WorkEffortServices.get#UserTodayItems: the open requests (not completed or
+            cancelled) of which the party (the user's, the current user's by default) is the Assignee, with a response due
+            (responseRequiredDate) before thruDate, the soonest first; one due before fromDate is overdue. fromDate and
+            thruDate default to the start of today and of tomorrow. Each item has the Today item's shape: kind request,
+            requestId, title, dueDate, overdue, priority, statusId and record (the request).
+        </description>
+        <in-parameters>
+            <parameter name="userId"/>
+            <parameter name="partyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="items" type="List"><parameter name="item" type="Map"/></parameter>
+            <parameter name="label"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            items = []
+            label = 'Requests'
+            if (!partyId) partyId = userId ? ec.entity.find('moqui.security.UserAccount').condition('userId', userId).disableAuthz().one()?.partyId
+                    : ec.user.userAccount?.partyId
+            if (!partyId) return
+            const toMillis = (value) => {
+                if (value == null || value === '') return null
+                if (value instanceof Date) return value.getTime()
+                const text = String(value)
+                return /^-?\d+$/.test(text) ? Number(text) : Date.parse(text)
+            }
+            if (!fromDate || !thruDate) {
+                const today = ec.user.getPeriodRange('day', '0', String(toMillis(ec.user.nowTimestamp)))
+                if (!fromDate) fromDate = today[0]
+                if (!thruDate) thruDate = today[1]
+            }
+            const fromMillis = toMillis(fromDate)
+            const cf = ec.entity.conditionFactory
+            const found = ec.entity.find('mantle.request.RequestAndParty').condition('partyId', partyId).condition('roleTypeId', 'Assignee')
+                    .condition(cf.makeConditionDate('fromDate', 'thruDate', ec.user.nowTimestamp))
+                    .condition(cf.makeCondition('statusId', 'not-in', ['ReqCompleted', 'ReqCancelled'], true))
+                    .condition(cf.makeCondition('responseRequiredDate', 'less', new Date(toMillis(thruDate))))
+                    .selectField('requestId').selectField('requestName').selectField('responseRequiredDate').selectField('priority')
+                    .selectField('statusId').orderBy('responseRequiredDate').list()
+            const seen = new Set()
+            for (const request of found) {
+                if (seen.has(request.requestId)) continue
+                seen.add(request.requestId)
+                const due = toMillis(request.responseRequiredDate)
+                items.push({kind: 'request', requestId: request.requestId, workEffortId: null, title: request.requestName || request.requestId,
+                    dueDate: new Date(due), overdue: due < fromMillis, startDate: null, endDate: null, allDay: false,
+                    priority: request.priority ?? null, statusId: request.statusId ?? null, assignees: [],
+                    record: {recordEntityName: 'mantle.request.Request', recordId: request.requestId,
+                        recordName: request.requestName ? `Request ${request.requestId} · ${request.requestName}` : `Request ${request.requestId}`},
+                    canUpdate: false, hasCallLink: false, source: null})
+            }
+        ]]></script></actions>
+    </service>
+
     <service verb="add" noun="RequestComment">
         <in-parameters>
             <parameter name="requestId" required="true"/>
