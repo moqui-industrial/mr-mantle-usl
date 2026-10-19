@@ -270,6 +270,21 @@ along with this software (see the LICENSE.md file). If not, see
         <alias-all entity-alias="CEV"/>
         <alias-all entity-alias="CEVP"/>
     </view-entity>
+    <!-- a row per CommunicationEventParty row (none when the event has none), for finding the events a party is from,
+        to, or a party to; the party row's fields are aliased apart from the event's -->
+    <view-entity entity-name="CommunicationEventPartyAndPurpose" package="mantle.party.communication">
+        <member-entity entity-alias="CEV" entity-name="mantle.party.communication.CommunicationEvent"/>
+        <member-entity entity-alias="CEVP" entity-name="mantle.party.communication.CommunicationEventPurpose"
+                join-from-alias="CEV" join-optional="true">
+            <key-map field-name="communicationEventId"/></member-entity>
+        <member-entity entity-alias="CEPTY" entity-name="mantle.party.communication.CommunicationEventParty"
+                join-from-alias="CEV" join-optional="true">
+            <key-map field-name="communicationEventId"/></member-entity>
+        <alias-all entity-alias="CEV"/>
+        <alias-all entity-alias="CEVP"><exclude field="communicationEventId"/></alias-all>
+        <alias name="recipientPartyId" entity-alias="CEPTY" field="partyId"/>
+        <alias name="recipientRoleTypeId" entity-alias="CEPTY" field="roleTypeId"/>
+    </view-entity>
     <view-entity entity-name="WikiPageCommEventDetail" package="mantle.party.communication">
         <member-entity entity-alias="WPCE" entity-name="mantle.party.communication.WikiPageCommunicationEvent"/>
         <member-entity entity-alias="CEV" entity-name="mantle.party.communication.CommunicationEvent" join-from-alias="WPCE">

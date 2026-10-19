@@ -289,6 +289,78 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
+    <service verb="link" noun="WorkEffortRecord">
+        <description>
+            Puts a work effort (an activity: a call, email, to-do or meeting) on a record, its full entity name and
+            single primary key value. The link is the record's own join when it has one (mantle.request.RequestWorkEffort,
+            WikiPageWorkEffort), else a WorkEffortRecord. Linking again changes nothing. With notifyFollowers a new link
+            notifies the record's followers of activities.
+        </description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="recordEntityName" required="true"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="notifyFollowers" type="Boolean" default="false"/>
+            <parameter name="recordUrl"><description>The record's screen, for the follower notification's link</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="linkEntityName"><description>The entity holding the link</description></parameter>
+            <parameter name="created" type="Boolean"><description>True when this call wrote the link</description></parameter>
+        </out-parameters>
+        <actions><script><![CDATA[
+            created = false
+            const workEffort = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
+            if (workEffort == null) { ec.message.addError(`Work effort ${workEffortId} not found`); return }
+            const info = ec.service.sync().name('mantle.party.CommunicationServices.get#RecordLinkInfo')
+                    .parameters({recordEntityName: recordEntityName, recordId: recordId}).call()
+            if (ec.message.hasError()) return
+            recordEntityName = info.recordEntityName
+
+            let keys
+            if (info.workEffortJoin) {
+                linkEntityName = info.workEffortJoin.entityName
+                keys = {workEffortId: workEffortId, [info.workEffortJoin.keyField]: recordId}
+            } else {
+                linkEntityName = 'mantle.work.effort.WorkEffortRecord'
+                keys = {workEffortId: workEffortId, recordEntityName: recordEntityName, recordId: recordId}
+            }
+            if (ec.entity.find(linkEntityName).condition(keys).one() != null) return
+            const fields = info.workEffortJoin ? keys : Object.assign({linkedByUserId: ec.user.userId, linkedDate: ec.user.nowTimestamp}, keys)
+            ec.service.sync().name('create#' + linkEntityName).parameters(fields).call()
+            if (ec.message.hasError()) return
+            created = true
+
+            if (notifyFollowers) ec.service.sync().name('mantle.party.CommunicationServices.notify#RecordFollowers').parameters({
+                recordEntityName: recordEntityName, recordId: recordId, kind: 'activities', workEffortId: workEffortId,
+                subject: workEffort.workEffortName, body: workEffort.description, recordUrl: recordUrl}).call()
+        ]]></script></actions>
+    </service>
+    <service verb="unlink" noun="WorkEffortRecord">
+        <description>Takes a work effort off a record: the own join row or the WorkEffortRecord.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="recordEntityName" required="true"/>
+            <parameter name="recordId" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="unlinked" type="Boolean"><description>True when a link row was removed</description></parameter></out-parameters>
+        <actions><script><![CDATA[
+            unlinked = false
+            const info = ec.service.sync().name('mantle.party.CommunicationServices.get#RecordLinkInfo')
+                    .parameters({recordEntityName: recordEntityName, recordId: recordId}).call()
+            if (ec.message.hasError()) return
+            const removeRows = (entityName, keys) => {
+                for (const row of ec.entity.find(entityName).condition(keys).list()) {
+                    ec.service.sync().name('delete#' + entityName).parameters(row.getPrimaryKeys()).call()
+                    if (ec.message.hasError()) return
+                    unlinked = true
+                }
+            }
+            if (info.workEffortJoin) removeRows(info.workEffortJoin.entityName, {workEffortId: workEffortId, [info.workEffortJoin.keyField]: recordId})
+            removeRows('mantle.work.effort.WorkEffortRecord', {workEffortId: workEffortId, recordEntityName: info.recordEntityName, recordId: recordId})
+        ]]></script></actions>
+    </service>
+
     <service verb="add" noun="WorkEffortProduct">
         <in-parameters>
             <parameter name="workEffortId" required="true"/>

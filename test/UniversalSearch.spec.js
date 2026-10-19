@@ -145,6 +145,24 @@ feature("without an organization filter every type is searched as before", {
     },
 })
 
+feature("a task result has its name as the title, its id as the code and the IronStone TaskDetail link", {
+    when() {
+        const out = call("mantle.search.UniversalSearchServices.search#Universal", { q: word, entityType: "MantleTask,MantleRequest", limit: 50, highlight: false })
+        const task = out.results.find((result) => result.entityType === "MantleTask" && result.id === "USS-T1")
+        const request = out.results.find((result) => result.entityType === "MantleRequest" && result.id === "USS-R1")
+        return { task, request }
+    },
+    then({ task, request }) {
+        task != null
+        task.title == `${word} assigned task`
+        task.code == "USS-T1"
+        task.url == "/apps/Commons/Tasks/TaskDetail?workEffortId=USS-T1"
+        task.linkLabel == "Task"
+        request.title == `${word} access request`
+        request.url == "/apps/Commons/Requests/RequestDetail?requestId=USS-R1"
+    },
+})
+
 feature("lookup by id finds a request and a communication event", {
     when() {
         const request = call("mantle.GeneralServices.lookup#ById", { lookupId: "USS-R1" })

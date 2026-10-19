@@ -159,6 +159,16 @@ along with this software (see the LICENSE.md file). If not, see
             titleTemplate="High Priority Order ${orderId}:${orderPartSeqId} - Priority ${priority}"
             linkTemplate="/vapps/PopcAdmin/Order/OrderDetail?orderId=${orderId}"/>
 
+    <!-- Notification: a user mentioned in a note or message on a record, and the followers of a record (Chatter;
+        mantle.party.CommunicationServices.notify#RecordMention and notify#RecordFollowers). No link template: the
+        record's screen belongs to the app, so the caller passes it as recordUrl. -->
+    <moqui.security.user.NotificationTopic topic="ChatterMention" description="Mentioned on a Record" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${authorName} mentioned you on ${recordName}: ${summary}" linkTemplate=""/>
+    <moqui.security.user.NotificationTopic topic="RecordFollow" description="Activity on a Followed Record" typeString="info"
+            showAlert="N" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${authorName} on ${recordName}: ${summary}" linkTemplate=""/>
+
     <!-- ========== Registered Services ========== -->
 
     <!-- Registered Services: Store Promotion -->
