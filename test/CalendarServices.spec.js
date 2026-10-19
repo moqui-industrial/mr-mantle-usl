@@ -1,8 +1,8 @@
 // Calendars, events, invitations, free/busy, resource booking and reminders (mantle.work.CalendarServices and
 // mantle.work.EventServices): calendar collections with shares and publish links, get#FullCalendarData over calendars,
 // parties, rooms and equipment, RSVP, invitations to new and changed attendees, get#FreeBusy, book#Resource, the reminder
-// job, the recurrence hook (the framework's ICalendar tool) and the WorkEffortPartyAsset view: the Mantle side of
-// IronStone M7. New spec, no Groovy original.
+// job, recurrence, feeds, export and import and the iMIP REPLY (the framework's ICalendar tool; no feed is fetched over
+// the network) and the WorkEffortPartyAsset view: the Mantle side of IronStone M7. New spec, no Groovy original.
 function errorOf(name, params) {
     try { call(name, params) } catch (e) { ec.message.clearErrors(); return String(e.message) }
     return null
@@ -22,12 +22,30 @@ const user = {}
 const cal = {}
 const we = {}
 let publishToken
+// the scheduler's fetch job would GET the spec's feed URL (https://calendar.example.com/...): it is paused while the
+// spec runs, so no spec step reaches the network
+const FETCH_JOB = "fetch_CalendarSubscriptions"
+let fetchJobPaused = null
 
 spec({
     stepwise: true,
     setupSpec() {
         login("john.doe")
         setTime(8)
+        ec.artifactExecution.disableAuthz()
+        try {
+            const job = ec.entity.find("moqui.service.job.ServiceJob").condition("jobName", FETCH_JOB).one()
+            if (job != null) {
+                fetchJobPaused = job.paused ?? "N"
+                call("update#moqui.service.job.ServiceJob", { jobName: FETCH_JOB, paused: "Y" })
+            }
+        } finally { ec.artifactExecution.enableAuthz() }
+    },
+    cleanupSpec() {
+        if (fetchJobPaused == null) return
+        ec.artifactExecution.disableAuthz()
+        try { call("update#moqui.service.job.ServiceJob", { jobName: FETCH_JOB, paused: fetchJobPaused }) }
+        finally { ec.artifactExecution.enableAuthz() }
     },
     setup() { ec.artifactExecution.disableAuthz() },
     cleanup() {
@@ -51,6 +69,8 @@ const notices = (userId, topic) => Array.from(ec.entity.find("moqui.security.use
 const week = (params) => call(`${EV}.get#FullCalendarData`, Object.assign({ start: "2027-05-09", end: "2027-05-15" }, params)).eventList
 const namesOf = (events) => events.map((item) => item.title)
 const millis = (value) => value == null ? null : (/^-?\d+$/.test(String(value)) ? Number(value) : Date.parse(String(value)))
+// a date field (epoch millis text of its UTC day) as yyyy-MM-dd
+const dayText = (value) => value == null ? null : new Date(millis(value)).toISOString().substring(0, 10)
 
 feature("four users of an organization, an outside contact, two meeting rooms (one with an approver) and a projector", {
     when() {
@@ -523,7 +543,20 @@ feature("a recurring event: without the ICalendar tool the series' first instanc
     },
 })
 
-feature("feeds: a subscription is recorded, the fetch job without the ICalendar tool fetches nothing, parsed events are stored", {
+// iCalendar text as a feed or a file has it, CRLF line ends
+const icsOf = (lines) => lines.join("\r\n") + "\r\n"
+// the feed as its URL would answer it after the restore below: the weekly series (now with a location) and its moved
+// instance, by the same UIDs and RECURRENCE-ID
+const feedIcs = icsOf(["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Mantle CalendarServices spec//EN", "X-WR-CALNAME:Holidays",
+    "BEGIN:VEVENT", "UID:feed-1@example.com", "DTSTAMP:20270501T120000Z", "DTSTART;TZID=America/Chicago:20270511T080000",
+    "DTEND;TZID=America/Chicago:20270511T090000", "RRULE:FREQ=WEEKLY", "SUMMARY:Feed weekly", "LOCATION:Feed room", "STATUS:CONFIRMED",
+    "END:VEVENT",
+    "BEGIN:VEVENT", "UID:feed-1@example.com", "DTSTAMP:20270501T120000Z", "RECURRENCE-ID;TZID=America/Chicago:20270511T080000",
+    "DTSTART;TZID=America/Chicago:20270511T100000", "DTEND;TZID=America/Chicago:20270511T110000", "SUMMARY:Feed weekly (later)",
+    "END:VEVENT",
+    "END:VCALENDAR"])
+
+feature("feeds: a subscription is recorded, parsed events are stored, the feed's text is read by the ICalendar tool, and a fetched feed is not due", {
     when() {
         setTime(14)
         const out = as("Ada", () => {
@@ -533,12 +566,10 @@ feature("feeds: a subscription is recorded, the fetch job without the ICalendar 
                 badUrl: errorOf(`${CAL}.subscribe#Calendar`, { url: "ftp://calendar.example.com/x.ics" }),
                 google: errorOf(`${CAL}.subscribe#Calendar`, { providerEnumId: "CspGoogle" }),
                 addToFeed: errorOf(`${CAL}.add#CalendarEvent`, { calendarId: cal.feed, workEffortId: we.focus }),
+                importToFeed: errorOf(`${CAL}.import#Calendar`, { calendarId: cal.feed, fileText: feedIcs }),
                 list: call(`${CAL}.get#UserCalendars`, {}).calendarList,
-                exportError: errorOf(`${CAL}.export#Calendar`, { calendarId: cal.projects }),
-                importError: errorOf(`${CAL}.import#Calendar`, { calendarId: cal.projects, fileText: "BEGIN:VCALENDAR\nEND:VCALENDAR\n" }),
             }
         })
-        const fetched = call(`${CAL}.fetch#CalendarSubscriptions`, { force: true })
         const subscription = ec.entity.find("mantle.work.calendar.CalendarSubscription").condition("calendarId", cal.feed).one()
         // what the tool's parse gives: a weekly series, an instance of it moved, and an all-day day
         const feedEvents = [
@@ -553,20 +584,32 @@ feature("feeds: a subscription is recorded, the fetch job without the ICalendar 
         setTime(14.1)
         const restored = call(`${CAL}.store#CalendarFeedEvents`, { calendarId: cal.feed, eventList: feedEvents.slice(0, 2), replaceAll: true })
         const holiday = ec.entity.find("mantle.work.effort.WorkEffort").condition("universalId", "feed-2@example.com").one()
-        return { out, fetched, subscription, stored, shown, restored, holiday }
+        // the fetch's read of what the URL answered, with the text given here instead of a GET: the same two events, matched
+        // by UID and RECURRENCE-ID, so updated rather than made again
+        setTime(14.2)
+        const fromText = call(`${CAL}.store#CalendarFeedText`, { calendarId: cal.feed, feedText: feedIcs })
+        const fetchedSubscription = ec.entity.find("mantle.work.calendar.CalendarSubscription").condition("calendarId", cal.feed).one()
+        const feedRows = Array.from(ec.entity.find("mantle.work.calendar.CalendarWorkEffortDetail").condition("calendarId", cal.feed).list())
+        const seriesRow = feedRows.find((row) => row.workEffortName === "Feed weekly")
+        const laterRow = feedRows.find((row) => row.workEffortName === "Feed weekly (later)")
+        const seriesRecurrence = ec.entity.find("mantle.work.effort.WorkEffortRecurrence").condition("workEffortId", seriesRow?.workEffortId).one()
+        // the fetch job: a subscription read within its refreshMinutes is not due, so its URL is not fetched
+        setTime(14.3)
+        const notDue = call(`${CAL}.fetch#CalendarSubscriptions`, { calendarId: cal.feed })
+        const afterJob = ec.entity.find("mantle.work.calendar.CalendarSubscription").condition("calendarId", cal.feed).one()
+        return { out, subscription, stored, shown, restored, holiday, fromText, fetchedSubscription, feedRows, seriesRow, laterRow,
+            seriesRecurrence, notDue, afterJob }
     },
-    then({ out, fetched, subscription, stored, shown, restored, holiday }) {
+    then({ out, subscription, stored, shown, restored, holiday, fromText, fetchedSubscription, feedRows, seriesRow, laterRow,
+            seriesRecurrence, notDue, afterJob }) {
         out.badUrl.includes("http, https or webcal URL")
         out.google.includes("not available yet")
         out.addToFeed.includes("come from its feed")
+        out.importToFeed.includes("come from its feed")
         out.list.find((entry) => entry.calendarId === cal.feed).group == "subscription"
         out.list.find((entry) => entry.calendarId === cal.feed).calendarName == "calendar.example.com"
         out.list.find((entry) => entry.calendarId === cal.feed).subscription.url == "webcal://calendar.example.com/holidays.ics"
         out.list.find((entry) => entry.calendarId === cal.feed).subscription.refreshMinutes == 60
-        out.exportError.includes("not available yet")
-        out.importError.includes("not available yet")
-        fetched.toolAvailable == (ec.factory.getToolFactory("ICalendar") != null)
-        fetched.fetchedCount == 0
         subscription.lastFetchDate == null
         stored.createdCount == 3
         stored.failedCount == 1
@@ -579,6 +622,106 @@ feature("feeds: a subscription is recorded, the fetch job without the ICalendar 
         restored.updatedCount == 2
         restored.removedCount == 1
         holiday.statusId == "WeCancelled"
+        fromText.createdCount == 0
+        fromText.updatedCount == 2
+        fromText.removedCount == 0
+        fromText.failedCount == 0
+        feedRows.length == 2
+        seriesRow.location == "Feed room"
+        seriesRow.statusId == "WeApproved"
+        millis(seriesRow.estimatedStartDate) == at(24 + 8).getTime()
+        millis(seriesRow.estimatedCompletionDate) == at(24 + 9).getTime()
+        seriesRecurrence.rrule == "FREQ=WEEKLY"
+        seriesRecurrence.timeZone == "America/Chicago"
+        millis(laterRow.estimatedStartDate) == at(24 + 10).getTime()
+        fetchedSubscription.lastFetchStatus == "ok"
+        fetchedSubscription.lastFetchError == null
+        millis(fetchedSubscription.lastFetchDate) == at(14.2).getTime()
+        notDue.toolAvailable == true
+        notDue.fetchedCount == 0
+        notDue.failedCount == 0
+        millis(afterJob.lastFetchDate) == at(14.2).getTime()
+    },
+})
+
+// a weekly series with its third instance moved to the afternoon, and a two-day all-day event
+const importIcs = icsOf(["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Mantle CalendarServices spec//EN", "CALSCALE:GREGORIAN",
+    "BEGIN:VEVENT", "UID:import-weekly@example.com", "DTSTAMP:20270501T120000Z", "DTSTART;TZID=America/Chicago:20270512T090000",
+    "DTEND;TZID=America/Chicago:20270512T100000", "RRULE:FREQ=WEEKLY;COUNT=4", "SUMMARY:Imported planning", "LOCATION:Room 7",
+    "DESCRIPTION:Plans for the week\\, with the team", "END:VEVENT",
+    "BEGIN:VEVENT", "UID:import-weekly@example.com", "DTSTAMP:20270501T120000Z", "RECURRENCE-ID;TZID=America/Chicago:20270519T090000",
+    "DTSTART;TZID=America/Chicago:20270519T140000", "DTEND;TZID=America/Chicago:20270519T150000",
+    "SUMMARY:Imported planning (afternoon)", "END:VEVENT",
+    "BEGIN:VEVENT", "UID:import-days@example.com", "DTSTAMP:20270501T120000Z", "DTSTART;VALUE=DATE:20270513", "DTEND;VALUE=DATE:20270515",
+    "SUMMARY:Imported offsite", "TRANSP:TRANSPARENT", "END:VEVENT",
+    "END:VCALENDAR"])
+
+feature("export#Calendar writes an iCalendar file that reads back through the ICalendar tool; import#Calendar reads a series, its moved instance and an all-day event", {
+    when() {
+        setTime(14.5)
+        return as("Ada", () => {
+            const exported = call(`${CAL}.export#Calendar`, { calendarId: cal.projects })
+            const reread = ec.factory.getTool("ICalendar").parse(exported.fileText)
+            cal.imported = call(`${CAL}.create#Calendar`, { calendarName: "Ada Imported", color: "#8e24aa" }).calendarId
+            const imported = call(`${CAL}.import#Calendar`, { calendarId: cal.imported, fileText: importIcs })
+            const rows = Array.from(ec.entity.find("mantle.work.calendar.CalendarWorkEffortDetail").condition("calendarId", cal.imported).list())
+            const series = rows.find((row) => row.universalId === "import-weekly@example.com" && row.workEffortName === "Imported planning")
+            const moved = rows.find((row) => row.workEffortName === "Imported planning (afternoon)")
+            const days = rows.find((row) => row.universalId === "import-days@example.com")
+            const recurrence = ec.entity.find("mantle.work.effort.WorkEffortRecurrence").condition("workEffortId", series?.workEffortId).one()
+            const link = ec.entity.find("mantle.work.effort.WorkEffortAssoc").condition("workEffortId", series?.workEffortId)
+                    .condition("toWorkEffortId", moved?.workEffortId).condition("workEffortAssocTypeEnumId", "WeatRecurrenceInstance").one()
+            const shown = call(`${EV}.get#FullCalendarData`, { start: "2027-05-09", end: "2027-05-22", calendarIdList: [cal.imported], partyId: "_NA_" })
+                    .eventList.map((item) => [item.title.replace(/ \[.*\]$/, ""), item.start])
+            // the same file again updates the events it made
+            setTime(14.6)
+            const again = call(`${CAL}.import#Calendar`, { calendarId: cal.imported, fileText: importIcs })
+            const rowsAgain = ec.entity.find("mantle.work.calendar.CalendarWorkEffort").condition("calendarId", cal.imported).count()
+            const benImport = as("Ben", () => errorOf(`${CAL}.import#Calendar`, { calendarId: cal.projects, fileText: importIcs }))
+            return { exported, reread, imported, rows, series, moved, days, recurrence, link, shown, again, rowsAgain, benImport }
+        })
+    },
+    then({ exported, reread, imported, rows, series, moved, days, recurrence, link, shown, again, rowsAgain, benImport }) {
+        exported.contentType == "text/calendar"
+        exported.fileName == "Ada Projects.ics"
+        exported.fileText.startsWith("BEGIN:VCALENDAR\r\n")
+        exported.fileText.includes("METHOD:PUBLISH")
+        exported.fileText.includes("BEGIN:VTIMEZONE")
+        reread.method == "PUBLISH"
+        reread.calendarName == "Ada Projects"
+        reread.events.map((item) => item.summary).sort() == ["Design review", "Focus time"]
+        reread.events.find((item) => item.summary === "Design review").start == at(10.5).getTime()
+        reread.events.find((item) => item.summary === "Design review").end == at(11.5).getTime()
+        reread.events.find((item) => item.summary === "Design review").timeZone == "America/Chicago"
+        reread.events.find((item) => item.summary === "Design review").uid == `mantle-${we.review}`
+        reread.events.find((item) => item.summary === "Design review").organizer.email == "cs.ada@example.com"
+        reread.events.find((item) => item.summary === "Design review").attendees.map((person) => `${person.email}:${person.partstat}`).sort() ==
+            ["cs.ben@example.com:ACCEPTED", "cs.cy@example.com:TENTATIVE", "xena.outside@example.com:NEEDS-ACTION"]
+        reread.events.find((item) => item.summary === "Focus time").start == at(13).getTime()
+        imported.createdCount == 3
+        imported.updatedCount == 0
+        imported.failedCount == 0
+        rows.length == 3
+        series.location == "Room 7"
+        series.description == "Plans for the week, with the team"
+        millis(series.estimatedStartDate) == at(48 + 9).getTime()
+        millis(series.estimatedCompletionDate) == at(48 + 10).getTime()
+        recurrence.rrule == "FREQ=WEEKLY;COUNT=4"
+        recurrence.timeZone == "America/Chicago"
+        millis(moved.estimatedStartDate) == at(7 * 24 + 48 + 14).getTime()
+        moved.universalId == "import-weekly@example.com"
+        millis(link.fromDate) == at(7 * 24 + 48 + 9).getTime()
+        dayText(days.allDayStart) == "2027-05-13"
+        dayText(days.allDayEnd) == "2027-05-14"
+        days.estimatedStartDate == null
+        // the series' Wednesday instances in the two weeks, the third moved to 14:00, and the two-day event
+        shown.filter((entry) => entry[0].startsWith("Imported planning")).sort((a, b) => (a[1] < b[1] ? -1 : 1)) ==
+            [["Imported planning", "2027-05-12T09:00:00"], ["Imported planning (afternoon)", "2027-05-19T14:00:00"]]
+        shown.filter((entry) => entry[0] === "Imported offsite") == [["Imported offsite", "2027-05-13"]]
+        again.createdCount == 0
+        again.updatedCount == 3
+        rowsAgain == 3
+        benImport.includes("You need permission to edit the calendar Ada Projects")
     },
 })
 
@@ -640,5 +783,44 @@ feature("deleting a calendar keeps its events; deleting a subscription cancels t
         feed.cancelledEventCount == 2
         ec.entity.find("mantle.work.calendar.CalendarSubscription").condition("calendarId", cal.feed).one() == null
         notMine.includes("You need permission to manage")
+    },
+})
+
+feature("an organizer outside gets an iMIP REPLY by email that carries the replying attendee only, with the answer", {
+    when() {
+        setTime(17)
+        // Xena (an outside contact, no user) organizes; Ben and Cy are invited
+        const visit = event("Supplier visit", { ownerPartyId: party.Xena, estimatedStartDate: at(30 * 24 + 10), estimatedCompletionDate: at(30 * 24 + 11) })
+        invite(visit, party.Ben)
+        invite(visit, party.Cy)
+        const maps = call(`${EV}.get#EventIcsMaps`, { workEffortIdList: [visit] }).eventMapList
+        const ben = as("Ben", () => call(`${EV}.respond#EventInvitation`, { workEffortId: visit, response: "accept" }))
+        setTime(17.01)
+        const cy = as("Cy", () => call(`${EV}.respond#EventInvitation`, { workEffortId: visit, response: "decline", message: "Away that week" }))
+        const tool = ec.factory.getTool("ICalendar")
+        // the ATTENDEE lines of the text, its folded lines joined
+        const attendeeLines = (text) => String(text).replace(/\r\n[ \t]/g, "").split("\r\n").filter((line) => /^ATTENDEE[;:]/.test(line))
+        const emails = Array.from(ec.entity.find("moqui.basic.email.EmailMessage").condition("toAddresses", "xena.outside@example.com")
+                .condition("emailTemplateId", "MANTLE_CALENDAR_EMAIL").list()).map((row) => row.subject)
+        return { maps, ben, cy, benReply: tool.parse(ben.replyIcsText), cyReply: tool.parse(cy.replyIcsText),
+            benLines: attendeeLines(ben.replyIcsText), cyLines: attendeeLines(cy.replyIcsText), emails }
+    },
+    then({ maps, ben, cy, benReply, cyReply, benLines, cyLines, emails }) {
+        // the event has both attendees; each REPLY names its replier only
+        maps[0].attendees.length == 2
+        ben.notifiedUserIds.length == 0
+        benReply.method == "REPLY"
+        benReply.events.length == 1
+        benReply.events[0].summary == "Supplier visit"
+        benReply.events[0].organizer.email == "xena.outside@example.com"
+        benReply.events[0].attendees.map((person) => `${person.email}:${person.partstat}`) == ["cs.ben@example.com:ACCEPTED"]
+        benLines.length == 1
+        benLines[0].includes("PARTSTAT=ACCEPTED")
+        benLines[0].endsWith(":mailto:cs.ben@example.com")
+        cyReply.events[0].attendees.map((person) => `${person.email}:${person.partstat}`) == ["cs.cy@example.com:DECLINED"]
+        cyLines.length == 1
+        cyLines[0].includes("PARTSTAT=DECLINED")
+        emails.includes("Ben Calendarspec accepted: Supplier visit")
+        emails.includes("Cy Calendarspec declined: Supplier visit")
     },
 })

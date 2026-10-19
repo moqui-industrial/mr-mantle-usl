@@ -34,7 +34,7 @@ along with this software (see the LICENSE.md file). If not, see
         </description>
         <in-parameters>
             <parameter name="contactFile" type="org.apache.commons.fileupload2.core.FileItem"/>
-            <parameter name="fileText"/>
+            <parameter name="fileText" allow-html="any"><description>The file's text, parsed by the framework tool, never shown as HTML; real vCard and ICS files hold &lt; (Apple labels, HTML descriptions)</description></parameter>
             <parameter name="fileLocation"/>
             <parameter name="fileName"/>
             <parameter name="characterSet" default-value="UTF-8"/>
@@ -62,7 +62,7 @@ along with this software (see the LICENSE.md file). If not, see
             field it maps to and sample values, the first rows, and the row count.</description>
         <in-parameters>
             <parameter name="contactFile" type="org.apache.commons.fileupload2.core.FileItem"/>
-            <parameter name="fileText"/>
+            <parameter name="fileText" allow-html="any"><description>The file's text, parsed by the framework tool, never shown as HTML; real vCard and ICS files hold &lt; (Apple labels, HTML descriptions)</description></parameter>
             <parameter name="fileLocation"/>
             <parameter name="fileName"/>
             <parameter name="characterSet" default-value="UTF-8"/>
@@ -104,8 +104,9 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters><parameter name="contact" type="Map" required="true"/></in-parameters>
         <out-parameters>
             <parameter name="matchedPartyId"/>
+            <parameter name="matchedPseudoId"><description>The matched party's pseudoId, the id to show</description></parameter>
             <parameter name="matchReason"><description>email, phone or name</description></parameter>
-            <parameter name="matchedName"/>
+            <parameter name="matchedName"><description>The matched party's name alone (PartyNameOnlyTemplate), without an id</description></parameter>
         </out-parameters>
         <actions><script><![CDATA[
             const cf = ec.entity.conditionFactory
@@ -118,8 +119,9 @@ along with this software (see the LICENSE.md file). If not, see
             }
             const found = (party, reason) => {
                 matchedPartyId = party.partyId
+                matchedPseudoId = party.pseudoId || party.partyId
                 matchReason = reason
-                matchedName = ec.resource.expand('PartyNameTemplate', '', party)
+                matchedName = (ec.resource.expand('PartyNameOnlyTemplate', '', party) || '').trim() || matchedPseudoId
             }
             for (const email of contact.emails || []) {
                 if (!email.emailAddress) continue
@@ -168,7 +170,7 @@ along with this software (see the LICENSE.md file). If not, see
         </description>
         <in-parameters>
             <parameter name="contactFile" type="org.apache.commons.fileupload2.core.FileItem"/>
-            <parameter name="fileText"/>
+            <parameter name="fileText" allow-html="any"><description>The file's text, parsed by the framework tool, never shown as HTML; real vCard and ICS files hold &lt; (Apple labels, HTML descriptions)</description></parameter>
             <parameter name="fileLocation"/>
             <parameter name="fileName"/>
             <parameter name="characterSet" default-value="UTF-8"/>
@@ -180,7 +182,7 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters>
             <parameter name="rowList" type="List"><parameter name="row" type="Map"><description>rowNumber, action, matchedPartyId,
-                matchedName, matchReason, matchedRowNumber, name, contact, problems</description></parameter></parameter>
+                matchedPseudoId, matchedName (the name alone), matchReason, matchedRowNumber, name, contact, problems</description></parameter></parameter>
             <parameter name="rowCount" type="Integer"/>
             <parameter name="createCount" type="Integer"/>
             <parameter name="updateCount" type="Integer"/>
@@ -199,7 +201,7 @@ along with this software (see the LICENSE.md file). If not, see
             const seenEmails = new Map()
             for (const row of read.contactList || []) {
                 const contact = row.contact
-                const out = {rowNumber: row.rowNumber, action: 'create', matchedPartyId: null, matchedName: null, matchReason: null,
+                const out = {rowNumber: row.rowNumber, action: 'create', matchedPartyId: null, matchedPseudoId: null, matchedName: null, matchReason: null,
                     matchedRowNumber: null, name: contact.partyTypeEnumId === 'PtyOrganization' ? contact.organizationName
                         : [contact.firstName, contact.lastName].filter((part) => part).join(' '), contact: contact, problems: row.problems || []}
                 if (row.empty) {
@@ -209,7 +211,8 @@ along with this software (see the LICENSE.md file). If not, see
                     if (ec.message.hasError()) return
                     let matched = false
                     if (match.matchedPartyId) {
-                        Object.assign(out, {matchedPartyId: match.matchedPartyId, matchedName: match.matchedName, matchReason: match.matchReason})
+                        Object.assign(out, {matchedPartyId: match.matchedPartyId, matchedPseudoId: match.matchedPseudoId, matchedName: match.matchedName,
+                            matchReason: match.matchReason})
                         matched = true
                     } else {
                         // an earlier row of the file with the same email is matched when that row is imported
@@ -243,7 +246,7 @@ along with this software (see the LICENSE.md file). If not, see
         </description>
         <in-parameters>
             <parameter name="contactFile" type="org.apache.commons.fileupload2.core.FileItem"/>
-            <parameter name="fileText"/>
+            <parameter name="fileText" allow-html="any"><description>The file's text, parsed by the framework tool, never shown as HTML; real vCard and ICS files hold &lt; (Apple labels, HTML descriptions)</description></parameter>
             <parameter name="fileLocation"/>
             <parameter name="fileName"/>
             <parameter name="characterSet" default-value="UTF-8"/>
@@ -413,7 +416,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="format" default-value="csv"><description>csv or vcard</description></parameter>
         </in-parameters>
         <out-parameters>
-            <parameter name="fileText"/>
+            <parameter name="fileText" allow-html="any"><description>The file's text, parsed by the framework tool, never shown as HTML; real vCard and ICS files hold &lt; (Apple labels, HTML descriptions)</description></parameter>
             <parameter name="fileName"/>
             <parameter name="contentType"/>
             <parameter name="exportedCount" type="Integer"/>

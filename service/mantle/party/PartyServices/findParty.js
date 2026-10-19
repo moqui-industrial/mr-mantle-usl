@@ -66,8 +66,83 @@ if (emailAddress) ef = ef.condition(like("emailAddress", emailAddress))
 
 if (assetSerialNumber) ef = ef.condition(like("assetSerialNumber", assetSerialNumber))
 
-// a personal contact (privateOwnerUserId) is found only by its owner, whether or not an entity filter applies
 const userId = ec.user.userId || null
+
+// one text against the names, emails, phones and organizations, as one or-condition so the count stays exact
+const anyText = anyField == null ? "" : String(anyField).trim()
+if (anyText) {
+    const branches = [like("organizationName", anyText), like("firstName", anyText), like("lastName", anyText)]
+    // first and last name in either order, split at each space ("Mary Ann Lee": "Mary" + "Ann Lee", "Mary Ann" + "Lee")
+    const words = anyText.replace(/,/g, " ").split(/\s+/).filter((word) => word)
+    for (let split = 1; split < words.length; split++) {
+        const head = words.slice(0, split).join(" ")
+        const rest = words.slice(split).join(" ")
+        branches.push(cf.makeCondition([like("firstName", head), like("lastName", rest)], "and"))
+        branches.push(cf.makeCondition([like("lastName", head), like("firstName", rest)], "and"))
+    }
+    if (!/\s/.test(anyText)) {
+        branches.push(cf.makeCondition([like("emailAddress", anyText), cf.makeCondition("emailContactMechTypeEnumId", "equals", "CmtEmailAddress"),
+            cf.makeConditionDate("emailFromDate", "emailThruDate", null)], "and"))
+    }
+    // the parties found apart and added by id (an organization's people, phones by their digits), up to maxIds each, a
+    // limit a text matching that many is past being a search; the finds run under the user's entity filters
+    const maxIds = 5000
+    const addIds = (branch, idSet) => {
+        if (!idSet.size) return
+        if (idSet.size >= maxIds) ec.logger.warn(`find#Party anyField ${anyText}: the ${branch} matches stop at ${maxIds}, the count may be short`)
+        branches.push(cf.makeCondition("partyId", "in", Array.from(idSet)))
+    }
+    // the people whose current contact or employee relationship is to an organization of that name the user may see
+    const orgIds = Array.from(ec.entity.find("mantle.party.PartyDetail").condition("partyTypeEnumId", "PtyOrganization")
+            .condition(like("organizationName", anyText)).condition(cf.makeCondition("disabled", "not-equals", "Y", true))
+            .condition(cf.makeCondition([cf.makeCondition("privateOwnerUserId", "equals", null),
+                cf.makeCondition("privateOwnerUserId", "equals", userId ?? "_NA_")], "or"))
+            .selectField("partyId").limit(maxIds).list()).map((org) => org.partyId)
+    if (orgIds.length) {
+        const memberIds = new Set()
+        for (let start = 0; start < orgIds.length && memberIds.size < maxIds; start += 500) {
+            for (const rel of ec.entity.find("mantle.party.PartyRelationship").condition(cf.makeCondition("toPartyId", "in", orgIds.slice(start, start + 500)))
+                    .condition(cf.makeCondition("relationshipTypeEnumId", "in", ["PrtContact", "PrtEmployee"]))
+                    .condition(cf.makeConditionDate("fromDate", "thruDate", null)).selectField("fromPartyId").limit(maxIds).list()) {
+                if (memberIds.size < maxIds) memberIds.add(rel.fromPartyId)
+            }
+        }
+        addIds("organization", memberIds)
+    }
+    // a phone by its digits: the numbers whose last digits are in the contact number, checked digit for digit here
+    const digits = anyText.replace(/\D/g, "")
+    if (digits.length >= 3 && /^[\d\s()+\-.\/]+$/.test(anyText)) {
+        const tail = digits.slice(-4)
+        // four digits may have a separator between them ("555-12" against 555-1234), fewer are taken as they are
+        const pattern = "%" + (tail.length === 4 ? tail.split("").join("%") : tail) + "%"
+        const phonePartyIds = new Set()
+        for (const tn of ec.entity.find("mantle.party.contact.PartyContactMechTelecomNumber")
+                .condition(cf.makeCondition("contactNumber", "like", pattern)).condition(cf.makeConditionDate("fromDate", "thruDate", null))
+                .selectField("partyId,countryCode,areaCode,contactNumber").list()) {
+            const local = `${tn.areaCode || ""}${tn.contactNumber || ""}`.replace(/\D/g, "")
+            const full = `${tn.countryCode || ""}`.replace(/\D/g, "") + local
+            // the digits in the number, with or without its country code; or the number with a country code (or an
+            // international prefix) before it that it does not have
+            const matches = full.includes(digits) || local.includes(digits) ||
+                    (local.length >= 7 && digits.length > local.length && digits.length - local.length <= 5 && digits.endsWith(local))
+            if (matches && phonePartyIds.size < maxIds) phonePartyIds.add(tn.partyId)
+        }
+        addIds("phone", phonePartyIds)
+    }
+    ef = ef.condition(cf.makeCondition(branches, "or"))
+}
+
+// any role; a personal contact has none, so the user's own still come unless personalContacts leaves them out
+if (hasRole === true || hasRole === "true" || hasRole === "Y") {
+    const withRole = cf.makeCondition("anyRoleTypeId", "is-not-null", null)
+    if (userId && personalContacts !== "exclude") {
+        ef = ef.condition(cf.makeCondition([withRole, cf.makeCondition("privateOwnerUserId", "equals", userId)], "or"))
+    } else {
+        ef = ef.condition(withRole)
+    }
+}
+
+// a personal contact (privateOwnerUserId) is found only by its owner, whether or not an entity filter applies
 if (personalContacts === "only") {
     ef = ef.condition(cf.makeCondition("privateOwnerUserId", "equals", userId ?? "_NA_"))
 } else if (personalContacts === "exclude" || !userId) {

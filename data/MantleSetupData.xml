@@ -47,6 +47,10 @@ along with this software (see the LICENSE.md file). If not, see
     <userPermissions userPermissionId="TIME_ENTRY_RATE" description="Time Entry Rate Override"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="TIME_ENTRY_RATE" fromDate="0"/>
 
+    <!-- deleting a directory party (mantle.party.ContactBookServices.delete#Contact); a personal contact's owner needs none -->
+    <userPermissions userPermissionId="CONTACT_ADMIN" description="Contact Admin (delete directory contacts)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="CONTACT_ADMIN" fromDate="0"/>
+
     <moqui.basic.Enumeration enumId="AllStoresMarkupLabelShipment" description="All Product Stores Markup Shipment Labels (set to 'true')" enumTypeId="UserPreferenceKey"/>
     <moqui.basic.Enumeration enumId="AllStoresMarkupLabelOrder" description="All Product Stores Markup Order Shipping (set to 'true')" enumTypeId="UserPreferenceKey"/>
 

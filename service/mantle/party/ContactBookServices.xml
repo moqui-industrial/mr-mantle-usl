@@ -19,7 +19,9 @@ along with this software (see the LICENSE.md file). If not, see
         enforce access, as entity filters do not apply to contact books: the owner manages a personal book, and on a
         shared book a current ContactBookShare for the user or one of the user's groups gives view (read and export), edit
         (members, groups, favorites) or manage (the book and its shares). A personal contact is seen only by its owner
-        and goes only in the owner's personal books. -->
+        and goes only in the owner's personal books. delete#Contact (delete#Contacts for many) deletes a contact: its owner
+        deletes a personal contact, a user with the CONTACT_ADMIN permission a directory party; the party is removed when no
+        business row refers to it, else disabled and taken out of its books. -->
 
     <service verb="check" noun="ContactBookAccess">
         <description>
@@ -1022,6 +1024,208 @@ along with this software (see the LICENSE.md file). If not, see
             party.update()
             if (roleTypeId) ec.service.sync().name('mantle.party.PartyServices.ensure#PartyRole').parameters({partyId: partyId, roleTypeId: roleTypeId}).call()
             directoryPartyId = partyId
+        ]]></script></actions>
+    </service>
+    <service verb="delete" noun="Contact">
+        <description>
+            Deletes a contact as the current user may. A personal contact is its owner's to delete (another user's is "not
+            found"). A directory party needs the CONTACT_ADMIN permission (the ADMIN group has it) and is never the user's own
+            party, a party with a user account or an internal organization (OrgInternal); that is user and organization
+            setup, not a contact. A party no business row refers to is removed with its own rows: its person or organization,
+            roles, relationships to others, contact mechanism links (the ContactMech rows stay, as other records may name them),
+            notes, contents, identifications, classifications, dimensions, settings, geo points, book and group memberships,
+            not-duplicate decisions and record followers. A party that other rows refer to (orders, invoices, payments,
+            shipments, accounts, assets, agreements, work efforts, requests, messages and records filed on it, consents, lists,
+            time, employment, relationships of other parties to it, parties merged into it: every foreign key to Party in the
+            data model) is disabled instead (Party.disabled Y, as a merge leaves a party), its current book memberships end and
+            it leaves its book groups, so its history stays whole. referencedByList names what kept it.
+        </description>
+        <in-parameters><parameter name="partyId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="removed" type="Boolean"><description>The party and its own rows are gone</description></parameter>
+            <parameter name="disabled" type="Boolean"><description>The party is disabled instead</description></parameter>
+            <parameter name="referencedByList" type="List"><description>entityName.fieldName of the rows that kept it, at most
+                five</description></parameter>
+        </out-parameters>
+        <actions><script><![CDATA[
+            removed = false
+            disabled = false
+            referencedByList = []
+            const userId = ec.user.userId || null
+            if (!userId) { ec.message.addError('Deleting a contact needs a user'); return }
+            const cf = ec.entity.conditionFactory
+            // the party as the user may see it: the entity filters, and a personal contact only its owner's
+            const party = ec.entity.find('mantle.party.Party').condition('partyId', partyId).one()
+            if (party == null || (party.privateOwnerUserId && party.privateOwnerUserId !== userId)) { ec.message.addError(`Contact ${partyId} not found`); return }
+            if (party.disabled === 'Y') { ec.message.addError(`Contact ${partyId} was already deleted or merged`); return }
+            if (!party.privateOwnerUserId) {
+                if (!ec.user.hasPermission('CONTACT_ADMIN')) { ec.message.addError(`You may not delete contact ${partyId}`); return }
+                if (ec.user.userAccount?.partyId === partyId) { ec.message.addError('You cannot delete your own party'); return }
+            }
+            if (ec.entity.find('moqui.security.UserAccount').condition('partyId', partyId).disableAuthz().count() > 0) {
+                ec.message.addError(`Contact ${partyId} has a user account; disable the user instead`); return }
+            if (ec.entity.find('mantle.party.PartyRole').condition('partyId', partyId).condition('roleTypeId', 'OrgInternal').count() > 0) {
+                ec.message.addError(`Contact ${partyId} is an internal organization and cannot be deleted`); return }
+
+            // the rows that refer to the party and are not its own: each foreign key to Party in the data model, and the
+            // generic record links. Keep this with the data model.
+            const references = {
+                'mantle.account.billing.BillingAccount': ['billToPartyId'], 'mantle.account.billing.BillingAccountParty': ['partyId'],
+                'mantle.account.financial.FinancialAccount': ['organizationPartyId', 'ownerPartyId'],
+                'mantle.account.financial.FinancialAccountParty': ['partyId'], 'mantle.account.financial.FinancialAccountTrans': ['fromPartyId', 'toPartyId'],
+                'mantle.account.invoice.Invoice': ['fromPartyId', 'toPartyId', 'overrideOrgPartyId'], 'mantle.account.invoice.InvoiceItemDetail': ['partyId'],
+                'mantle.account.invoice.InvoiceItemAssoc': ['fromPartyId', 'toPartyId'], 'mantle.account.invoice.InvoiceParty': ['partyId'],
+                'mantle.account.method.PaymentMethod': ['ownerPartyId'], 'mantle.account.method.BankAccount': ['bankPartyId'],
+                'mantle.account.method.GiftCardFulfillment': ['partyId'], 'mantle.account.payment.Payment': ['fromPartyId', 'toPartyId', 'overrideOrgPartyId'],
+                'mantle.account.payment.PaymentFraudEvidence': ['partyId'],
+                'mantle.ledger.account.GlAccountOrganization': ['organizationPartyId'], 'mantle.ledger.account.GlAccountOrgTimePeriod': ['organizationPartyId'],
+                'mantle.ledger.account.GlAccountParty': ['partyId'], 'mantle.ledger.config.AssetTypeGlAccount': ['organizationPartyId'],
+                'mantle.ledger.config.CreditCardTypeGlAccount': ['organizationPartyId'], 'mantle.ledger.config.FinancialAccountTypeGlAccount': ['organizationPartyId'],
+                'mantle.ledger.config.FinancialAccountReasonGlAccount': ['organizationPartyId'],
+                'mantle.ledger.config.GlAccountTypePartyDefault': ['organizationPartyId', 'partyId'], 'mantle.ledger.config.GlAccountTypeDefault': ['organizationPartyId'],
+                'mantle.ledger.config.InvoiceTypeTransType': ['organizationPartyId'], 'mantle.ledger.config.ItemTypeGlAccount': ['organizationPartyId'],
+                'mantle.ledger.config.PaymentInstrumentGlAccount': ['organizationPartyId'], 'mantle.ledger.config.PaymentTypeGlAccount': ['organizationPartyId'],
+                'mantle.ledger.config.ProductCategoryGlAccount': ['organizationPartyId'], 'mantle.ledger.config.ProductGlAccount': ['organizationPartyId'],
+                'mantle.ledger.config.TaxAuthorityGlAccount': ['organizationPartyId'], 'mantle.ledger.config.VarianceReasonGlAccount': ['organizationPartyId'],
+                'mantle.ledger.config.PartyAcctgPreference': ['organizationPartyId'], 'mantle.ledger.reconciliation.GlReconciliation': ['organizationPartyId'],
+                'mantle.ledger.transaction.AcctgTrans': ['organizationPartyId', 'otherPartyId'], 'mantle.ledger.transaction.GlJournal': ['organizationPartyId'],
+                'mantle.other.budget.BudgetReview': ['partyId'], 'mantle.other.budget.BudgetParty': ['partyId'],
+                'mantle.other.tax.TaxAuthority': ['taxAuthPartyId'], 'mantle.other.tax.TaxAuthorityParty': ['partyId'],
+                'mantle.facility.Facility': ['ownerPartyId'], 'mantle.facility.FacilityCertification': ['contactPartyId', 'auditorPartyId', 'auditorOrgPartyId'],
+                'mantle.facility.FacilityGroupParty': ['partyId'], 'mantle.facility.FacilityParty': ['partyId'],
+                'mantle.humanres.ability.PartySkill': ['partyId'], 'mantle.humanres.employment.Employee': ['partyId'],
+                'mantle.humanres.employment.EmploymentApplication': ['applyingPartyId', 'referredByPartyId', 'approverPartyId'],
+                'mantle.humanres.employment.EmploymentLeave': ['approverPartyId'], 'mantle.humanres.employment.EmploymentPayDetail': ['payeePartyId'],
+                'mantle.humanres.employment.PayrollAdjustment': ['organizationPartyId', 'payeePartyId'],
+                'mantle.humanres.employment.WorkTypeGlOverride': ['organizationPartyId'], 'mantle.humanres.position.EmplPosition': ['organizationPartyId'],
+                'mantle.humanres.position.EmplPositionClassParty': ['partyId'], 'mantle.humanres.position.EmplPositionParty': ['partyId'],
+                'mantle.humanres.rate.RateAmount': ['partyId'], 'mantle.marketing.campaign.MarketingCampaignParty': ['partyId'],
+                'mantle.marketing.contact.ContactList': ['ownerPartyId'], 'mantle.marketing.contact.ContactListCommStatus': ['partyId'],
+                'mantle.marketing.contact.ContactListParty': ['partyId'], 'mantle.marketing.contact.ContactListToken': ['partyId'],
+                'mantle.marketing.segment.MarketSegment': ['ownerPartyId'], 'mantle.marketing.segment.MarketSegmentParty': ['partyId'],
+                'mantle.order.OrderContent': ['partyId'], 'mantle.order.OrderEmailMessage': ['partyId'], 'mantle.order.OrderHeader': ['enteredByPartyId'],
+                'mantle.order.OrderDecision': ['decisionByPartyId'], 'mantle.order.OrderItemFormResponse': ['partyId'], 'mantle.order.OrderItemParty': ['partyId'],
+                'mantle.order.OrderPart': ['vendorPartyId', 'customerPartyId', 'carrierPartyId'], 'mantle.order.OrderPartParty': ['partyId'],
+                'mantle.order.return.ReturnHeader': ['customerPartyId', 'vendorPartyId', 'carrierPartyId'],
+                'mantle.party.Party': ['ownerPartyId', 'mergedToPartyId'], 'mantle.party.PartyBadge': ['partyId', 'organizationPartyId'],
+                'mantle.party.PartyConsent': ['partyId'], 'mantle.party.PartyIdentification': ['issuedByPartyId'],
+                'mantle.party.PartyRelationship': ['toPartyId'], 'mantle.party.PartySystemMessage': ['partyId'],
+                'mantle.party.agreement.Agreement': ['organizationPartyId', 'otherPartyId'], 'mantle.party.agreement.AgreementParty': ['partyId'],
+                'mantle.party.agreement.AgreementItemParty': ['partyId'],
+                'mantle.party.communication.CommunicationEvent': ['fromPartyId', 'toPartyId'],
+                'mantle.party.communication.CommunicationEventParty': ['partyId'], 'mantle.party.contact.ContactBook': ['ownerPartyId'],
+                'mantle.product.asset.Asset': ['ownerPartyId'], 'mantle.product.asset.AssetPartyAssignment': ['partyId'],
+                'mantle.product.asset.AssetPoolParty': ['partyId'], 'mantle.product.asset.Lot': ['mfgPartyId'],
+                'mantle.product.asset.PhysicalInventory': ['partyId'], 'mantle.product.issuance.AssetIssuanceParty': ['partyId'],
+                'mantle.product.maintenance.AssetRegistration': ['govAgencyPartyId'], 'mantle.product.Product': ['ownerPartyId'],
+                'mantle.product.ProductParameterSet': ['customerPartyId'], 'mantle.product.ProductParty': ['partyId'],
+                'mantle.product.category.ProductCategory': ['ownerPartyId'], 'mantle.product.category.ProductCategoryParty': ['partyId'],
+                'mantle.product.feature.ProductFeature': ['ownerPartyId'], 'mantle.product.subscription.Subscription': ['subscriberPartyId'],
+                'mantle.product.store.ProductStore': ['organizationPartyId'], 'mantle.product.store.ProductStoreParty': ['partyId'],
+                'mantle.product.store.ProductStorePromoCodeParty': ['partyId'], 'mantle.product.store.ProductStoreShippingGateway': ['carrierPartyId'],
+                'mantle.product.store.ProductStoreShipOption': ['carrierPartyId'], 'mantle.product.store.ProductStoreGroupParty': ['partyId'],
+                'mantle.request.Request': ['filedByPartyId'], 'mantle.request.RequestCategory': ['responsiblePartyId'],
+                'mantle.request.RequestEmailMessage': ['partyId'], 'mantle.request.RequestItem': ['supplierPartyId'], 'mantle.request.RequestParty': ['partyId'],
+                'mantle.request.requirement.RequirementParty': ['partyId'], 'mantle.sales.opportunity.SalesOpportunity': ['accountPartyId'],
+                'mantle.sales.opportunity.SalesOpportunityParty': ['partyId'], 'mantle.sales.forecast.SalesForecast': ['organizationPartyId', 'internalPartyId'],
+                'mantle.sales.need.PartyNeed': ['partyId'], 'mantle.shipment.Shipment': ['fromPartyId', 'toPartyId'], 'mantle.shipment.ShipmentParty': ['partyId'],
+                'mantle.shipment.ShipmentRouteSegment': ['carrierPartyId'], 'mantle.shipment.carrier.CarrierShipmentMethod': ['carrierPartyId'],
+                'mantle.shipment.carrier.CarrierShipmentBoxType': ['carrierPartyId'], 'mantle.shipment.carrier.PartyCarrierAccount': ['partyId', 'carrierPartyId'],
+                'mantle.shipment.carrier.ShippingGatewayCarrier': ['carrierPartyId'], 'mantle.shipment.carrier.ShippingGatewayMethod': ['carrierPartyId'],
+                'mantle.work.calendar.Calendar': ['ownerPartyId'], 'mantle.work.calendar.CalendarShare': ['partyId'],
+                'mantle.work.effort.WorkEffort': ['ownerPartyId'], 'mantle.work.effort.WorkEffortCategory': ['ownerPartyId'],
+                'mantle.work.effort.WorkEffortParty': ['partyId'], 'mantle.work.effort.WorkEffortReminder': ['partyId'],
+                'mantle.work.time.TimeEntry': ['partyId', 'teamPartyId', 'clientPartyId'], 'mantle.work.time.Timesheet': ['partyId', 'clientPartyId'],
+                'mantle.work.time.TimesheetParty': ['partyId'],
+            }
+            const recordLinks = ['mantle.party.communication.CommunicationEventRecord', 'mantle.work.effort.WorkEffortRecord',
+                'mantle.party.communication.EmailMessageRecord']
+            const keep = (name) => { if (referencedByList.length < 5) referencedByList.push(name) }
+            for (const [entityName, fields] of Object.entries(references)) {
+                for (const field of fields) {
+                    try {
+                        if (ec.entity.find(entityName).condition(field, partyId).disableAuthz().count() > 0) keep(`${entityName}.${field}`)
+                    } catch (err) {
+                        // a reference that cannot be checked keeps the party: disabling it loses nothing
+                        ec.logger.error(`delete#Contact ${partyId}: ${entityName}.${field} not checked: ${err?.message ?? err}`)
+                        keep(`${entityName}.${field}`)
+                    }
+                }
+            }
+            for (const entityName of recordLinks) {
+                if (ec.entity.find(entityName).condition('recordEntityName', 'mantle.party.Party').condition('recordId', partyId).disableAuthz().count() > 0)
+                    keep(`${entityName}.recordId`)
+            }
+
+            const now = ec.user.nowTimestamp
+            if (referencedByList.length) {
+                // disabled, as a merge leaves a party: out of its books and groups, the rest of its history whole
+                for (const row of ec.entity.find('mantle.party.contact.ContactBookParty').condition('partyId', partyId)
+                        .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).list()) { row.set('thruDate', now); row.update() }
+                ec.entity.find('mantle.party.contact.ContactBookGroupParty').condition('partyId', partyId).deleteAll()
+                party.set('disabled', 'Y')
+                party.update()
+                disabled = true
+                ec.logger.info(`Contact ${partyId} disabled by ${ec.user.username}, referenced by ${referencedByList.join(', ')}`)
+                return
+            }
+
+            // nothing else refers to it: the party and its own rows go
+            const byParty = ['mantle.party.contact.ContactBookGroupParty', 'mantle.party.contact.ContactBookParty', 'mantle.party.contact.PartyContactMech',
+                'mantle.party.PartyClassificationAppl', 'mantle.party.PartyContent', 'mantle.party.PartyDimension', 'mantle.party.PartyGeoPoint',
+                'mantle.party.PartyIdentification', 'mantle.party.PartyNote', 'mantle.party.PartyRole', 'mantle.party.PartySetting']
+            for (const entityName of byParty) ec.entity.find(entityName).condition('partyId', partyId).deleteAll()
+            ec.entity.find('mantle.party.PartyRelationship').condition('fromPartyId', partyId).deleteAll()
+            ec.entity.find('mantle.party.PartyNotDuplicate').condition(cf.makeCondition([cf.makeCondition('partyId', 'equals', partyId),
+                    cf.makeCondition('otherPartyId', 'equals', partyId)], 'or')).deleteAll()
+            ec.entity.find('mantle.party.communication.RecordFollower').condition('recordEntityName', 'mantle.party.Party').condition('recordId', partyId).deleteAll()
+            ec.entity.find('mantle.party.Person').condition('partyId', partyId).deleteAll()
+            ec.entity.find('mantle.party.Organization').condition('partyId', partyId).deleteAll()
+            party.delete()
+            removed = true
+            ec.logger.info(`Contact ${partyId} removed by ${ec.user.username}`)
+        ]]></script></actions>
+    </service>
+    <service verb="delete" noun="Contacts">
+        <description>delete#Contact for each party, each in its own transaction: a contact that cannot be deleted is named in
+            failureList with the reason (and a warning message) and the rest are deleted.</description>
+        <in-parameters>
+            <parameter name="partyIdList" type="List"><parameter name="partyId"/></parameter>
+            <parameter name="partyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="removedCount" type="Integer"/>
+            <parameter name="disabledCount" type="Integer"/>
+            <parameter name="removedPartyIdList" type="List"/>
+            <parameter name="disabledPartyIdList" type="List"/>
+            <parameter name="failedPartyIdList" type="List"/>
+            <parameter name="failureList" type="List"><parameter name="failure" type="Map"><description>partyId, error</description></parameter></parameter>
+        </out-parameters>
+        <actions><script><![CDATA[
+            removedCount = 0
+            disabledCount = 0
+            removedPartyIdList = []
+            disabledPartyIdList = []
+            failedPartyIdList = []
+            failureList = []
+            const textList = (value) => value == null ? [] : (typeof value === 'string' ? value.split(',') : Array.from(value))
+                    .map((item) => String(item).trim()).filter((item) => item)
+            for (const id of Array.from(new Set(textList(partyIdList).concat(textList(partyId))))) {
+                try {
+                    const out = ec.service.sync().name('mantle.party.ContactBookServices.delete#Contact').parameters({partyId: id})
+                            .requireNewTransaction(true).call()
+                    if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                    if (out?.removed) { removedCount++; removedPartyIdList.push(id) }
+                    else if (out?.disabled) { disabledCount++; disabledPartyIdList.push(id) }
+                } catch (err) {
+                    const error = String(err && err.message ? err.message : err).trim()
+                    ec.message.clearErrors()
+                    ec.logger.warn(`Contact ${id} not deleted for ${ec.user.username}: ${error}`)
+                    ec.message.addMessage(`Contact ${id} not deleted: ${error}`, 'warning')
+                    failedPartyIdList.push(id)
+                    failureList.push({partyId: id, error: error})
+                }
+            }
         ]]></script></actions>
     </service>
 </services>

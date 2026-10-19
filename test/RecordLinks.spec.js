@@ -270,9 +270,10 @@ feature("followers, and a note that mentions a user notifies them and the follow
         const followers = call("mantle.party.CommunicationServices.get#RecordFollowers", { recordEntityName: REQUEST, recordId: "RL-R1" })
         const note = call("mantle.party.CommunicationServices.log#RecordNote", { recordEntityName: REQUEST, recordId: "RL-R1", subject: "Check this",
                 body: "<p>Please check the access, @Mia</p>", contentType: "text/html", mentionUserIds: [miaUserId], recordUrl: requestUrl })
+        // the user's notices of the topic about this spec's request (demo data may give the same users notices of other records)
         const notices = (userId, topic) => Array.from(ec.entity.find("moqui.security.user.NotificationMessageUser").condition("userId", userId).list())
                 .map((row) => ec.entity.find("moqui.security.user.NotificationMessage").condition("notificationMessageId", row.notificationMessageId).one())
-                .filter((notice) => notice.topic === topic)
+                .filter((notice) => notice.topic === topic && JSON.parse(notice.messageJson || "{}").recordId === "RL-R1")
         const comment = ec.entity.find("mantle.party.communication.CommunicationEvent").condition("communicationEventId", note.communicationEventId).one()
         return { followers, note, comment, joinRows: count("mantle.request.RequestCommEvent", { requestId: "RL-R1", communicationEventId: note.communicationEventId }),
             miaMentions: notices(miaUserId, "ChatterMention"), noahFollows: notices(noahUserId, "RecordFollow"), johnFollows: notices("EX_JOHN_DOE", "RecordFollow"),

@@ -54,6 +54,12 @@ along with this software (see the LICENSE.md file). If not, see
         <member-entity entity-alias="ASST" entity-name="mantle.product.asset.Asset" join-from-alias="PTY" join-optional="true">
             <key-map field-name="partyId" related="ownerPartyId"/></member-entity>
 
+        <!-- find#Party hasRole: any role, optional so the user's personal contacts (which have none) can come too. No member
+            here may be a Party or PartyRelationship besides PTY: an entity filter on those entities applies to every member of
+            that entity, so it would bind (and join) the other member too. -->
+        <member-entity entity-alias="ANYRL" entity-name="mantle.party.PartyRole" join-from-alias="PTY" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+
         <alias entity-alias="PTY" name="partyId"/>
         <alias entity-alias="PTY" name="pseudoId"/>
         <alias entity-alias="PTY" name="partyTypeEnumId"/>
@@ -89,8 +95,11 @@ along with this software (see the LICENSE.md file). If not, see
         <alias name="emailContactMechPurposeId" entity-alias="EMPCM" field="contactMechPurposeId"/>
         <alias name="emailFromDate" entity-alias="EMPCM" field="fromDate"/>
         <alias name="emailThruDate" entity-alias="EMPCM" field="thruDate"/>
+        <alias name="emailContactMechTypeEnumId" entity-alias="EMCM" field="contactMechTypeEnumId"/>
 
         <alias name="assetSerialNumber" entity-alias="ASST" field="serialNumber"/>
+
+        <alias name="anyRoleTypeId" entity-alias="ANYRL" field="roleTypeId"/>
     </view-entity>
 
     <view-entity entity-name="PersonAndUserAccount" package="mantle.party">

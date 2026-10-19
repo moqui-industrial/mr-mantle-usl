@@ -704,8 +704,9 @@ along with this software (see the LICENSE.md file). If not, see
             The current user's answer to an event invitation, on the user's own current WorkEffortParty rows of the event:
             accept (WeptAssigned), tentative (WeptTentative) or decline (WeptDeclined), with an optional message (the row's
             comments). The organizer (the event's owner) gets a notification on the topic EventInvitationResponse when the
-            organizer is another user; an organizer outside (no user, an email address) gets an iMIP REPLY once the
-            framework's ICalendar tool exists. A failed notification is logged; the answer stays.
+            organizer is another user; an organizer outside (no user, an email address) gets an iMIP REPLY written by the
+            framework's ICalendar tool, which carries the replying attendee only (RFC 5546). A failed notification is
+            logged; the answer stays.
         </description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
@@ -717,10 +718,12 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="statusId"/>
             <parameter name="statusChanged" type="Boolean"/>
             <parameter name="notifiedUserIds" type="List"/>
+            <parameter name="replyIcsText"><description>The iMIP REPLY sent to an organizer outside, else null</description></parameter>
         </out-parameters>
         <actions><script><![CDATA[
             notifiedUserIds = []
             statusChanged = false
+            replyIcsText = null
             const statusOf = {accept: 'WeptAssigned', tentative: 'WeptTentative', decline: 'WeptDeclined'}
             const wordsOf = {accept: 'accepted', tentative: 'tentatively accepted', decline: 'declined'}
             statusId = statusOf[String(response).toLowerCase()]
@@ -762,13 +765,15 @@ along with this software (see the LICENSE.md file). If not, see
                     const fromAddress = ec.service.sync().name('mantle.party.ContactServices.get#PrimaryEmailAddress').parameters({partyId: partyId}).call()?.emailAddress
                     if (organizerEmail && fromAddress) {
                         const maps = ec.service.sync().name('mantle.work.EventServices.get#EventIcsMaps').parameters({workEffortIdList: [workEffortId]}).call()?.eventMapList || []
-                        const ics = ec.factory.getTool('ICalendar').write({method: 'REPLY', events: maps})
+                        // the REPLY names the replier only, not the other attendees
+                        const ics = ec.factory.getTool('ICalendar').write({method: 'REPLY', attendee: fromAddress, events: maps})
                         const subject = `${responderName} ${wordsOf[String(response).toLowerCase()]}: ${event.workEffortName || workEffortId}`
                         ec.service.sync().name('org.moqui.impl.EmailServices.send#EmailTemplate').parameters({emailTemplateId: 'MANTLE_CALENDAR_EMAIL',
                             toAddresses: organizerEmail, bodyParameters: {subject: subject, fromAddress: fromAddress, fromName: responderName},
                             body: `<html><body><p>${escape(subject)}</p>${message ? `<p>${escape(message)}</p>` : ''}</body></html>`,
                             bodyText: subject + (message ? `\n\n${message}` : ''),
                             attachments: [{fileName: 'reply.ics', contentType: 'text/calendar; method=REPLY; charset=UTF-8', contentText: ics}]}).call()
+                        replyIcsText = ics
                     }
                 }
             } catch (err) {

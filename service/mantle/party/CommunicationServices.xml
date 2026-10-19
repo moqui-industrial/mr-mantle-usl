@@ -78,6 +78,9 @@ along with this software (see the LICENSE.md file). If not, see
             or to and its to and cc recipients; besides the members they get the post where they may read the thread (a
             public mailbox, or their own threads in a help mailbox). A contactListId of another type (Marketing's lists)
             is only set on the event, as before.
+
+            A Message alerts the users of the recipients that take it in the Inbox on topic NewMail (notify#NewMail: not
+            the members who take the mailbox as Mailbox only); newMailUserIds are those alerted.
         </description>
         <in-parameters>
             <auto-parameters entity-name="mantle.party.communication.CommunicationEvent" include="nonpk"/>
@@ -102,6 +105,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="toPartyId"/>
             <parameter name="rootCommEventId"/>
             <parameter name="recipientList" type="List"><description>The CommunicationEventParty rows written: {partyId, roleTypeId}</description></parameter>
+            <parameter name="newMailUserIds" type="List"><description>The users alerted on topic NewMail</description></parameter>
         </out-parameters>
         <actions>
             <script><![CDATA[
@@ -186,11 +190,18 @@ along with this software (see the LICENSE.md file). If not, see
                 <service-call name="create#mantle.party.communication.CommunicationEventPurpose" in-map="context"/>
             </if>
             <script><![CDATA[
+                newMailUserIds = []
                 for (const recipient of recipientList) {
                     ec.service.sync().name('create#mantle.party.communication.CommunicationEventParty').parameters({
                         communicationEventId: communicationEventId, partyId: recipient.partyId, roleTypeId: recipient.roleTypeId,
                         statusId: 'CepReceived'}).call()
                     if (ec.message.hasError()) return
+                }
+                // the alert of new mail in the Inbox; notify#NewMail logs its own failures
+                if (communicationEventTypeId === 'Message' && recipientList.length) {
+                    const alert = ec.service.sync().name('mantle.party.CommunicationServices.notify#NewMail')
+                            .parameter('communicationEventId', communicationEventId).call()
+                    newMailUserIds = alert?.notifiedUserIds ?? []
                 }
             ]]></script>
         </actions>
@@ -836,6 +847,474 @@ along with this software (see the LICENSE.md file). If not, see
         ]]></script></actions>
     </service>
 
+    <!-- ================================================ -->
+    <!-- ========== The Inbox over both stores ========== -->
+    <!-- ================================================ -->
+
+    <service verb="find" noun="InboxThreads">
+        <description>
+            The Inbox's one list over both stores, newest first by sortDate: the framework's mail
+            (org.moqui.impl.EmailClientServices.find#Messages, rows with store email) and the internal threads
+            (find#InternalThreads, store internal). A store is called only when the view includes it.
+
+            The view:
+            - With no emailAccountId and no contactListId: view inbox (the default: the Unified inbox, every mail account's
+              Inbox and the internal received view), flagged, snoozed, sent, archive and all read both stores (the internal
+              views received, flagged, snoozed, sent, archived and all); scheduled, outbox, drafts, junk and trash read only
+              the mail, and so do emailFolderId (view folder) and emailLabelId (view label).
+            - emailAccountId of a mail account: that account's mail only, in view (inbox by default), its folder
+              (emailFolderId) or its label (emailLabelId).
+            - emailAccountId of the user's Internal account, or store internal: the internal threads only, in view received
+              (or inbox, the default), sent, flagged, snoozed, archived (or archive) or all; a view with no internal
+              counterpart (drafts) lists nothing.
+            - contactListId: the threads of that mailbox only (view all by default, else an internal view).
+            - store email keeps the mail of a view that reads both stores.
+            Filters: searchText and unreadOnly go to both stores. fromAddress, toAddress, subject, hasAttachment, fromDate,
+            thruDate, minSize and maxSize are the mail's only; with any of them the internal store is not read. threadMode
+            false lists the mail by message; internal rows are always threads.
+
+            Paging: pageSize rows (default 50), then cursor, the nextCursor of the page before. The cursor holds each store's
+            own date cursor, store:millis (the sortDate of the last row of that store shown) or store:end (no more rows),
+            joined by commas; a store not in it starts at its newest row. Each page reads pageSize + 1 rows of every store
+            still going (from its own date), merges them by sortDate (mail first on the same date), keeps the first pageSize
+            and moves each store's date to its last row kept, so a store whose rows were all newer or all older than the
+            other's continues exactly where it stopped. A store's date is exclusive (its next page reads rows before it),
+            so a page never ends inside a run of one store's rows with the same sortDate: that run, and the rows of the
+            other store older than it, wait for the next page; only a run longer than a page is cut (logged). hasMore is
+            true while a store that answered has more rows; nextCursor is empty when it is false.
+
+            Failure tolerant: each store reads in a transaction of its own; one that fails is logged, named in failedStores,
+            and keeps its date in nextCursor, so a later page tries it again; the other store's rows still come. Strict on
+            access: an emailAccountId, emailFolderId or emailLabelId the user does not reach, or a mailbox the user may not
+            see, is an error before any store is read, and each store reads only what the user may read. The rows are the stores' own (find#Messages and find#InternalThreads describe them), with rowKey added:
+            store:threadId (email:emailMessageId for the mail listed by message).
+        </description>
+        <in-parameters>
+            <parameter name="view"/>
+            <parameter name="store"><description>email or internal: only that store</description></parameter>
+            <parameter name="emailAccountId"/>
+            <parameter name="emailFolderId"/>
+            <parameter name="emailLabelId"/>
+            <parameter name="contactListId"/>
+            <parameter name="searchText" allow-html="any"/>
+            <parameter name="unreadOnly" type="Boolean" default="false"/>
+            <parameter name="threadMode" type="Boolean" default="true"/>
+            <parameter name="fromAddress" allow-html="any"/>
+            <parameter name="toAddress" allow-html="any"/>
+            <parameter name="subject" allow-html="any"/>
+            <parameter name="hasAttachment" type="Boolean"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="minSize" type="Long"/>
+            <parameter name="maxSize" type="Long"/>
+            <parameter name="cursor"/>
+            <parameter name="pageSize" type="Integer" default="50"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="threadList" type="List"><parameter name="thread" type="Map"/></parameter>
+            <parameter name="hasMore" type="Boolean"/>
+            <parameter name="nextCursor"/>
+            <parameter name="storeList" type="List"><description>The stores the view reads: email, internal</description></parameter>
+            <parameter name="failedStores" type="List"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const toMillis = (value) => {
+                if (value == null || value === '') return null
+                if (typeof value === 'number') return value
+                if (value instanceof Date) return value.getTime()
+                const number = Number(value)
+                return Number.isNaN(number) ? new Date(String(value)).getTime() : number
+            }
+            threadList = []
+            hasMore = false
+            nextCursor = null
+            storeList = []
+            failedStores = []
+            if (!(pageSize > 0)) pageSize = 50
+            const STORES = ['email', 'internal']
+            const EMAIL_VIEWS = ['inbox', 'flagged', 'snoozed', 'scheduled', 'outbox', 'drafts', 'sent', 'archive', 'junk', 'trash', 'all', 'folder', 'label']
+            // the internal view of each view that has one
+            const INTERNAL_VIEWS = {inbox: 'received', received: 'received', sent: 'sent', flagged: 'flagged', snoozed: 'snoozed',
+                archive: 'archived', archived: 'archived', all: 'all'}
+            const EMAIL_ALIASES = {received: 'inbox', archived: 'archive'}
+            if (store && !STORES.includes(store)) { ec.message.addError(`Unknown store ${store}: email or internal`); return }
+
+            // each store's own date, or 'end'
+            const cursorOf = {}
+            if (cursor) {
+                for (const part of String(cursor).split(',')) {
+                    const [name, value] = part.split(':')
+                    if (!STORES.includes(name) || !(value === 'end' || /^\d+$/.test(value || ''))) {
+                        ec.message.addError(`Not an Inbox cursor: ${cursor}`); return }
+                    cursorOf[name] = value === 'end' ? 'end' : Number(value)
+                }
+            }
+
+            // the stores of the view and their parameters
+            let emailParameters = null
+            let internalParameters = null
+            const emailOnlyFilter = !!(fromAddress || toAddress || subject || hasAttachment != null || fromDate != null || thruDate != null ||
+                    minSize != null || maxSize != null)
+            const shared = {searchText: searchText, unreadOnly: unreadOnly}
+            if (contactListId) {
+                if (emailAccountId || emailFolderId || emailLabelId || store === 'email') {
+                    ec.message.addError('A mailbox is listed without an email account, folder or label'); return }
+                const access = ec.service.sync().name('mantle.marketing.ContactListServices.get#ContactListAccess')
+                        .parameter('contactListId', contactListId).call()
+                if (ec.message.hasError()) return
+                if (!access.exists || !access.isMailbox || !access.canSeeHeader) { ec.message.addError(`Mailbox ${contactListId} not found`); return }
+                const internalView = view ? INTERNAL_VIEWS[view] : 'all'
+                if (!internalView) { ec.message.addError(`Unknown mailbox view ${view}: received, sent, flagged, snoozed, archived or all`); return }
+                if (!emailOnlyFilter) internalParameters = Object.assign({view: internalView, contactListId: contactListId}, shared)
+            } else {
+                // the account, folder and label must be ones the user reaches: an input error, not a store that fails
+                let account = null
+                let access = null
+                if (emailAccountId || emailFolderId || emailLabelId) {
+                    access = ec.service.sync().name('org.moqui.impl.EmailClientServices.get#EmailAccountAccess')
+                            .parameters(emailAccountId ? {emailAccountId: emailAccountId} : {}).call()
+                    if (ec.message.hasError()) return
+                }
+                if (emailAccountId) {
+                    if (!(access.level >= 1)) { ec.message.addError(`Email account ${emailAccountId} not found`); return }
+                    account = access.account
+                    if (!account.isInternal && store === 'internal') { ec.message.addError(`Email account ${emailAccountId} is not the Internal account`); return }
+                }
+                if (account?.isInternal || store === 'internal') {
+                    if (emailFolderId || emailLabelId) { ec.message.addError('The Internal account has no folders or labels'); return }
+                    const internalView = INTERNAL_VIEWS[view || 'received']
+                    if (!internalView && !EMAIL_VIEWS.includes(view)) { ec.message.addError(`Unknown view ${view}`); return }
+                    if (internalView && !emailOnlyFilter) internalParameters = Object.assign({view: internalView}, shared)
+                } else {
+                    const emailView = view ? (EMAIL_ALIASES[view] || view) : (emailFolderId ? 'folder' : (emailLabelId ? 'label' : 'inbox'))
+                    if (!EMAIL_VIEWS.includes(emailView)) { ec.message.addError(`Unknown view ${view}: ${EMAIL_VIEWS.join(', ')}`); return }
+                    if (emailView === 'folder' && !emailFolderId) { ec.message.addError('The folder view needs an emailFolderId'); return }
+                    if (emailView === 'label' && !emailLabelId) { ec.message.addError('The label view needs an emailLabelId'); return }
+                    const reaches = (entityName, idField, id, what) => {
+                        const row = ec.entity.find(entityName).condition(idField, id).one()
+                        if (row == null || !access.accessMap[row.emailAccountId] || (emailAccountId && row.emailAccountId !== emailAccountId)) {
+                            ec.message.addError(`${what} ${id} not found`)
+                            return false
+                        }
+                        return true
+                    }
+                    if (emailFolderId && !reaches('moqui.basic.email.EmailFolder', 'emailFolderId', emailFolderId, 'Email folder')) return
+                    if (emailLabelId && !reaches('moqui.basic.email.EmailLabel', 'emailLabelId', emailLabelId, 'Email label')) return
+                    emailParameters = Object.assign({view: emailView, emailAccountId: emailAccountId, emailFolderId: emailFolderId,
+                        emailLabelId: emailLabelId, threadMode: threadMode, fromAddress: fromAddress, toAddress: toAddress, subject: subject,
+                        hasAttachment: hasAttachment, fromDate: fromDate, thruDate: thruDate, minSize: minSize, maxSize: maxSize}, shared)
+                    const internalView = INTERNAL_VIEWS[emailView]
+                    if (!account && !emailFolderId && !emailLabelId && store !== 'email' && internalView && !emailOnlyFilter)
+                        internalParameters = Object.assign({view: internalView}, shared)
+                }
+            }
+            const stores = []
+            if (emailParameters) stores.push({name: 'email', service: 'org.moqui.impl.EmailClientServices.find#Messages', parameters: emailParameters})
+            if (internalParameters) stores.push({name: 'internal', service: 'mantle.party.CommunicationServices.find#InternalThreads',
+                parameters: internalParameters})
+            storeList = stores.map((entry) => entry.name)
+            if (stores.length === 0) return
+
+            // pageSize + 1 rows of each store still going, each on its own
+            const lists = []
+            for (const entry of stores) {
+                if (cursorOf[entry.name] === 'end') continue
+                const parameters = Object.assign({}, entry.parameters, {pageSize: pageSize + 1})
+                if (cursorOf[entry.name] != null) parameters.beforeDate = new Date(cursorOf[entry.name])
+                // in a transaction of its own, so a store that fails does not roll back the other's or the caller's
+                ec.message.pushErrors()
+                try {
+                    const out = ec.service.sync().name(entry.service).parameters(parameters).requireNewTransaction(true).call()
+                    if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                    if (out == null) throw new Error(`${entry.service} answered nothing`)
+                    lists.push({name: entry.name, rows: Array.from(out.threadList || []), hasMore: out.hasMore === true, taken: 0})
+                } catch (err) {
+                    failedStores.push(entry.name)
+                    ec.logger.error(`Inbox of user ${ec.user.userId}: the ${entry.name} store failed and is left out: ${err && err.message ? err.message : err}`)
+                } finally {
+                    ec.message.clearErrors()
+                    ec.message.popErrors()
+                }
+            }
+
+            // merge by sortDate, newest first; each store's rows stay in its own order
+            const merged = []
+            while (merged.length < pageSize) {
+                let best = null
+                for (const list of lists) {
+                    if (list.taken >= list.rows.length) continue
+                    if (best == null || toMillis(list.rows[list.taken].sortDate) > toMillis(best.rows[best.taken].sortDate)) best = list
+                }
+                if (best == null) break
+                merged.push({store: best.name, row: best.rows[best.taken], date: toMillis(best.rows[best.taken].sortDate)})
+                best.taken++
+            }
+            // a store whose last row kept has the date of its next row would skip the rest of that run on the next page
+            // (its date is exclusive): end the page before the newest such run
+            let cutDate = null
+            const runDate = {}
+            for (const list of lists) {
+                if (list.taken === 0 || list.taken >= list.rows.length) continue
+                const last = toMillis(list.rows[list.taken - 1].sortDate)
+                if (last === toMillis(list.rows[list.taken].sortDate)) {
+                    runDate[list.name] = last
+                    if (cutDate == null || last > cutDate) cutDate = last
+                }
+            }
+            let page = merged
+            if (cutDate != null) {
+                const kept = merged.filter((entry) => entry.date > cutDate || (entry.date === cutDate && runDate[entry.store] !== cutDate))
+                if (kept.length) page = kept
+                else ec.logger.warn(`Inbox of user ${ec.user.userId}: more than ${pageSize} rows of one store have sortDate ${cutDate}; the next page starts after them`)
+            }
+
+            // each store's next date
+            const nextOf = {}
+            for (const entry of stores) {
+                const name = entry.name
+                if (cursorOf[name] === 'end') { nextOf[name] = 'end'; continue }
+                // a store that failed keeps its date, for the next page to try again
+                if (failedStores.includes(name)) { if (cursorOf[name] != null) nextOf[name] = cursorOf[name]; continue }
+                const list = lists.find((candidate) => candidate.name === name)
+                const keptRows = page.filter((candidate) => candidate.store === name)
+                if (keptRows.length === list.rows.length && !list.hasMore) { nextOf[name] = 'end'; continue }
+                if (keptRows.length) nextOf[name] = keptRows[keptRows.length - 1].date
+                else if (cursorOf[name] != null) nextOf[name] = cursorOf[name]
+                hasMore = true
+            }
+            if (hasMore) nextCursor = Object.keys(nextOf).map((name) => `${name}:${nextOf[name]}`).join(',')
+
+            const byMessage = emailParameters != null && threadMode === false
+            threadList = page.map((entry) => Object.assign({}, entry.row, {rowKey: `${entry.store}:${entry.store === 'email' && byMessage
+                    ? entry.row.emailMessageId : entry.row.threadId}`}))
+        ]]></script></actions>
+    </service>
+
+    <service verb="get" noun="InboxUnreadCounts">
+        <description>
+            The unread counts of the Inbox rail and Comms Home for the current user, each part on its own: accountList, the
+            user's accounts as org.moqui.impl.EmailClientServices.get#UserEmailAccounts gives them (the Internal account
+            first; each mail account with its Inbox unreadCount and its folders' counts), with the Internal account's
+            unreadCount filled from count#UnreadInternalMessages (internal messages and the mailbox posts delivered to the
+            Inbox); mailboxList, the mailboxes the user is a member of or asked to join with their unreadCount and the user's
+            delivery (mantle.marketing.ContactListServices.find#ContactLists); emailUnreadCount (the mail accounts' Inbox
+            unread), internalUnreadCount and unifiedUnreadCount (both: the Unified inbox). A part that fails is logged by
+            name, named in failedParts, and its counts are null.
+        </description>
+        <out-parameters>
+            <parameter name="accountList" type="List"><parameter name="account" type="Map"/></parameter>
+            <parameter name="internalEmailAccountId"/>
+            <parameter name="mailboxList" type="List"><parameter name="mailbox" type="Map"/></parameter>
+            <parameter name="emailUnreadCount" type="Integer"/>
+            <parameter name="internalUnreadCount" type="Integer"/>
+            <parameter name="internalUnreadThreadCount" type="Integer"/>
+            <parameter name="unifiedUnreadCount" type="Integer"/>
+            <parameter name="failedParts" type="List"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            accountList = []
+            mailboxList = []
+            internalEmailAccountId = null
+            emailUnreadCount = null
+            internalUnreadCount = null
+            internalUnreadThreadCount = null
+            unifiedUnreadCount = null
+            failedParts = []
+            const part = (name, run) => {
+                ec.message.pushErrors()
+                try {
+                    run()
+                    if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                    return true
+                } catch (err) {
+                    failedParts.push(name)
+                    ec.logger.error(`Inbox counts of user ${ec.user.userId}: the ${name} part failed and is left out: ${err && err.message ? err.message : err}`)
+                    return false
+                } finally {
+                    ec.message.clearErrors()
+                    ec.message.popErrors()
+                }
+            }
+            // each part in a transaction of its own, so one that fails does not roll back the others
+            const callService = (name, parameters) => {
+                const out = ec.service.sync().name(name).parameters(parameters || {}).requireNewTransaction(true).call()
+                if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                if (out == null) throw new Error(`${name} answered nothing`)
+                return out
+            }
+            const emailOk = part('email', () => {
+                const out = callService('org.moqui.impl.EmailClientServices.get#UserEmailAccounts')
+                accountList = Array.from(out.accountList || []).map((account) => Object.assign({}, account))
+                internalEmailAccountId = out.internalEmailAccountId ?? null
+                emailUnreadCount = accountList.filter((account) => !account.isInternal).reduce((sum, account) => sum + (account.unreadCount || 0), 0)
+            })
+            const internalOk = part('internal', () => {
+                const out = callService('mantle.party.CommunicationServices.count#UnreadInternalMessages')
+                internalUnreadCount = out.unreadCount ?? 0
+                internalUnreadThreadCount = out.unreadThreadCount ?? 0
+            })
+            for (const account of accountList) if (account.isInternal) account.unreadCount = internalOk ? internalUnreadCount : null
+            part('mailboxes', () => {
+                const out = callService('mantle.marketing.ContactListServices.find#ContactLists', {contactListTypeEnumId: 'MAILBOX', memberOnly: true})
+                mailboxList = Array.from(out.contactListList || []).map((list) => ({contactListId: list.contactListId,
+                    contactListName: list.contactListName ?? null, isMember: list.isMember === true, membershipStatusId: list.membershipStatusId ?? null,
+                    deliveryEnumId: list.deliveryEnumId || list.defaultDeliveryEnumId || 'CldInbox', unreadCount: list.unreadCount ?? 0,
+                    lastPostDate: list.lastPostDate ?? null}))
+            })
+            if (emailOk && internalOk) unifiedUnreadCount = emailUnreadCount + internalUnreadCount
+        ]]></script></actions>
+    </service>
+
+    <service verb="notify" noun="NewMail">
+        <description>
+            An alert on topic NewMail for new mail in an Inbox. The topic is not persisted (persistOnSend N), so the
+            Notifications and Updates lists and their counts leave it out; the Inbox and its count keep the message.
+            - An email (emailMessageId): to the users of its account (the owner and the current members), when it is
+              received mail (ES_RECEIVED) in an Inbox folder, unread, not archived and not snoozed. Coalesced by the
+              messages themselves: mail stored in the account's Inbox within coalesceSeconds (15 by default; 0 for none)
+              of each other alerts once, for the first stored (lastUpdatedStamp, then emailMessageId), with newCount the
+              unread messages of that burst; for the others the users are named in coalescedUserIds. So a sync batch, one
+              transaction or several close together, alerts once.
+            - An internal message or mailbox post (communicationEventId, a Message): to the users of its recipients that
+              take it in the Inbox (its to and cc rows, and its mailbox rows but those of a member who takes the mailbox as
+              Mailbox only), less the sender. Not coalesced unless coalesceSeconds is given.
+            The message has store, emailMessageId or communicationEventId, threadId, emailAccountId, contactListId and
+            contactListName, fromName, fromAddress, subject and summary; the notification's record is the message and its
+            actor the sender's user. Never fails the caller: a failure is logged and notifies no one.
+        </description>
+        <in-parameters>
+            <parameter name="emailMessageId"/>
+            <parameter name="communicationEventId"/>
+            <parameter name="coalesceSeconds" type="Integer"><description>For email: 15 by default, 0 for no coalescing</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="notifiedUserIds" type="List"/>
+            <parameter name="coalescedUserIds" type="List"/>
+            <parameter name="newCount" type="Integer"><description>The messages the alert is for</description></parameter>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const cf = ec.entity.conditionFactory
+            notifiedUserIds = []
+            coalescedUserIds = []
+            newCount = 0
+            const textOf = (body) => body ? String(body).replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim() : ''
+            const summaryOf = (subjectText, body) => {
+                const text = textOf(body)
+                return subjectText || (text.length > 120 ? text.substring(0, 117) + '...' : text)
+            }
+            ec.message.pushErrors()
+            try {
+                let userIds = []
+                let message = null
+                let record = null
+                let actorUserId = null
+                let earlier = false
+                if (emailMessageId) {
+                    const email = ec.entity.find('moqui.basic.email.EmailMessage').condition('emailMessageId', emailMessageId).disableAuthz().one()
+                    if (email == null || !email.emailAccountId || email.statusId !== 'ES_RECEIVED' || email.isRead === 'Y' || email.archivedDate != null) return
+                    if (email.snoozedThruDate != null && Number(email.snoozedThruDate) > Number(ec.user.nowTimestamp)) return
+                    const folder = email.emailFolderId ? ec.entity.find('moqui.basic.email.EmailFolder').condition('emailFolderId', email.emailFolderId)
+                            .disableAuthz().one() : null
+                    if (folder == null || folder.folderKindEnumId !== 'EfkInbox') return
+                    const account = ec.entity.find('moqui.basic.email.EmailAccount').condition('emailAccountId', email.emailAccountId).disableAuthz().one()
+                    if (account == null || account.statusId === 'EasRemoved') return
+                    const users = new Set(account.ownerUserId ? [account.ownerUserId] : [])
+                    for (const row of ec.entity.find('moqui.basic.email.EmailAccountUser').condition('emailAccountId', email.emailAccountId)
+                            .conditionDate('fromDate', 'thruDate', null).disableAuthz().list()) users.add(row.userId)
+                    userIds = Array.from(users)
+                    // the burst this message is in: the account's unread received mail in an Inbox stored within the window
+                    newCount = 1
+                    const windowMillis = (coalesceSeconds == null ? 15 : Number(coalesceSeconds)) * 1000
+                    const stampOf = (row) => {
+                        const value = row.lastUpdatedStamp
+                        if (value == null || value === '') return null
+                        if (value instanceof Date) return value.getTime()
+                        const number = Number(value)
+                        return Number.isNaN(number) ? new Date(String(value)).getTime() : number
+                    }
+                    const stamp = stampOf(email)
+                    if (windowMillis > 0 && stamp != null) {
+                        const inboxIds = Array.from(ec.entity.find('moqui.basic.email.EmailFolder').condition('emailAccountId', email.emailAccountId)
+                                .condition('folderKindEnumId', 'EfkInbox').selectField('emailFolderId').disableAuthz().list()).map((row) => row.emailFolderId)
+                        const before = (row) => {
+                            const other = stampOf(row)
+                            if (other !== stamp) return other < stamp
+                            const left = String(row.emailMessageId), right = String(emailMessageId)
+                            return left.length !== right.length ? left.length < right.length : left < right
+                        }
+                        const burst = Array.from(ec.entity.find('moqui.basic.email.EmailMessage').condition('emailAccountId', email.emailAccountId)
+                                .condition('emailFolderId', 'in', inboxIds).condition('statusId', 'ES_RECEIVED')
+                                .condition(cf.makeCondition('isRead', 'not-equals', 'Y', true)).condition('archivedDate', null)
+                                .condition('emailMessageId', 'not-equals', emailMessageId)
+                                .condition(cf.makeCondition('lastUpdatedStamp', 'greater-equals', new Date(stamp - windowMillis)))
+                                .condition(cf.makeCondition('lastUpdatedStamp', 'less-equals', new Date(stamp + windowMillis)))
+                                .selectField('emailMessageId').selectField('lastUpdatedStamp').disableAuthz().list())
+                        earlier = burst.some(before)
+                        newCount = 1 + burst.filter((row) => !before(row)).length
+                    }
+                    message = {store: 'email', emailMessageId: emailMessageId, threadId: email.rootEmailMessageId || emailMessageId,
+                        emailAccountId: email.emailAccountId, accountName: account.accountName ?? null, contactListId: null, contactListName: null,
+                        fromName: email.fromName || email.fromAddress || '', fromAddress: email.fromAddress ?? null, subject: email.subject ?? '',
+                        summary: email.snippet || summaryOf(email.subject, email.bodyText || email.body), newCount: newCount}
+                    record = ['moqui.basic.email.EmailMessage', emailMessageId]
+                } else if (communicationEventId) {
+                    const event = ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', communicationEventId)
+                            .disableAuthz().one()
+                    if (event == null || event.communicationEventTypeId !== 'Message' || event.statusId === 'CeCancelled') return
+                    const rows = Array.from(ec.entity.find('mantle.party.communication.CommunicationEventParty')
+                            .condition('communicationEventId', communicationEventId).condition('roleTypeId', 'in', ['MessageTo', 'MessageCc', 'MessageMailbox'])
+                            .disableAuthz().list())
+                    // a member who takes the mailbox as Mailbox only reads the post there
+                    const mailboxOnly = new Set()
+                    let contactListName = null
+                    if (event.contactListId) {
+                        const list = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', event.contactListId).disableAuthz().one()
+                        contactListName = list?.contactListName ?? null
+                        for (const member of ec.entity.find('mantle.marketing.contact.ContactListParty').condition('contactListId', event.contactListId)
+                                .condition('statusId', 'CLPT_ACCEPTED').condition(cf.makeConditionDate('fromDate', 'thruDate', null)).disableAuthz().list()) {
+                            if ((member.deliveryEnumId || list?.defaultDeliveryEnumId || 'CldInbox') === 'CldMailboxOnly') mailboxOnly.add(member.partyId)
+                        }
+                    }
+                    const partyIds = Array.from(new Set(rows.filter((row) => !(row.roleTypeId === 'MessageMailbox' && mailboxOnly.has(row.partyId)))
+                            .map((row) => row.partyId).filter((partyId) => partyId !== event.fromPartyId)))
+                    if (partyIds.length === 0) return
+                    const senders = new Set(event.fromPartyId ? Array.from(ec.entity.find('moqui.security.UserAccount').condition('partyId', event.fromPartyId)
+                            .selectField('userId').disableAuthz().list()).map((account) => account.userId) : [])
+                    userIds = Array.from(new Set(Array.from(ec.entity.find('moqui.security.UserAccount').condition('partyId', 'in', partyIds)
+                            .selectField('userId').disableAuthz().list()).map((account) => account.userId))).filter((userId) => !senders.has(userId))
+                    let fromName = ''
+                    if (event.fromPartyId) {
+                        const party = ec.entity.find('mantle.party.PartyDetail').condition('partyId', event.fromPartyId).disableAuthz().one()
+                        fromName = party ? (party.organizationName || [party.firstName, party.lastName].filter((part) => part).join(' ') || event.fromPartyId) : event.fromPartyId
+                    }
+                    message = {store: 'internal', communicationEventId: communicationEventId, threadId: event.rootCommEventId || communicationEventId,
+                        emailAccountId: null, contactListId: event.contactListId ?? null, contactListName: contactListName, fromName: fromName,
+                        fromAddress: null, subject: event.subject ?? '', summary: summaryOf(event.subject, event.body)}
+                    record = ['mantle.party.communication.CommunicationEvent', communicationEventId]
+                    actorUserId = senders.size ? Array.from(senders)[0] : null
+                    newCount = 1
+                    message.newCount = 1
+                } else {
+                    return
+                }
+                if (userIds.length === 0) return
+                // a message after the first of its burst: the burst's alert is the first one's
+                if (earlier) { coalescedUserIds = userIds; newCount = 0; return }
+                const nm = ec.makeNotificationMessage().topic('NewMail').message(message).userIds(userIds).record(record[0], record[1])
+                if (actorUserId) nm.actorUserId(actorUserId)
+                nm.send()
+                notifiedUserIds = Array.from(nm.getNotifyUserIds() ?? [])
+            } catch (err) {
+                ec.logger.error(`New mail alert for ${emailMessageId ? 'email message ' + emailMessageId : 'communication event ' + communicationEventId} not sent: ${err && err.message ? err.message : err}`)
+                notifiedUserIds = []
+            } finally {
+                if (ec.message.hasError()) ec.logger.error(`New mail alert for ${emailMessageId || communicationEventId}: ${ec.message.getErrorsString()}`)
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+        ]]></script></actions>
+    </service>
+
     <service verb="add" noun="WikiPageComment">
         <in-parameters>
             <parameter name="wikiPageId" required="true"/>
@@ -869,12 +1348,60 @@ along with this software (see the LICENSE.md file). If not, see
             primary key field, the record's own communication event join and work effort join (null when the generic
             CommunicationEventRecord or WorkEffortRecord holds its links; a party's own communication event link is the
             event's from and to party and its CommunicationEventParty rows), its note entity and its content entity.
-            With checkRecord (the default) the record must be found under the user's filters.
+
+            With checkRecord (the default) the record must be one the user may see, or there is an error (the record is
+            not found). With checkOnly the answer is recordVisible, true or false, and no error, so the caller's
+            transaction is not marked rollback-only by a record the user may not see; notVisibleReason says why, for a log.
+
+            A record the user may see is found under the user's entity filters, and is never someone else's personal
+            contact (Party.privateOwnerUserId). A work effort, a request, a communication event and an order (whose filter
+            is on OrderPart, not OrderHeader) have no entity filter of their own, so under an organization filter they
+            follow per-user rules, those of search#Universal (IronStone R4, R5). The
+            organization filter is the MANTLE_USER_ORG or MANTLE_ACTIVE_ORG filter set of the authorization: its
+            organizations are filterOrgIds (setup#UserOrganizationInfo), the active organization for MANTLE_ACTIVE_ORG,
+            and all of the user's organizations when the authorization names MANTLE_ACTIVE_ORG and no organization is
+            active (the set's applyCond leaves it off then, but the user still has the filter here).
+            - A work effort (task, event, project, ...): its ownerPartyId, or that of its root work effort, is the user's
+              party or one of the user's organizations, or one of those is a current WorkEffortParty of it or of its root
+              work effort.
+            - A request: the user's party filed it (filedByPartyId), or the user's party or one of the user's
+              organizations (such as the customer organization) is a current RequestParty, or the organization of its
+              product store or the owner of its facility is one of the user's organizations.
+            - An order: the user's party entered it (enteredByPartyId), or the user's party or one of the user's
+              organizations is the vendor or customer of one of its parts (the rule of the OrderPart filter) or an
+              OrderPartParty of it.
+            - A communication event: the user's party is its from or to party or a CommunicationEventParty, or it is a
+              post of a mailbox the user may read (ContactListServices.get#UserMailboxAccess), or it or the root of its
+              thread is linked (the record's own join or a CommunicationEventRecord) to a record the user may see by these
+              rules, one level deep: a linked communication event is checked without its own links.
+            A post of a mailbox the user may not read follows the communication event rule with or without an
+            organization filter, as in search#Universal, and so does a communication event filed on a wiki page the user
+            may not see (the event or the root of its thread, WikiPageCommunicationEvent). Without an organization filter
+            work efforts, requests, orders and other communication events are seen as found. A wiki page has its own rule
+            (below). Any other record type has only its entity filters.
+
+            The per-user rules do not apply with authorization disabled (an internal caller), to a user in the ADMIN
+            group, or for a record type the user has an explicit entity authorization for: an ArtifactAuthz of one of the
+            user's groups over an ArtifactGroupMember of type AT_ENTITY naming the record entity (by name, or by a pattern
+            that matches it), allow or always, for view or all, with no deny, which ec.artifactExecution.isPermitted
+            confirms. A staff app such as a customer service or projects app gives its users all requests or work efforts
+            that way. isPermitted alone does not tell: an entity inherits the authorization of the app root (an
+            AUTHZT_ALWAYS ArtifactAuthz with inheritAuthz), which permits every entity to every user of the app, and no
+            group, ADMIN included, has an entity authorization by default.
+
+            A wiki page (moqui.resource.wiki.WikiPage, a framework entity, which no entity filter covers) follows the wiki's
+            own view rule whenever authorization is on, for every user, ADMIN and staff included as in the wiki screens,
+            with or without an organization filter: the rule of org.moqui.impl.WikiServices.get#WikiPageInfo, replicated
+            here because that service also reads the page's file. A space with restrictView Y needs a WikiSpaceUser row of
+            the user with allowView Y, and a page with restrictView Y a WikiPageUser row of the user with allowView Y; a page
+            whose space is not found is not seen.
         </description>
         <in-parameters>
             <parameter name="recordEntityName" required="true"/>
             <parameter name="recordId" required="true"/>
             <parameter name="checkRecord" type="Boolean" default="true"/>
+            <parameter name="checkOnly" type="Boolean" default="false"><description>Check the record and answer recordVisible
+                instead of adding an error: a record type that is not one or a record the user may not see gives false</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="recordEntityName"><description>The full entity name</description></parameter>
@@ -885,6 +1412,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="workEffortJoin" type="Map"><description>{entityName, keyField}</description></parameter>
             <parameter name="noteEntity" type="Map"><description>{entityName, keyField}</description></parameter>
             <parameter name="contentEntity" type="Map"><description>{entityName, keyField, typeField, dateField}</description></parameter>
+            <parameter name="recordVisible" type="Boolean"><description>Whether the user may see the record; null when it was
+                not checked (checkRecord false)</description></parameter>
+            <parameter name="notVisibleReason"><description>With checkOnly, why recordVisible is false (for a log, not for the
+                user)</description></parameter>
         </out-parameters>
         <actions><script><![CDATA[
             const commEventJoins = {
@@ -923,38 +1454,249 @@ along with this software (see the LICENSE.md file). If not, see
                 'mantle.work.effort.WorkEffort': content('mantle.work.effort.WorkEffortContent', 'workEffortId', 'contentTypeEnumId'),
                 'mantle.facility.Facility': content('mantle.facility.FacilityContent', 'facilityId', 'facilityContentTypeEnumId')}
 
+            const PARTY = 'mantle.party.Party'
+            const WORK_EFFORT = 'mantle.work.effort.WorkEffort'
+            const REQUEST = 'mantle.request.Request'
+            const COMM_EVENT = 'mantle.party.communication.CommunicationEvent'
+            const ORDER = 'mantle.order.OrderHeader'
+            const WIKI_PAGE = 'moqui.resource.wiki.WikiPage'
+            recordVisible = null
+            notVisibleReason = null
+            // a refusal: an error, or with checkOnly the answer false
+            const refuse = (message) => {
+                if (checkOnly) { recordVisible = false; notVisibleReason = message }
+                else ec.message.addError(message)
+            }
+
             let recordValue
             try { recordValue = ec.entity.makeValue(recordEntityName) }
-            catch (err) { ec.message.addError(`The record type ${recordEntityName} is not an entity`); return }
+            catch (err) { refuse(`The record type ${recordEntityName} is not an entity`); return }
             recordEntityName = recordValue.getEntityName()
             recordTypeName = recordValue.getEntityNamePretty()
             const keyNames = Object.keys(recordValue.getPrimaryKeys())
             if (keyNames.length !== 1) {
-                ec.message.addError(`The record type ${recordEntityName} has ${keyNames.length} primary key fields, a record link needs one`)
+                refuse(`The record type ${recordEntityName} has ${keyNames.length} primary key fields, a record link needs one`)
                 return
             }
             recordKeyField = keyNames[0]
-            // the record under the user's filters: a record the user may not see has no links for them; someone else's
-            // personal contact (Party.privateOwnerUserId) is not found, with or without an entity filter
-            const record = checkRecord ? ec.entity.find(recordEntityName).condition(recordKeyField, recordId).one() : null
-            if (checkRecord && (record == null || (recordEntityName === 'mantle.party.Party' && record.privateOwnerUserId
-                    && record.privateOwnerUserId !== ec.user.userId))) {
-                ec.message.addError(`${recordTypeName} ${recordId} not found`)
-                return
-            }
-            isParty = recordEntityName === 'mantle.party.Party'
+            isParty = recordEntityName === PARTY
             commEventJoin = commEventJoins[recordEntityName] || null
             workEffortJoin = workEffortJoins[recordEntityName] || null
             noteEntity = noteEntities[recordEntityName] || null
             contentEntity = contentEntities[recordEntityName] || null
+            if (!checkRecord && !checkOnly) return
+
+            // ===== whether the user may see the record (see the description) =====
+            const cf = ec.entity.conditionFactory
+            const authzOn = !ec.artifactExecution.authzDisabled()
+            const current = () => cf.makeConditionDate('fromDate', 'thruDate', null)
+
+            // the user's party and the organizations of the organization filter (orgIds null: no organization filter)
+            let scope = null
+            const userScope = () => {
+                if (scope) return scope
+                const userPartyId = ec.user.userAccount?.partyId || null
+                let orgIds = null
+                if (authzOn) {
+                    if (userPartyId && ec.user.context.filterOrgIds === undefined)
+                        ec.service.sync().name('mantle.party.PartyServices.setup#UserOrganizationInfo').call()
+                    const filterSets = () => new Set(Array.from(ec.artifactExecution.getFindFiltersForUser(PARTY) || [])
+                            .map((filter) => filter.entityFilterSetId))
+                    const activeOrgId = ec.user.context.activeOrgId || null
+                    const filterOrgIds = Array.from(ec.user.context.filterOrgIds || [])
+                    let sets = filterSets()
+                    if (sets.has('MANTLE_USER_ORG')) orgIds = filterOrgIds
+                    else if (sets.has('MANTLE_ACTIVE_ORG')) orgIds = activeOrgId ? [activeOrgId] : filterOrgIds
+                    else if (!activeOrgId) {
+                        // MANTLE_ACTIVE_ORG applies only with an active organization (its applyCond): whether the
+                        // authorization names it is asked with one in the user context for the moment
+                        const hadActive = 'activeOrgId' in ec.user.context
+                        const oldActive = ec.user.context.activeOrgId
+                        ec.user.context.activeOrgId = '_NA_'
+                        try { sets = filterSets() } finally {
+                            if (hadActive) ec.user.context.activeOrgId = oldActive ?? null
+                            else delete ec.user.context.activeOrgId
+                        }
+                        if (sets.has('MANTLE_ACTIVE_ORG')) orgIds = filterOrgIds
+                    }
+                }
+                scope = {userPartyId: userPartyId, orgIds: orgIds, partyIds: (userPartyId ? [userPartyId] : []).concat(orgIds || [])}
+                return scope
+            }
+            // the mailboxes whose every post the user may read, and the others
+            let mailboxes = null
+            const mailboxAccess = () => {
+                if (mailboxes) return mailboxes
+                const out = ec.service.sync().name('mantle.marketing.ContactListServices.get#UserMailboxAccess')
+                        .parameter('partyId', userScope().userPartyId).call()
+                mailboxes = {readable: Array.from(out?.readableContactListIds || []), hidden: Array.from(out?.hiddenContactListIds || [])}
+                return mailboxes
+            }
+            // staff: ADMIN, or an explicit entity authorization for the record type (not the inherited one of an app root)
+            const staff = {}
+            const staffSees = (entityName) => {
+                if (Object.prototype.hasOwnProperty.call(staff, entityName)) return staff[entityName]
+                let sees = false
+                try {
+                    if (ec.user.isInGroup('ADMIN')) {
+                        sees = true
+                    } else {
+                        const groupIds = Array.from(ec.user.getUserGroupIdSet() || [])
+                        const rows = Array.from(ec.entity.find('moqui.security.ArtifactAuthzCheckView').condition('userGroupId', 'in', groupIds)
+                                .condition('artifactTypeEnumId', 'AT_ENTITY').condition('authzActionEnumId', 'in', ['AUTHZA_ALL', 'AUTHZA_VIEW'])
+                                .disableAuthz().list()).filter((row) => {
+                            if (row.nameIsPattern !== 'Y') return row.artifactName === entityName
+                            try { return new RegExp(`^(?:${row.artifactName})$`).test(entityName) }
+                            catch (err) {
+                                ec.logger.error(`Artifact authz ${row.artifactAuthzId}: the pattern ${row.artifactName} is not valid, skipped: ${err}`)
+                                return false
+                            }
+                        })
+                        sees = rows.some((row) => row.authzTypeEnumId === 'AUTHZT_ALLOW' || row.authzTypeEnumId === 'AUTHZT_ALWAYS')
+                                && !rows.some((row) => row.authzTypeEnumId === 'AUTHZT_DENY')
+                                && ec.artifactExecution.isPermitted(entityName, 'AT_ENTITY', 'view')
+                    }
+                } catch (err) {
+                    ec.logger.error(`Record visibility: the entity authorization of user ${ec.user.userId} for ${entityName} was not read, ` +
+                            `the per-user rules apply: ${err}`)
+                    sees = false
+                }
+                staff[entityName] = sees
+                return sees
+            }
+
+            const workEffortVisible = (workEffort, s) => {
+                if (s.partyIds.length === 0) return false
+                const ids = [workEffort.workEffortId]
+                let root = null
+                if (workEffort.rootWorkEffortId && workEffort.rootWorkEffortId !== workEffort.workEffortId) {
+                    ids.push(workEffort.rootWorkEffortId)
+                    root = ec.entity.find(WORK_EFFORT).condition('workEffortId', workEffort.rootWorkEffortId).disableAuthz().one()
+                }
+                if ([workEffort.ownerPartyId, root?.ownerPartyId].some((partyId) => partyId && s.partyIds.includes(partyId))) return true
+                return ec.entity.find('mantle.work.effort.WorkEffortParty').condition('workEffortId', 'in', ids)
+                        .condition('partyId', 'in', s.partyIds).condition(current()).disableAuthz().count() > 0
+            }
+            const requestVisible = (request, s) => {
+                if (s.userPartyId && request.filedByPartyId === s.userPartyId) return true
+                if (s.partyIds.length && ec.entity.find('mantle.request.RequestParty').condition('requestId', request.requestId)
+                        .condition('partyId', 'in', s.partyIds).condition(current()).disableAuthz().count() > 0) return true
+                if (s.orgIds.length === 0) return false
+                const store = request.productStoreId ? ec.entity.find('mantle.product.store.ProductStore')
+                        .condition('productStoreId', request.productStoreId).disableAuthz().one() : null
+                if (store?.organizationPartyId && s.orgIds.includes(store.organizationPartyId)) return true
+                const facility = request.facilityId ? ec.entity.find('mantle.facility.Facility')
+                        .condition('facilityId', request.facilityId).disableAuthz().one() : null
+                return !!(facility?.ownerPartyId && s.orgIds.includes(facility.ownerPartyId))
+            }
+            const orderVisible = (order, s) => {
+                if (s.userPartyId && order.enteredByPartyId === s.userPartyId) return true
+                if (s.partyIds.length === 0) return false
+                // a part of the user's party or organizations as vendor or customer, as the OrderPart filter has it
+                if (Array.from(ec.entity.find('mantle.order.OrderPart').condition('orderId', order.orderId).disableAuthz().list())
+                        .some((part) => s.partyIds.includes(part.vendorPartyId) || s.partyIds.includes(part.customerPartyId))) return true
+                return ec.entity.find('mantle.order.OrderPartParty').condition('orderId', order.orderId)
+                        .condition('partyId', 'in', s.partyIds).disableAuthz().count() > 0
+            }
+            // the view rule of org.moqui.impl.WikiServices.get#WikiPageInfo (see the description)
+            const wikiPageVisible = (page) => {
+                const userId = ec.user.userId || null
+                const space = page.wikiSpaceId ? ec.entity.find('moqui.resource.wiki.WikiSpace').condition('wikiSpaceId', page.wikiSpaceId)
+                        .disableAuthz().one() : null
+                if (space == null) return false
+                if (space.restrictView === 'Y' && !(userId && ec.entity.find('moqui.resource.wiki.WikiSpaceUser')
+                        .condition({wikiSpaceId: page.wikiSpaceId, userId: userId, allowView: 'Y'}).disableAuthz().count() > 0)) return false
+                if (page.restrictView === 'Y' && !(userId && ec.entity.find('moqui.resource.wiki.WikiPageUser')
+                        .condition({wikiPageId: page.wikiPageId, userId: userId, allowView: 'Y'}).disableAuthz().count() > 0)) return false
+                return true
+            }
+            let visible
+            const commEventVisible = (commEvent, depth) => {
+                const s = userScope()
+                const mailbox = commEvent.contactListId ? mailboxAccess() : null
+                const hiddenPost = !!(mailbox && mailbox.hidden.includes(commEvent.contactListId))
+                const eventIds = [commEvent.communicationEventId]
+                if (commEvent.rootCommEventId && commEvent.rootCommEventId !== commEvent.communicationEventId) eventIds.push(commEvent.rootCommEventId)
+                // a comment on a wiki page the user may not see, the event's or its thread root's, is kept as a mailbox post is
+                const onHiddenWikiPage = () => Array.from(ec.entity.find('mantle.party.communication.WikiPageCommunicationEvent')
+                        .condition('communicationEventId', 'in', eventIds).disableAuthz().list()).some((row) => {
+                    const page = ec.entity.find(WIKI_PAGE).condition('wikiPageId', row.wikiPageId).disableAuthz().one()
+                    return page == null || !wikiPageVisible(page)
+                })
+                if (s.orgIds == null && !hiddenPost && !onHiddenWikiPage()) return true
+                if (staffSees(COMM_EVENT)) return true
+                const partyId = s.userPartyId
+                if (partyId && (commEvent.fromPartyId === partyId || commEvent.toPartyId === partyId)) return true
+                if (partyId && ec.entity.find('mantle.party.communication.CommunicationEventParty')
+                        .condition('communicationEventId', commEvent.communicationEventId).condition('partyId', partyId)
+                        .disableAuthz().count() > 0) return true
+                if (mailbox && mailbox.readable.includes(commEvent.contactListId)) return true
+                if (depth > 0) return false
+                // filed on a record the user may see: the event, or the root of its thread (a record's timeline shows the replies)
+                for (const [linkedEntityName, join] of Object.entries(commEventJoins)) {
+                    for (const row of ec.entity.find(join.entityName).condition('communicationEventId', 'in', eventIds).disableAuthz().list()) {
+                        if (visible(linkedEntityName, join.keyField, row[join.keyField], depth + 1)) return true
+                    }
+                }
+                for (const row of ec.entity.find('mantle.party.communication.CommunicationEventRecord')
+                        .condition('communicationEventId', 'in', eventIds).disableAuthz().list()) {
+                    let keyField = null
+                    try {
+                        const keys = Object.keys(ec.entity.makeValue(row.recordEntityName).getPrimaryKeys())
+                        if (keys.length === 1) keyField = keys[0]
+                    } catch (err) { keyField = null }
+                    if (keyField == null) {
+                        ec.logger.warn(`Communication event ${row.communicationEventId} is filed on ${row.recordEntityName} ${row.recordId}, ` +
+                                'which is not a record type, skipped')
+                        continue
+                    }
+                    if (visible(row.recordEntityName, keyField, row.recordId, depth + 1)) return true
+                }
+                return false
+            }
+            visible = (entityName, keyField, id, depth) => {
+                // under the user's entity filters
+                const value = ec.entity.find(entityName).condition(keyField, id).one()
+                if (value == null) return false
+                if (entityName === PARTY) return !value.privateOwnerUserId || value.privateOwnerUserId === ec.user.userId
+                if (!authzOn) return true
+                if (entityName === COMM_EVENT) return commEventVisible(value, depth)
+                if (entityName === WIKI_PAGE) return wikiPageVisible(value)
+                if (entityName !== WORK_EFFORT && entityName !== REQUEST && entityName !== ORDER) return true
+                const s = userScope()
+                if (s.orgIds == null || staffSees(entityName)) return true
+                if (entityName === ORDER) return orderVisible(value, s)
+                return entityName === WORK_EFFORT ? workEffortVisible(value, s) : requestVisible(value, s)
+            }
+
+            // strict: a check that fails (an exception, or an error from a service it calls) is not visible, and logged
+            let isVisible = false
+            ec.message.pushErrors()
+            try {
+                isVisible = visible(recordEntityName, recordKeyField, recordId, 0)
+                if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+            } catch (err) {
+                ec.logger.error(`Record visibility of ${recordEntityName} ${recordId} for user ${ec.user.userId} not checked, not visible: ` +
+                        `${err && err.message ? err.message : err}`)
+                isVisible = false
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+            if (isVisible) recordVisible = true
+            else refuse(`${recordTypeName} ${recordId} not found`)
         ]]></script></actions>
     </service>
 
     <service verb="findOrCreate" noun="EmailCommunicationEvent">
         <description>
-            The CommunicationEvent of a framework EmailMessage (by emailMessageId), created when there is none: type
-            Email, the from and to party matched by the user account or by an email address on a party (the first To
-            address), the status from the message's, and the parent event of the message's parent email when it has one.
+            The CommunicationEvent of a framework EmailMessage (by emailMessageId), created when there is none
+            (create#EmailCommunicationEvent: type Email, its parties matched by user account and by the email addresses on
+            parties, the status from the message's, and the parent event of the message's parent email when it has one). A
+            message of a mail client account (emailAccountId) is found only by a user who reaches the account
+            (org.moqui.impl.EmailClientServices.get#EmailAccountAccess); the personal contacts that match are the account
+            owner's and the current user's. Mail with no account (template mail, the old poller) is found by anyone, as
+            before.
         </description>
         <in-parameters><parameter name="emailMessageId" required="true"/></in-parameters>
         <out-parameters>
@@ -963,6 +1705,57 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions><script><![CDATA[
             created = false
+            const email = ec.entity.find('moqui.basic.email.EmailMessage').condition('emailMessageId', emailMessageId).disableAuthz().one()
+            if (email == null) { ec.message.addError(`Email message ${emailMessageId} not found`); return }
+            const owners = []
+            if (email.emailAccountId) {
+                const access = ec.service.sync().name('org.moqui.impl.EmailClientServices.get#EmailAccountAccess')
+                        .parameter('emailAccountId', email.emailAccountId).call()
+                if (ec.message.hasError()) return
+                if (!(access.level >= 1)) { ec.message.addError(`Email message ${emailMessageId} not found`); return }
+                if (access.account?.ownerUserId) owners.push(access.account.ownerUserId)
+            }
+            if (ec.user.userId) owners.push(ec.user.userId)
+            const out = ec.service.sync().name('mantle.party.CommunicationServices.create#EmailCommunicationEvent')
+                    .parameters({emailMessageId: emailMessageId, contactOwnerUserIdList: owners}).disableAuthz().call()
+            if (ec.message.hasError()) return
+            communicationEventId = out.communicationEventId ?? null
+            created = out.created === true
+        ]]></script></actions>
+    </service>
+    <service verb="create" noun="EmailCommunicationEvent">
+        <description>
+            Internal (authorization disabled), for findOrCreate#EmailCommunicationEvent and the filing of received and sent
+            mail (file#ReceivedEmail, file#SentEmail): the CommunicationEvent of a framework EmailMessage, the one it has or
+            a new one. Its parties are matched by the message's user accounts (fromUserId, toUserId) and by the email
+            addresses on parties (an email address of PartyContactMechInfo in effect, in any case) for the from address and
+            each To and Cc address. A disabled party does not match, nor a personal contact (Party.privateOwnerUserId) of a
+            user not in contactOwnerUserIdList; a directory party comes before a personal contact of the same address.
+
+            The new event is type Email, from the from party, to the first matched To party, with the status from the
+            message's (ES_SENT CeSent, ES_RECEIVED CeReceived, ...), the parent event of the message's parent email, and its
+            subject and body. Every other matched To and Cc party gets a CommunicationEventParty row (MessageTo, MessageCc;
+            one per party, To first), so each party's timeline (find#PartyCommunicationEvents) shows the email. With
+            requireMatch nothing is created unless an address that is not in ignoreAddressList (the account's own
+            addresses) matches a party; communicationEventId is then null.
+        </description>
+        <in-parameters>
+            <parameter name="emailMessageId" required="true"/>
+            <parameter name="contactOwnerUserIdList" type="List"><description>The users whose personal contacts may match</description></parameter>
+            <parameter name="requireMatch" type="Boolean" default="false"/>
+            <parameter name="ignoreAddressList" type="List"><description>Addresses whose match alone does not make an event</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="communicationEventId"/>
+            <parameter name="created" type="Boolean"/>
+            <parameter name="matchedPartyIdList" type="List"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            created = false
+            communicationEventId = null
+            matchedPartyIdList = []
+            if (!ec.artifactExecution.authzDisabled()) { ec.message.addError('create#EmailCommunicationEvent is internal'); return }
+            const cf = ec.entity.conditionFactory
             const eventOf = (id) => {
                 if (!id) return null
                 const found = ec.entity.find('mantle.party.communication.CommunicationEvent').condition('emailMessageId', id)
@@ -971,35 +1764,82 @@ along with this software (see the LICENSE.md file). If not, see
             }
             const existing = eventOf(emailMessageId)
             if (existing != null) { communicationEventId = existing.communicationEventId; return }
-
-            // TODO: once mail accounts have owners (IronStone M5) check the user may see the message
             const email = ec.entity.find('moqui.basic.email.EmailMessage').condition('emailMessageId', emailMessageId).one()
             if (email == null) { ec.message.addError(`Email message ${emailMessageId} not found`); return }
 
-            const cf = ec.entity.conditionFactory
-            const bareAddress = (text) => {
-                const match = /<([^>]+)>/.exec(text)
-                return (match ? match[1] : text).trim()
-            }
-            const addressList = (text) => text ? String(text).split(/[,;]/).map(bareAddress).filter((address) => address.includes('@')) : []
-            const partyOf = (address, userId) => {
-                if (userId) {
-                    const account = ec.entity.find('moqui.security.UserAccount').condition('userId', userId).useCache(true).one()
-                    if (account?.partyId) return {partyId: account.partyId, contactMechId: null}
+            // the addresses of a header: "Name, Title" <a@b>, c@d
+            const addressList = (text) => {
+                const out = []
+                if (!text) return out
+                let current = '', quote = false, angle = 0
+                const push = () => {
+                    const entry = current.trim()
+                    current = ''
+                    if (!entry) return
+                    const match = /<([^>]+)>\s*$/.exec(entry)
+                    const address = (match ? match[1] : entry).trim()
+                    if (address.includes('@') && !out.some((other) => other.toLowerCase() === address.toLowerCase())) out.push(address)
                 }
-                if (!address) return null
-                const found = ec.entity.find('mantle.party.contact.PartyContactMechInfo')
-                        .condition('contactMechTypeEnumId', 'CmtEmailAddress')
-                        .condition(cf.makeCondition('infoString', 'equals', address, false, true))
-                        .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).orderBy('-fromDate').limit(1).list()
-                return found.length ? {partyId: found[0].partyId, contactMechId: found[0].contactMechId} : null
+                for (const ch of String(text)) {
+                    if (ch === '"') quote = !quote
+                    else if (ch === '<' && !quote) angle++
+                    else if (ch === '>' && !quote && angle > 0) angle--
+                    else if ((ch === ',' || ch === ';') && !quote && angle === 0) { push(); continue }
+                    current += ch
+                }
+                push()
+                return out.slice(0, 100)
             }
-            const from = partyOf(addressList(email.fromAddress)[0], email.fromUserId)
-            const to = partyOf(addressList(email.toAddresses)[0], email.toUserId)
-            const statusByEmail = {ES_DRAFT: 'CeInProgress', ES_READY: 'CeReady', ES_SENT: 'CeSent', ES_RECEIVED: 'CeReceived',
-                ES_VIEWED: 'CeViewed', ES_BOUNCED: 'CeBounced', ES_CANCELLED: 'CeCancelled'}
-            const parent = eventOf(email.parentEmailMessageId)
+            const owners = new Set((contactOwnerUserIdList ? Array.from(contactOwnerUserIdList) : []).filter((id) => id))
+            const ignored = new Set((ignoreAddressList ? Array.from(ignoreAddressList) : []).filter((address) => address)
+                    .map((address) => String(address).trim().toLowerCase()))
+            const byAddress = new Map()
+            const partyOfAddress = (address) => {
+                const key = address.toLowerCase()
+                if (byAddress.has(key)) return byAddress.get(key)
+                let found = null
+                const rows = Array.from(ec.entity.find('mantle.party.contact.PartyContactMechInfo').condition('contactMechTypeEnumId', 'CmtEmailAddress')
+                        .condition(cf.makeCondition('infoString', 'equals', address, false, true))
+                        .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).orderBy('-fromDate').list())
+                if (rows.length) {
+                    const parties = {}
+                    for (const party of ec.entity.find('mantle.party.Party').condition('partyId', 'in', Array.from(new Set(rows.map((row) => row.partyId))))
+                            .selectField('partyId').selectField('privateOwnerUserId').selectField('disabled').list()) parties[party.partyId] = party
+                    const allowed = rows.filter((row) => {
+                        const party = parties[row.partyId]
+                        return party != null && party.disabled !== 'Y' && (!party.privateOwnerUserId || owners.has(party.privateOwnerUserId))
+                    })
+                    const pick = allowed.find((row) => !parties[row.partyId].privateOwnerUserId) || allowed[0]
+                    if (pick) found = {partyId: pick.partyId, contactMechId: pick.contactMechId, address: address}
+                }
+                byAddress.set(key, found)
+                return found
+            }
+            const partyOfUser = (userId) => {
+                if (!userId) return null
+                const account = ec.entity.find('moqui.security.UserAccount').condition('userId', userId).useCache(true).one()
+                return account?.partyId ? {partyId: account.partyId, contactMechId: null, address: null} : null
+            }
 
+            const fromAddress = addressList(email.fromAddress)[0] || null
+            const from = partyOfUser(email.fromUserId) || (fromAddress ? partyOfAddress(fromAddress) : null)
+            const toMatches = []
+            const toUser = partyOfUser(email.toUserId)
+            if (toUser) toMatches.push(toUser)
+            for (const address of addressList(email.toAddresses)) { const match = partyOfAddress(address); if (match) toMatches.push(match) }
+            const ccMatches = []
+            for (const address of addressList(email.ccAddresses)) { const match = partyOfAddress(address); if (match) ccMatches.push(match) }
+            const all = [from].concat(toMatches, ccMatches).filter((match) => match != null)
+            matchedPartyIdList = Array.from(new Set(all.map((match) => match.partyId)))
+            if (requireMatch && !all.some((match) => match.address == null || !ignored.has(match.address.toLowerCase()))) {
+                matchedPartyIdList = []
+                return
+            }
+            const to = toMatches[0] || null
+
+            const statusByEmail = {ES_DRAFT: 'CeInProgress', ES_SCHEDULED: 'CeInProgress', ES_READY: 'CeReady', ES_SENT: 'CeSent',
+                ES_RECEIVED: 'CeReceived', ES_VIEWED: 'CeViewed', ES_BOUNCED: 'CeBounced', ES_CANCELLED: 'CeCancelled'}
+            const parent = eventOf(email.parentEmailMessageId)
             const out = ec.service.sync().name('create#mantle.party.communication.CommunicationEvent').parameters({
                 communicationEventTypeId: 'Email', contactMechTypeEnumId: 'CmtEmailAddress', emailMessageId: emailMessageId,
                 statusId: statusByEmail[email.statusId] || (email.receivedDate ? 'CeReceived' : 'CeSent'),
@@ -1007,11 +1847,21 @@ along with this software (see the LICENSE.md file). If not, see
                 toPartyId: to?.partyId ?? null, toContactMechId: to?.contactMechId ?? null,
                 parentCommEventId: parent?.communicationEventId ?? null,
                 rootCommEventId: parent ? (parent.rootCommEventId || parent.communicationEventId) : null,
-                entryDate: email.sentDate ?? email.receivedDate ?? ec.user.nowTimestamp, datetimeStarted: email.sentDate ?? null,
+                entryDate: email.sentDate ?? email.receivedDate ?? email.messageDate ?? ec.user.nowTimestamp, datetimeStarted: email.sentDate ?? null,
                 subject: email.subject, body: email.body ?? email.bodyText, contentType: email.contentType}).call()
             if (ec.message.hasError()) return
             communicationEventId = out.communicationEventId
             created = true
+            // the other recipients that match, one row per party, To before Cc
+            const roles = new Map()
+            for (const match of toMatches) if (!roles.has(match.partyId)) roles.set(match.partyId, 'MessageTo')
+            for (const match of ccMatches) if (!roles.has(match.partyId)) roles.set(match.partyId, 'MessageCc')
+            for (const [partyId, roleTypeId] of roles) {
+                if (partyId === to?.partyId || partyId === from?.partyId) continue
+                ec.service.sync().name('create#mantle.party.communication.CommunicationEventParty').parameters({
+                    communicationEventId: communicationEventId, partyId: partyId, roleTypeId: roleTypeId, statusId: 'CepReceived'}).call()
+                if (ec.message.hasError()) return
+            }
         ]]></script></actions>
     </service>
 
@@ -1024,7 +1874,9 @@ along with this software (see the LICENSE.md file). If not, see
             timelines of its members and participants, it is always the _NA_ row. Any other record gets a CommunicationEventRecord. Linking
             again changes nothing. The event is communicationEventId, or the event of a framework email (emailMessageId),
             created when there is none. With notifyFollowers a new link notifies the record's followers of messages (of
-            notes for a Comment).
+            notes for a Comment). The record must be one the user sees (get#RecordLinkInfo); an internal caller
+            (authorization disabled) that checked it before, as file#SentEmail for the records send#EmailDraft checked,
+            passes checkRecord false.
         </description>
         <in-parameters>
             <parameter name="communicationEventId"/>
@@ -1033,6 +1885,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="recordId" required="true"/>
             <parameter name="notifyFollowers" type="Boolean" default="false"/>
             <parameter name="recordUrl"><description>The record's screen, for the follower notification's link</description></parameter>
+            <parameter name="checkRecord" type="Boolean" default="true"><description>false only with authorization disabled</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="communicationEventId"/>
@@ -1053,7 +1906,8 @@ along with this software (see the LICENSE.md file). If not, see
             if (commEvent == null) { ec.message.addError(`Communication event ${communicationEventId} not found`); return }
 
             const info = ec.service.sync().name('mantle.party.CommunicationServices.get#RecordLinkInfo')
-                    .parameters({recordEntityName: recordEntityName, recordId: recordId}).call()
+                    .parameters({recordEntityName: recordEntityName, recordId: recordId,
+                        checkRecord: checkRecord !== false || !ec.artifactExecution.authzDisabled()}).call()
             if (ec.message.hasError()) return
             recordEntityName = info.recordEntityName
 
@@ -1120,6 +1974,327 @@ along with this software (see the LICENSE.md file). If not, see
         ]]></script></actions>
     </service>
 
+    <!-- Mail client messages on records. Sent mail: send#EmailDraft keeps the records chosen in Compose or Chatter on the
+        draft (EmailMessageRecord) and file#SentEmail files them once the message is ES_SENT, from the EmailMessage ECA
+        (EmailMessage.eecas.xml) after the commit of the change that sent it: a send that went now, or later (a scheduled
+        send, the undo-send hold, a retry from the Outbox). Received mail: the same ECA runs
+        file#ReceivedEmail after the commit that stored it, which files it by its account's policy and alerts on NewMail. -->
+
+    <service verb="send" noun="EmailDraft">
+        <description>
+            Sends a mail client draft through org.moqui.impl.EmailClientServices.send#Draft, with the same parameters (now,
+            at scheduledSendDate, or after the undo-send hold of holdSeconds) and the same results, and files it on records
+            once it is sent (IronStone R6): recordEntityName and recordId, or recordList ({recordEntityName, recordId}) for
+            several. Each record must be one the user sees (get#RecordLinkInfo) and the draft one the user may send from,
+            or nothing changes.
+
+            The records are kept with the draft as EmailMessageRecord rows, which replace the ones it had; with none given
+            the draft keeps the ones it has. Once the message is ES_SENT, file#SentEmail files it on each through
+            link#CommunicationEventRecord with the emailMessageId (which makes its CommunicationEvent of type Email, with the
+            parties its addresses match) and deletes the row. It runs from the EmailMessage ECA after the commit of the
+            change that sent the message, whether the send went now (this call) or later (send#DueDrafts for a scheduled
+            or held send, a retry from the Outbox), on a service worker in a transaction of its own: a filing failure can
+            never roll back a send that went out. A message that waits (scheduled, held, or failed and in the Outbox) keeps
+            its records, and cancel#ScheduledSend takes it back to Drafts with them. pendingRecordList is the records kept
+            for the message: filed once the commit is done when sent is true.
+        </description>
+        <in-parameters>
+            <parameter name="emailMessageId" required="true"/>
+            <parameter name="scheduledSendDate" type="Timestamp"/>
+            <parameter name="holdSeconds" type="Integer"/>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId"/>
+            <parameter name="recordList" type="List"><parameter name="record" type="Map"/></parameter>
+            <parameter name="notifyFollowers" type="Boolean" default="false"/>
+            <parameter name="recordUrl"><description>The record's screen, for the follower notification's link</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="statusId"/>
+            <parameter name="sent" type="Boolean"/>
+            <parameter name="messageId"/>
+            <parameter name="sendError"/>
+            <parameter name="scheduledSendDate" type="Long"/>
+            <parameter name="pendingRecordList" type="List"><description>The records kept for the message: {recordEntityName, recordId}</description></parameter>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const RECORD = 'mantle.party.communication.EmailMessageRecord'
+            sent = false
+            messageId = null
+            sendError = null
+            statusId = null
+            pendingRecordList = []
+            const scheduleAt = scheduledSendDate
+            scheduledSendDate = null
+            if (!!recordEntityName !== !!recordId) { ec.message.addError('A record is a recordEntityName with a recordId'); return }
+            const records = []
+            const addRecord = (entityName, id) => {
+                if (!entityName || id == null || id === '') return
+                if (!records.some((record) => record.recordEntityName === entityName && record.recordId === String(id)))
+                    records.push({recordEntityName: entityName, recordId: String(id)})
+            }
+            addRecord(recordEntityName, recordId)
+            for (const item of (recordList ? Array.from(recordList) : [])) {
+                if (!item?.recordEntityName || item?.recordId == null) { ec.message.addError('Each record of recordList has a recordEntityName and a recordId'); return }
+                addRecord(item.recordEntityName, item.recordId)
+            }
+            // each record under the user's filters, with its full entity name
+            const checked = []
+            for (const record of records) {
+                const info = ec.service.sync().name('mantle.party.CommunicationServices.get#RecordLinkInfo')
+                        .parameters({recordEntityName: record.recordEntityName, recordId: record.recordId}).call()
+                if (ec.message.hasError()) return
+                if (!checked.some((other) => other.recordEntityName === info.recordEntityName && other.recordId === record.recordId))
+                    checked.push({recordEntityName: info.recordEntityName, recordId: record.recordId})
+            }
+            // a draft the user may send from (send#Draft checks the rest)
+            const access = ec.service.sync().name('org.moqui.impl.EmailClientServices.get#EmailAccountAccess').call()
+            if (ec.message.hasError()) return
+            const draft = ec.entity.find('moqui.basic.email.EmailMessage').condition('emailMessageId', emailMessageId).one()
+            if (draft == null || !access.accessMap[draft.emailAccountId]) { ec.message.addError(`Email message ${emailMessageId} not found`); return }
+            if (access.accessMap[draft.emailAccountId] < 2) { ec.message.addError(`You may not send from email account ${draft.emailAccountId}`); return }
+
+            if (checked.length) {
+                const now = ec.user.nowTimestamp
+                for (const row of ec.entity.find(RECORD).condition('emailMessageId', emailMessageId).list()) {
+                    if (!checked.some((record) => record.recordEntityName === row.recordEntityName && record.recordId === row.recordId)) row.delete()
+                }
+                for (const record of checked) {
+                    const fields = {linkedByUserId: ec.user.userId, linkedDate: now, notifyFollowers: notifyFollowers ? 'Y' : 'N', recordUrl: recordUrl || null}
+                    const existing = ec.entity.find(RECORD).condition({emailMessageId: emailMessageId, recordEntityName: record.recordEntityName,
+                        recordId: record.recordId}).one()
+                    if (existing != null) {
+                        existing.setFields(fields, true, null, null)
+                        existing.update()
+                    } else {
+                        const row = ec.entity.makeValue(RECORD)
+                        row.setFields(Object.assign({emailMessageId: emailMessageId}, record, fields), true, null, null)
+                        row.create()
+                    }
+                }
+            }
+
+            const out = ec.service.sync().name('org.moqui.impl.EmailClientServices.send#Draft').parameters({emailMessageId: emailMessageId,
+                scheduledSendDate: scheduleAt, holdSeconds: holdSeconds}).call()
+            if (ec.message.hasError()) return
+            statusId = out.statusId ?? null
+            sent = out.sent === true
+            messageId = out.messageId ?? null
+            sendError = out.sendError ?? null
+            scheduledSendDate = out.scheduledSendDate ?? null
+            pendingRecordList = Array.from(ec.entity.find(RECORD).condition('emailMessageId', emailMessageId).orderBy('recordEntityName,recordId').list())
+                    .map((row) => ({recordEntityName: row.recordEntityName, recordId: row.recordId}))
+        ]]></script></actions>
+    </service>
+
+    <service verb="file" noun="SentEmail" authenticate="anonymous-all">
+        <description>
+            Files a sent mail client message (ES_SENT): on the records kept for it (EmailMessageRecord, written by
+            send#EmailDraft), through link#CommunicationEventRecord, deleting each row it files; and for an account that
+            files every party match (recordFilingEnumId ErfAllMatches; by kind when empty: hosted and shared accounts) also
+            with no record, when a recipient other than the account's own addresses matches a party, so the party's
+            timeline shows the reply. The CommunicationEvent is create#EmailCommunicationEvent's; the personal contacts that
+            match are those of the account's owner and of the users who chose the records. The EmailMessage ECA runs it
+            after the commit of any change to ES_SENT (a send that went now, send#DueDrafts, a retry). Safe for any caller: it
+            does only what the account's policy and the kept records say, and a message not sent yet keeps its records.
+            Serialized per message by a lock on the message, so two runs do not both file. Failure tolerant per record:
+            one that fails is logged, named in failedRecordList and kept.
+        </description>
+        <in-parameters><parameter name="emailMessageId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="communicationEventId"/>
+            <parameter name="filedRecordList" type="List"/>
+            <parameter name="failedRecordList" type="List"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const RECORD = 'mantle.party.communication.EmailMessageRecord'
+            communicationEventId = null
+            filedRecordList = []
+            failedRecordList = []
+            const wasDisabled = ec.artifactExecution.disableAuthz()
+            try {
+                const email = ec.entity.find('moqui.basic.email.EmailMessage').condition('emailMessageId', emailMessageId).forUpdate(true).one()
+                if (email == null) { ec.entity.find(RECORD).condition('emailMessageId', emailMessageId).deleteAll(); return }
+                if (email.statusId !== 'ES_SENT') return
+                const pending = Array.from(ec.entity.find(RECORD).condition('emailMessageId', emailMessageId).orderBy('linkedDate').list())
+                const account = email.emailAccountId ? ec.entity.find('moqui.basic.email.EmailAccount').condition('emailAccountId', email.emailAccountId).one() : null
+                const filing = account == null || account.accountKindEnumId === 'EakInternal' ? null
+                        : (account.recordFilingEnumId || (account.accountKindEnumId === 'EakExternal' ? 'ErfLinkedOnly' : 'ErfAllMatches'))
+                if (pending.length === 0 && filing !== 'ErfAllMatches') return
+                const ownAddresses = account == null ? [] : [account.emailAddress].concat(Array.from(ec.entity.find('moqui.basic.email.EmailIdentity')
+                        .condition('emailAccountId', account.emailAccountId).selectField('emailAddress').list()).map((identity) => identity.emailAddress))
+                        .filter((address) => address)
+                const owners = [account?.ownerUserId].concat(pending.map((row) => row.linkedByUserId)).filter((id) => id)
+                // the event, then each record's link, each in a transaction of its own: a record that fails leaves the rest filed
+                const made = ec.service.sync().name('mantle.party.CommunicationServices.create#EmailCommunicationEvent').parameters({
+                    emailMessageId: emailMessageId, contactOwnerUserIdList: owners, requireMatch: pending.length === 0,
+                    ignoreAddressList: ownAddresses}).requireNewTransaction(true).disableAuthz().call()
+                if (ec.message.hasError()) return
+                communicationEventId = made.communicationEventId ?? null
+                if (!communicationEventId) return
+                for (const row of pending) {
+                    const record = {recordEntityName: row.recordEntityName, recordId: row.recordId}
+                    ec.message.pushErrors()
+                    try {
+                        const linked = ec.service.sync().name('mantle.party.CommunicationServices.link#CommunicationEventRecord').parameters({
+                            communicationEventId: communicationEventId, recordEntityName: row.recordEntityName, recordId: row.recordId,
+                            checkRecord: false, notifyFollowers: row.notifyFollowers === 'Y', recordUrl: row.recordUrl})
+                            .requireNewTransaction(true).disableAuthz().call()
+                        if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                        // the generic link names the user who chose the record, not the one whose run filed it
+                        if (linked.created && linked.linkEntityName === 'mantle.party.communication.CommunicationEventRecord' && row.linkedByUserId) {
+                            ec.entity.find('mantle.party.communication.CommunicationEventRecord').condition({communicationEventId: communicationEventId,
+                                recordEntityName: linked.recordEntityName, recordId: row.recordId})
+                                    .updateAll({linkedByUserId: row.linkedByUserId, linkedDate: row.linkedDate})
+                        }
+                        row.delete()
+                        record.linkEntityName = linked.linkEntityName ?? null
+                        filedRecordList.push(record)
+                    } catch (err) {
+                        record.message = err && err.message ? err.message : String(err)
+                        failedRecordList.push(record)
+                        ec.logger.error(`Sent email message ${emailMessageId} not filed on ${row.recordEntityName} ${row.recordId}: ${record.message}`)
+                    } finally {
+                        ec.message.clearErrors()
+                        ec.message.popErrors()
+                    }
+                }
+            } finally {
+                if (!wasDisabled) ec.artifactExecution.enableAuthz()
+            }
+        ]]></script></actions>
+    </service>
+
+    <service verb="file" noun="ReceivedEmail" authenticate="anonymous-all">
+        <description>
+            Files a received mail client message by its account's policy and alerts its users. The EmailMessage ECA runs it
+            after the commit of the write that stored the message (created ES_RECEIVED or ES_VIEWED in an account), so it
+            never fails or slows that write. Mail in a Drafts, Sent, Junk or Trash folder is not filed.
+
+            An account that files every party match (recordFilingEnumId ErfAllMatches; by kind when empty: hosted and shared
+            business accounts) gets the message's CommunicationEvent (type Email, emailMessageId;
+            create#EmailCommunicationEvent) when its sender or a recipient, other than the account's own addresses, matches
+            a party with that email address, so the party's timeline and the 360s show it; the personal contacts
+            (Party.privateOwnerUserId) that match are only the account owner's. An account that files only what is linked
+            (ErfLinkedOnly; an external account such as a personal Gmail) files nothing here: its owner links what belongs
+            on a record (link#CommunicationEventRecord). Received mail in an Inbox, unread, alerts the account's users on
+            topic NewMail (notify#NewMail, coalesced per user). Safe for any caller: it does only what the account's policy
+            says. Never fails: each step that fails is logged and named in failedSteps.
+        </description>
+        <in-parameters><parameter name="emailMessageId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="communicationEventId"/>
+            <parameter name="created" type="Boolean"><description>True when this run made the CommunicationEvent</description></parameter>
+            <parameter name="matchedPartyIdList" type="List"/>
+            <parameter name="notifiedUserIds" type="List"/>
+            <parameter name="coalescedUserIds" type="List"/>
+            <parameter name="failedSteps" type="List"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            communicationEventId = null
+            created = false
+            matchedPartyIdList = []
+            notifiedUserIds = []
+            coalescedUserIds = []
+            failedSteps = []
+            const step = (name, run) => {
+                ec.message.pushErrors()
+                try {
+                    run()
+                    if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                } catch (err) {
+                    failedSteps.push(name)
+                    ec.logger.error(`Received email message ${emailMessageId}: the ${name} step failed: ${err && err.message ? err.message : err}`)
+                } finally {
+                    ec.message.clearErrors()
+                    ec.message.popErrors()
+                }
+            }
+            const wasDisabled = ec.artifactExecution.disableAuthz()
+            try {
+                const email = ec.entity.find('moqui.basic.email.EmailMessage').condition('emailMessageId', emailMessageId).one()
+                if (email == null || !email.emailAccountId || !['ES_RECEIVED', 'ES_VIEWED'].includes(email.statusId)) return
+                const account = ec.entity.find('moqui.basic.email.EmailAccount').condition('emailAccountId', email.emailAccountId).one()
+                if (account == null || account.accountKindEnumId === 'EakInternal' || account.statusId === 'EasRemoved') return
+                const folder = email.emailFolderId ? ec.entity.find('moqui.basic.email.EmailFolder').condition('emailFolderId', email.emailFolderId).one() : null
+                if (folder != null && ['EfkDrafts', 'EfkSent', 'EfkJunk', 'EfkTrash'].includes(folder.folderKindEnumId)) return
+                const filing = account.recordFilingEnumId || (account.accountKindEnumId === 'EakExternal' ? 'ErfLinkedOnly' : 'ErfAllMatches')
+                if (filing === 'ErfAllMatches') step('filing', () => {
+                    const ownAddresses = [account.emailAddress].concat(Array.from(ec.entity.find('moqui.basic.email.EmailIdentity')
+                            .condition('emailAccountId', account.emailAccountId).selectField('emailAddress').list()).map((identity) => identity.emailAddress))
+                            .filter((address) => address)
+                    const out = ec.service.sync().name('mantle.party.CommunicationServices.create#EmailCommunicationEvent').parameters({
+                        emailMessageId: emailMessageId, contactOwnerUserIdList: account.ownerUserId ? [account.ownerUserId] : [],
+                        requireMatch: true, ignoreAddressList: ownAddresses}).requireNewTransaction(true).disableAuthz().call()
+                    if (ec.message.hasError()) return
+                    communicationEventId = out.communicationEventId ?? null
+                    created = out.created === true
+                    matchedPartyIdList = out.matchedPartyIdList ?? []
+                })
+                step('alert', () => {
+                    const out = ec.service.sync().name('mantle.party.CommunicationServices.notify#NewMail')
+                            .parameter('emailMessageId', emailMessageId).disableAuthz().call()
+                    notifiedUserIds = out?.notifiedUserIds ?? []
+                    coalescedUserIds = out?.coalescedUserIds ?? []
+                })
+            } finally {
+                if (!wasDisabled) ec.artifactExecution.enableAuthz()
+            }
+        ]]></script></actions>
+    </service>
+
+    <service verb="handle" noun="EmailMessageFiling" authenticate="false">
+        <description>
+            For the EmailMessage ECA (EmailMessage.eecas.xml): a received message stored in a mail client account (created
+            ES_RECEIVED or ES_VIEWED) runs file#ReceivedEmail, and a message of an account that becomes sent (created ES_SENT
+            or changed to it) runs file#SentEmail, each after the commit of the write on a service worker, in a transaction
+            of its own, so filing and alerts never fail or slow the write (with no transaction in place, at once, in a new
+            one). The EmailMessageRecord rows of a deleted message go. Never fails the write: a failure is logged.
+        </description>
+        <in-parameters>
+            <parameter name="eecaOperation"/>
+            <parameter name="emailMessageId"/>
+            <parameter name="emailAccountId"/>
+            <parameter name="statusId"/>
+            <parameter name="oldStatusId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="serviceName"><description>The filing service run or registered for the commit</description></parameter>
+            <parameter name="afterCommit" type="Boolean"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            serviceName = null
+            afterCommit = false
+            if (!emailMessageId) return
+            ec.message.pushErrors()
+            try {
+                if (eecaOperation === 'delete') {
+                    ec.entity.find('mantle.party.communication.EmailMessageRecord').condition('emailMessageId', emailMessageId).disableAuthz().deleteAll()
+                    return
+                }
+                if (!emailAccountId) return
+                if (statusId === 'ES_SENT' && (eecaOperation === 'create' || oldStatusId !== 'ES_SENT')) serviceName = 'mantle.party.CommunicationServices.file#SentEmail'
+                else if (eecaOperation === 'create' && (statusId === 'ES_RECEIVED' || statusId === 'ES_VIEWED')) serviceName = 'mantle.party.CommunicationServices.file#ReceivedEmail'
+                if (!serviceName) return
+                try {
+                    ec.service.special().name(serviceName).parameters({emailMessageId: emailMessageId}).registerOnCommit()
+                    afterCommit = true
+                } catch (err) {
+                    // no transaction in place: the write is committed already
+                    afterCommit = false
+                }
+                if (!afterCommit) {
+                    ec.service.sync().name(serviceName).parameter('emailMessageId', emailMessageId).requireNewTransaction(true).disableAuthz().call()
+                    if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                }
+            } catch (err) {
+                ec.logger.error(`Email message ${emailMessageId}: ${serviceName || 'filing'} after the ${eecaOperation} not run: ${err && err.message ? err.message : err}`)
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+        ]]></script></actions>
+    </service>
+
     <service verb="get" noun="RecordTimeline">
         <description>
             The history of a record, newest first: its communication events (messages; a Comment is a note) through the
@@ -1131,15 +2306,20 @@ along with this software (see the LICENSE.md file). If not, see
             activities come apart in plannedActivities, soonest due first, with the assignee.
 
             kinds limits the entries to messages, notes, activities, changes and files (a list or comma-separated text;
-            empty is all). Page with pageIndex and pageSize, or give beforeDate (the date of the last entry shown) for
-            the entries before it.
+            empty is all). Page with pageIndex and pageSize, or by a cursor: beforeDate with seenKeys, which are
+            nextBeforeDate and nextSeenKeys of the page before, gives the entries before that date and those of that date
+            not shown yet, so the pages neither skip nor repeat an entry when entries share a date. beforeDate alone
+            gives the entries strictly before it, as before seenKeys (an entry of the same date as the last one shown is
+            not on the next page).
 
             Each source stands alone: one that fails is logged by name and left out, and its name is in failedSources.
             The services of the ServiceRegister rows of type RecordTimelineSource are sources too: each gets
-            recordEntityName, recordId, kinds (the wanted entry kinds), beforeDate and limit, and returns entryList.
+            recordEntityName, recordId, kinds (the wanted entry kinds), beforeDate and limit, and returns entryList;
+            an entry of a registered source may have an entryKey (or an id) that is stable for it.
 
-            An entry is {kind (message, note, activity, change or file), date, authorPartyId, authorUserId, title, body,
-            contentType, statusId, source (the entity or service it came from)} with the fields of its kind:
+            An entry is {kind (message, note, activity, change or file), date, entryKey (the source and the entry's key,
+            stable for the entry: the cursor's seenKeys), authorPartyId, authorUserId, title, body, contentType, statusId,
+            source (the entity or service it came from)} with the fields of its kind:
             communicationEventId, communicationEventTypeId, fromPartyId, toPartyId, parentCommEventId, rootCommEventId,
             emailMessageId, contactListId and attachments (the CommunicationEventContent rows) for a message or a Comment
             note; noteDate and internalNote for a *Note row; workEffortId and purposeEnumId for an activity;
@@ -1153,6 +2333,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="pageIndex" type="Integer" default="0"/>
             <parameter name="pageSize" type="Integer" default="50"/>
             <parameter name="beforeDate" type="Timestamp"/>
+            <parameter name="seenKeys" type="List"><description>With beforeDate: the entryKey of each entry shown whose date is
+                beforeDate (nextSeenKeys); the other entries of that date come too. A list or comma-separated.</description></parameter>
             <parameter name="includeListPosts" type="Boolean" default="false"/>
         </in-parameters>
         <out-parameters>
@@ -1164,12 +2346,18 @@ along with this software (see the LICENSE.md file). If not, see
                 <parameter name="overdue" type="Boolean"/><parameter name="assigneePartyId"/>
             </parameter></parameter>
             <parameter name="hasMore" type="Boolean"/>
+            <parameter name="nextBeforeDate" type="Timestamp"><description>The cursor of the next page: the date of the last
+                entry of this one (null when it has none)</description></parameter>
+            <parameter name="nextSeenKeys" type="List"><description>The cursor's seenKeys: the entryKey of each entry shown so
+                far whose date is nextBeforeDate</description></parameter>
             <parameter name="failedSources" type="List"/>
         </out-parameters>
         <actions><script><![CDATA[
             entryList = []
             plannedActivities = []
             hasMore = false
+            nextBeforeDate = null
+            nextSeenKeys = []
             failedSources = []
             const info = ec.service.sync().name('mantle.party.CommunicationServices.get#RecordLinkInfo')
                     .parameters({recordEntityName: recordEntityName, recordId: recordId}).call()
@@ -1192,7 +2380,14 @@ along with this software (see the LICENSE.md file). If not, see
             const start = pageIndex * pageSize
             const need = start + pageSize + 1
             const beforeMillis = toMillis(beforeDate)
-            const before = beforeMillis == null ? null : new Date(beforeMillis)
+            // the cursor: with seenKeys the entries of beforeDate not shown yet come too
+            const seen = new Set(beforeMillis == null || seenKeys == null ? [] : (typeof seenKeys === 'string' ? seenKeys.split(',')
+                    : Array.from(seenKeys)).map((key) => String(key).trim()).filter((key) => key))
+            const inclusive = seen.size > 0
+            // each source's bound (before it): beforeDate, or with seenKeys the millisecond after it; and its limit, with
+            // room for the seen entries it may return
+            const before = beforeMillis == null ? null : new Date(inclusive ? beforeMillis + 1 : beforeMillis)
+            const fetch = need + seen.size
             const entries = []
 
             // one source: a failure (an exception or error messages) is logged and the source left out
@@ -1217,8 +2412,8 @@ along with this software (see the LICENSE.md file). If not, see
                     const typeIds = ec.entity.find('mantle.party.communication.CommunicationEventType').useCache(true).list()
                             .map((type) => type.communicationEventTypeId).join(',')
                     const parameters = {partyId: recordId, communicationEventTypeId: typeIds, includeListPosts: includeListPosts,
-                        orderByField: '-entryDate', pageIndex: 0, pageSize: need}
-                    if (before) parameters.entryDate_thru = new Date(beforeMillis - 1)
+                        orderByField: '-entryDate', pageIndex: 0, pageSize: fetch}
+                    if (before) parameters.entryDate_thru = new Date(before.getTime() - 1)
                     const found = callSource('mantle.party.CommunicationServices.find#PartyCommunicationEvents', parameters)
                     if (ec.message.hasError()) return
                     for (const commEvent of found.commEventList) ids.add(commEvent.communicationEventId)
@@ -1234,14 +2429,15 @@ along with this software (see the LICENSE.md file). If not, see
                 const idCondition = info.isParty ? cf.makeCondition('communicationEventId', 'in', idList) : cf.makeCondition([
                     cf.makeCondition('communicationEventId', 'in', idList), cf.makeCondition('rootCommEventId', 'in', idList)], 'or')
                 let find = ec.entity.find('mantle.party.communication.CommunicationEvent').condition(idCondition)
-                        .condition(cf.makeCondition('statusId', 'not-equals', 'CeCancelled', true)).orderBy('-entryDate').limit(need)
+                        .condition(cf.makeCondition('statusId', 'not-equals', 'CeCancelled', true)).orderBy('-entryDate').limit(fetch)
                 if (before) find = find.condition(cf.makeCondition('entryDate', 'less', before))
                 for (const value of find.list()) {
                     const commEvent = value.getMap()
                     const kind = commEvent.communicationEventTypeId === 'Comment' ? 'note' : 'message'
                     if (!wants(kind)) continue
                     entries.push({kind: kind, date: commEvent.entryDate ?? commEvent.datetimeStarted ?? commEvent.lastUpdatedStamp,
-                        authorPartyId: commEvent.fromPartyId ?? null, authorUserId: null, title: commEvent.subject ?? null,
+                        entryKey: `ce:${commEvent.communicationEventId}`, authorPartyId: commEvent.fromPartyId ?? null, authorUserId: null,
+                        title: commEvent.subject ?? null,
                         body: commEvent.body ?? null, contentType: commEvent.contentType ?? null, statusId: commEvent.statusId ?? null,
                         source: 'mantle.party.communication.CommunicationEvent', communicationEventId: commEvent.communicationEventId,
                         communicationEventTypeId: commEvent.communicationEventTypeId, fromPartyId: commEvent.fromPartyId ?? null,
@@ -1254,11 +2450,12 @@ along with this software (see the LICENSE.md file). If not, see
             // notes: the record's *Note rows
             if (wants('note') && info.noteEntity) runSource('notes', () => {
                 let find = ec.entity.find(info.noteEntity.entityName).condition(info.noteEntity.keyField, recordId)
-                        .orderBy('-noteDate').limit(need)
+                        .orderBy('-noteDate').limit(fetch)
                 if (before) find = find.condition(cf.makeCondition('noteDate', 'less', before))
                 for (const value of find.list()) {
                     const note = value.getMap()
-                    entries.push({kind: 'note', date: note.noteDate, authorPartyId: null, authorUserId: note.userId ?? null,
+                    entries.push({kind: 'note', date: note.noteDate, entryKey: `note:${toMillis(note.noteDate)}`, authorPartyId: null,
+                        authorUserId: note.userId ?? null,
                         title: null, body: note.noteText ?? null, contentType: 'text/plain', statusId: null,
                         source: info.noteEntity.entityName, noteDate: note.noteDate, internalNote: note.internalNote ?? null})
                 }
@@ -1285,8 +2482,9 @@ along with this software (see the LICENSE.md file). If not, see
                     if (activity.statusId === 'WeComplete' || activity.statusId === 'WeClosed') {
                         const date = activity.actualCompletionDate ?? activity.estimatedCompletionDate ?? activity.actualStartDate ??
                                 activity.estimatedStartDate ?? activity.lastUpdatedStamp
-                        if (beforeMillis != null && toMillis(date) >= beforeMillis) continue
-                        entries.push({kind: 'activity', date: date, authorPartyId: assigneePartyId, authorUserId: null,
+                        if (before && toMillis(date) >= before.getTime()) continue
+                        entries.push({kind: 'activity', date: date, entryKey: `we:${activity.workEffortId}`, authorPartyId: assigneePartyId,
+                            authorUserId: null,
                             title: activity.workEffortName ?? null, body: activity.description ?? null, contentType: null,
                             statusId: activity.statusId, source: 'mantle.work.effort.WorkEffort', workEffortId: activity.workEffortId,
                             purposeEnumId: activity.purposeEnumId})
@@ -1308,7 +2506,7 @@ along with this software (see the LICENSE.md file). If not, see
             if (wants('change')) runSource('auditLog', () => {
                 let find = ec.entity.find('moqui.entity.EntityAuditLog').condition('changedEntityName', recordEntityName)
                         .condition('pkPrimaryValue', recordId).condition(cf.makeCondition('pkSecondaryValue', 'is-null', null))
-                        .orderBy('-changedDate').limit(need).disableAuthz()
+                        .orderBy('-changedDate').limit(fetch).disableAuthz()
                 if (before) find = find.condition(cf.makeCondition('changedDate', 'less', before))
                 const statusDescription = (statusId) => {
                     if (!statusId) return null
@@ -1320,7 +2518,8 @@ along with this software (see the LICENSE.md file). If not, see
                     const isStatus = /statusId$/i.test(change.changedFieldName || '')
                     const oldDescription = isStatus ? statusDescription(change.oldValueText) : null
                     const newDescription = isStatus ? statusDescription(change.newValueText) : null
-                    entries.push({kind: 'change', date: change.changedDate, authorPartyId: null, authorUserId: change.changedByUserId ?? null,
+                    entries.push({kind: 'change', date: change.changedDate, entryKey: `audit:${change.auditHistorySeqId}`, authorPartyId: null,
+                        authorUserId: change.changedByUserId ?? null,
                         title: change.changedFieldName, body: `${oldDescription ?? change.oldValueText ?? ''} → ${newDescription ?? change.newValueText ?? ''}`,
                         contentType: 'text/plain', statusId: null, source: 'moqui.entity.EntityAuditLog',
                         auditHistorySeqId: change.auditHistorySeqId, fieldName: change.changedFieldName, oldValue: change.oldValueText ?? null,
@@ -1333,12 +2532,13 @@ along with this software (see the LICENSE.md file). If not, see
             if (wants('file') && info.contentEntity) runSource('content', () => {
                 const contentInfo = info.contentEntity
                 let find = ec.entity.find(contentInfo.entityName).condition(contentInfo.keyField, recordId)
-                        .orderBy('-' + contentInfo.dateField).limit(need)
+                        .orderBy('-' + contentInfo.dateField).limit(fetch)
                 if (before) find = find.condition(cf.makeCondition(contentInfo.dateField, 'less', before))
                 for (const value of find.list()) {
                     const row = value.getMap()
                     const location = row.contentLocation ? String(row.contentLocation) : ''
-                    entries.push({kind: 'file', date: row[contentInfo.dateField], authorPartyId: null, authorUserId: row.userId ?? null,
+                    entries.push({kind: 'file', date: row[contentInfo.dateField], entryKey: `file:${Object.values(value.getPrimaryKeys()).join('/')}`,
+                        authorPartyId: null, authorUserId: row.userId ?? null,
                         title: location ? location.substring(location.lastIndexOf('/') + 1) : null, body: row.description ?? null,
                         contentType: null, statusId: null, source: contentInfo.entityName, contentKey: value.getPrimaryKeys(),
                         contentLocation: row.contentLocation ?? null, contentTypeEnumId: row[contentInfo.typeField] ?? null})
@@ -1350,21 +2550,36 @@ along with this software (see the LICENSE.md file). If not, see
                     .useCache(true).list()
             for (const register of registered) runSource(register.serviceRegisterId, () => {
                 const out = callSource(register.serviceName, {recordEntityName: recordEntityName, recordId: recordId,
-                    kinds: Array.from(wanted), beforeDate: before, limit: need})
+                    kinds: Array.from(wanted), beforeDate: before, limit: fetch})
                 if (ec.message.hasError()) return
                 for (const entry of (out?.entryList ?? [])) {
                     const kind = kindNames[entry.kind] || entry.kind
                     if (!wants(kind)) continue
-                    if (beforeMillis != null && toMillis(entry.date) >= beforeMillis) continue
-                    entries.push(Object.assign({source: register.serviceName}, entry, {kind: kind}))
+                    if (before && toMillis(entry.date) >= before.getTime()) continue
+                    const ownKey = entry.entryKey ?? entry.id ?? `${toMillis(entry.date)}:${entry.title ?? ''}`
+                    entries.push(Object.assign({source: register.serviceName}, entry,
+                            {kind: kind, entryKey: `${register.serviceRegisterId}:${ownKey}`}))
                 }
             })
 
-            // the union, newest first, and the page
+            // the union after the cursor, newest first (by entryKey within a date), and the page
             const dateOf = (entry) => toMillis(entry.date) ?? 0
-            entries.sort((left, right) => dateOf(right) - dateOf(left))
-            hasMore = entries.length > start + pageSize
-            const page = entries.slice(start, start + pageSize)
+            const after = beforeMillis == null ? entries : entries.filter((entry) => {
+                const millis = dateOf(entry)
+                return millis < beforeMillis || (inclusive && millis === beforeMillis && !seen.has(entry.entryKey))
+            })
+            after.sort((left, right) => dateOf(right) - dateOf(left)
+                    || (left.entryKey < right.entryKey ? 1 : left.entryKey > right.entryKey ? -1 : 0))
+            hasMore = after.length > start + pageSize
+            const page = after.slice(start, start + pageSize)
+            // the next page's cursor: the last entry's date and the keys shown so far of that date
+            if (page.length) {
+                const lastMillis = dateOf(page[page.length - 1])
+                nextBeforeDate = new Date(lastMillis)
+                nextSeenKeys = after.slice(0, start + pageSize).filter((entry) => dateOf(entry) === lastMillis)
+                        .map((entry) => entry.entryKey)
+                if (inclusive && lastMillis === beforeMillis) for (const key of seen) if (!nextSeenKeys.includes(key)) nextSeenKeys.push(key)
+            }
             for (const entry of page) entry.date = entry.date == null ? null : new Date(dateOf(entry))
 
             // the attachments of the messages and notes shown

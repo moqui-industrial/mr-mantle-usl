@@ -111,16 +111,36 @@ feature("duplicate party detection and merge", {
         call("mantle.party.DuplicateServices.merge#Parties", { toPartyId: a, fromPartyId: b })
         const movedClass = Array.from(ec.entity.find("mantle.party.PartyClassificationAppl").condition("partyId", a).condition("partyClassificationId", "CustDistributor").list()).length
         const fromParty = ec.entity.find("mantle.party.Party").condition("partyId", b).one()
+        // a pair of the spec's own for the bulk merge, and a pair it leaves out of the list it gives the merge
+        const withEmail = (firstName, lastName, emailAddress) => {
+            const partyId = call("mantle.party.PartyServices.create#Person", { firstName, lastName }).partyId
+            call("mantle.party.ContactServices.create#EmailAddress", { partyId, emailAddress, contactMechPurposeId: "EmailPrimary" })
+            return partyId
+        }
+        const c = withEmail("Dupe", "Three", "dupe.pair." + effectiveTime + "@example.com")
+        const d = withEmail("Dupe", "Four", "dupe.pair." + effectiveTime + "@example.com")
+        const e = withEmail("Dupe", "Five", "dupe.outside." + effectiveTime + "@example.com")
+        const f = withEmail("Dupe", "Six", "dupe.outside." + effectiveTime + "@example.com")
+        const party = (partyId) => ec.entity.find("mantle.party.Party").condition("partyId", partyId).one()
         call("mantle.party.DuplicateServices.check#AllPartyDuplicates", {})
-        call("mantle.party.DuplicateServices.merge#AllDuplicateParties", {})
-        return { has, dups, addrs, movedClass, fromParty }
+        const flagged = [c, d, e, f].map((partyId) => party(partyId).hasDuplicates)
+        // only the spec's own parties: a full run's demo data from other components, flagged by the scan, is not merged
+        call("mantle.party.DuplicateServices.merge#AllDuplicateParties", { partyIdList: [a, c, d] })
+        const pair = [c, d].map((partyId) => party(partyId))
+        const outside = [e, f].map((partyId) => party(partyId))
+        return { has, dups, addrs, movedClass, fromParty, flagged, pair, outside, c, d }
     },
-    then({ has, dups, addrs, movedClass, fromParty }) {
+    then({ has, dups, addrs, movedClass, fromParty, flagged, pair, outside, c, d }) {
         has.hasDuplicates == true
         Object.keys(dups.matchingInfoByPartyId).length >= 1
         addrs.postalAddressList.length >= 1
         movedClass == 1
         fromParty == null || fromParty.disabled == "Y" || fromParty.mergedToPartyId != null
+        flagged == ["Y", "Y", "Y", "Y"]
+        // one of the pair merged into the other, the pair outside the list left as it was
+        pair.map((party) => party.disabled).sort() == ["N", "Y"]
+        pair.find((party) => party.disabled == "Y").mergedToPartyId == (pair[0].disabled == "Y" ? d : c)
+        outside.map((party) => `${party.disabled}:${party.mergedToPartyId ?? ""}:${party.hasDuplicates}`) == ["N::Y", "N::Y"]
     },
 })
 
