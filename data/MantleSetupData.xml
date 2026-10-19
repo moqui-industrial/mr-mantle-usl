@@ -213,6 +213,24 @@ along with this software (see the LICENSE.md file). If not, see
             showAlert="Y" persistOnSend="N" receiveNotifications="Y" isPrivate="Y"
             titleTemplate="${fromName}: ${subject}" linkTemplate=""/>
 
+    <!-- an event invitation, new or updated (mantle.work.EventServices.send#EventInvitations): workEffortId, workEffortName,
+        organizerName, whenText (the time in the organizer's words), whereText, update (true for a changed event), cancelled,
+        message -->
+    <moqui.security.user.NotificationTopic topic="EventInvitation" description="Event Invitation" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${cancelled ? organizerName + ' cancelled ' + workEffortName : (update ? organizerName + ' updated ' + workEffortName : organizerName + ' invited you to ' + workEffortName)}, ${whenText}"
+            linkTemplate=""/>
+    <!-- an attendee's answer to the organizer (mantle.work.EventServices.respond#EventInvitation): workEffortId, workEffortName,
+        responderName, response (accept, tentative or decline), responseText (accepted, tentatively accepted, declined), message -->
+    <moqui.security.user.NotificationTopic topic="EventInvitationResponse" description="Answer to an Event Invitation" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${responderName} ${responseText} ${workEffortName}${message ? ': ' + message : ''}" linkTemplate=""/>
+
+    <!-- Email: invitations to attendees outside (no user account), iMIP replies and reminders by email. The services pass
+        subject, fromAddress and fromName in bodyParameters, and the body. -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_CALENDAR_EMAIL" description="Calendar Invitation or Reminder" emailServerId="SYSTEM"
+            fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}" sendPartial="Y"/>
+
     <!-- ========== Registered Services ========== -->
 
     <!-- Registered Services: Store Promotion -->
@@ -267,6 +285,16 @@ along with this software (see the LICENSE.md file). If not, see
             linkTemplate=""/>
     <moqui.service.job.ServiceJob jobName="ProcessTimePeriodPay" description="Process Pay for Payroll Period"
             serviceName="mantle.humanres.PayrollServices.process#TimePeriodPay" topic="ProcessTimePeriodPay"/>
+
+    <!-- Service Job: Send Due Reminders of tasks and events - every minute -->
+    <moqui.service.job.ServiceJob jobName="send_DueReminders" description="Send Due Task and Event Reminders"
+            serviceName="mantle.work.EventServices.send#DueReminders" cronExpression="0 0/1 * * * ?" paused="N"
+            transactionTimeout="300"/>
+    <!-- Service Job: Fetch Calendar Subscriptions that are due (each its own refresh interval) - every 15 minutes; nothing is
+        fetched until the framework's ICalendar tool exists -->
+    <moqui.service.job.ServiceJob jobName="fetch_CalendarSubscriptions" description="Fetch Calendar Subscriptions"
+            serviceName="mantle.work.CalendarServices.fetch#CalendarSubscriptions" cronExpression="0 0/15 * * * ?" paused="N"
+            transactionTimeout="1800"/>
 
     <!-- Service Job: Check All Parties for Duplicates (paused by default; cron for every night at 2:00 am) -->
     <moqui.service.job.ServiceJob jobName="check_AllPartyDuplicates" description="Check All Parties for Duplicates"
