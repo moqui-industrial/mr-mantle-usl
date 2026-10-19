@@ -8,9 +8,8 @@ const startYear = "2016"
 // Legitimate differences from the Groovy expectations:
 // - the Groovy checked passwordHashType="SHA-256"; this host hashes new passwords with argon2
 const passwordHashType = "argon2"
-// - the Groovy checked 1477976400000 for the date-only fromDate '2016-11-01', which is midnight in the US Central zone
-//   (UTC-5 in Nov 1); this host parses a date-only value as midnight UTC, 1477958400000
-const assignFromDate = "1477958400000"
+// the date-only fromDate '2016-11-01' is midnight in john.doe's zone, US Central (UTC-5 on Nov 1), as in the Groovy
+const assignFromDate = "1477976400000"
 let vendorResult, workerResult, clientRateResult, vendorRateResult, clientResult, expInvResult, clientInvResult
 
 spec({

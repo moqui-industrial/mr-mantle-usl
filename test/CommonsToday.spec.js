@@ -264,7 +264,7 @@ feature("Mark done and Reschedule are update#Task: the task leaves Today", {
     when() {
         as("Ada", () => {
             call("mantle.work.TaskServices.update#Task", { workEffortId: we.budget, statusId: "WeComplete" })
-            // a timestamp: the port reads date text ("2026-06-11") for this yyyy-MM-dd parameter as UTC midnight, not the user's
+            // a timestamp rather than date text ("2026-06-11", which reads as midnight in the session zone): a time a day ahead
             call("mantle.work.TaskServices.update#Task", { workEffortId: we.report, estimatedCompletionDate: at(24) })
         })
         const find = (id) => ec.entity.find("mantle.work.effort.WorkEffort").condition("workEffortId", id).one()
@@ -312,21 +312,44 @@ feature("the shell counts: Today, overdue, unviewed notifications, approvals, un
     then({ beforeView, afterView, rows, counts, framework, internal, afterRead, mentionTitle, reminderTitle }) {
         counts.counts.today == 6
         counts.counts.overdue == 1
-        counts.counts.notifications == rows
+        // the Notifications and the automatic Updates inbox together are every unviewed row
+        counts.counts.notifications + counts.counts.updates == rows
         counts.counts.approvals == 0
-        counts.counts.mail == 1
+        counts.counts.messages == 1
+        counts.counts.email == 0
         counts.counts.chat == 0
         counts.failedParts == []
         afterView.counts.notifications == beforeView.counts.notifications - 1
-        beforeView.counts.mail == 0
+        beforeView.counts.messages == 0
         framework.counts == counts.counts
         // another user's counts, for internal work (in the session's time zone, which is not Ada's here)
-        internal.counts.notifications == rows
-        internal.counts.mail == 1
+        internal.counts.notifications + internal.counts.updates == rows
+        internal.counts.messages == 1
         internal.failedParts == []
-        afterRead.counts.mail == 0
+        afterRead.counts.messages == 0
         mentionTitle == "Ben Commonstoday mentioned you in Ops: Lunch at noon?"
         reminderTitle == "Reminder: Call the supplier, at 4:00 PM"
+    },
+})
+
+feature("an Updates topic counts in updates, not in the Notifications badge; an approval topic stays in notifications", {
+    when() {
+        call("create#moqui.security.user.NotificationTopic", { topic: "CommonsTodayUpdate", description: "Record update feed (spec)",
+            inboxEnumId: "NinUpdates", persistOnSend: "Y" })
+        call("create#moqui.security.user.NotificationTopic", { topic: "CommonsTodayApproval", description: "Approval (spec)",
+            inboxEnumId: "NinUpdates", approveServiceName: "mantle.party.PartyServices.get#ShellCounts", persistOnSend: "Y" })
+        const before = as("Ada", () => call(COUNTS, {})).counts
+        for (const topic of ["CommonsTodayUpdate", "CommonsTodayApproval"])
+            ec.makeNotificationMessage().topic(topic).message({ summary: topic }).userIds([user.Ada]).send()
+        ec.factory.waitWorkerPoolEmpty(100)
+        const after = as("Ada", () => call(COUNTS, {})).counts
+        return { before, after }
+    },
+    then({ before, after }) {
+        after.updates == before.updates + 1
+        // an approval waits on the user, so it is a notification whatever inbox its topic names
+        after.notifications == before.notifications + 1
+        after.approvals == before.approvals + 1
     },
 })
 

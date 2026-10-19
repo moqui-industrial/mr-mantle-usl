@@ -180,7 +180,7 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.security.user.NotificationTopic topic="ChatterMention" description="Mentioned on a Record" typeString="info"
             showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="${authorName} mentioned you on ${recordName}: ${summary}" linkTemplate=""/>
-    <moqui.security.user.NotificationTopic topic="RecordFollow" description="Activity on a Followed Record" typeString="info"
+    <moqui.security.user.NotificationTopic topic="RecordFollow" inboxEnumId="NinUpdates" description="Activity on a Followed Record" typeString="info"
             showAlert="N" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="${authorName} on ${recordName}: ${summary}" linkTemplate=""/>
 
@@ -222,7 +222,7 @@ along with this software (see the LICENSE.md file). If not, see
             linkTemplate=""/>
     <!-- an attendee's answer to the organizer (mantle.work.EventServices.respond#EventInvitation): workEffortId, workEffortName,
         responderName, response (accept, tentative or decline), responseText (accepted, tentatively accepted, declined), message -->
-    <moqui.security.user.NotificationTopic topic="EventInvitationResponse" description="Answer to an Event Invitation" typeString="info"
+    <moqui.security.user.NotificationTopic topic="EventInvitationResponse" inboxEnumId="NinUpdates" description="Answer to an Event Invitation" typeString="info"
             showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="${responderName} ${responseText} ${workEffortName}${message ? ': ' + message : ''}" linkTemplate=""/>
 
@@ -278,7 +278,7 @@ along with this software (see the LICENSE.md file). If not, see
     </moqui.service.job.ServiceJob>
 
     <!-- Service Job: Payroll Processing -->
-    <moqui.security.user.NotificationTopic topic="ProcessTimePeriodPay" description="Payroll Period Process Pay Completed"
+    <moqui.security.user.NotificationTopic topic="ProcessTimePeriodPay" inboxEnumId="NinUpdates" description="Payroll Period Process Pay Completed"
             typeString="success" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
             titleTemplate="Process Pay Completed for Payroll Period ${parameters.timePeriodId} for pay date ${ec.l10n.format(results.payDate, '')}, total pay ${ec.l10n.format(results.totalPayAmount, '0.00')}"
             errorTitleTemplate="Error in Process Pay for Payroll Period ${parameters.timePeriodId}: ${serviceCallRun.errors}"
