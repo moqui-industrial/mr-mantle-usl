@@ -2594,8 +2594,8 @@ along with this software (see the LICENSE.md file). If not, see
             stable for the entry: the cursor's seenKeys), authorPartyId, authorUserId, title, body, contentType, statusId,
             source (the entity or service it came from)} with the fields of its kind:
             communicationEventId, communicationEventTypeId, fromPartyId, toPartyId, parentCommEventId, rootCommEventId,
-            emailMessageId, contactListId and attachments (the CommunicationEventContent rows) for a message or a Comment
-            note; noteDate and internalNote for a *Note row; workEffortId and purposeEnumId for an activity;
+            emailMessageId, contactListId, editedDate (when its author last changed its text, update#RecordNote) and
+            attachments (the CommunicationEventContent rows) for a message or a Comment note; noteDate and internalNote for a *Note row; workEffortId and purposeEnumId for an activity;
             auditHistorySeqId, fieldName, oldValue, newValue, oldValueDescription and newValueDescription (status
             descriptions) and changeReason for a change; contentKey, contentLocation and contentTypeEnumId for a file;
             for a chat message (kind chat, source moqui.chat.ChatEvent: the room's messages of the main timeline, not
@@ -2723,7 +2723,7 @@ along with this software (see the LICENSE.md file). If not, see
                         communicationEventTypeId: commEvent.communicationEventTypeId, fromPartyId: commEvent.fromPartyId ?? null,
                         toPartyId: commEvent.toPartyId ?? null, parentCommEventId: commEvent.parentCommEventId ?? null,
                         rootCommEventId: commEvent.rootCommEventId ?? null, emailMessageId: commEvent.emailMessageId ?? null,
-                        contactListId: commEvent.contactListId ?? null})
+                        contactListId: commEvent.contactListId ?? null, editedDate: commEvent.editedDate ?? null})
                 }
             })
 
@@ -2974,6 +2974,226 @@ along with this software (see the LICENSE.md file). If not, see
                     .parameters(Object.assign({kind: 'notes', excludeUserIds: mentionedUserIds}, notifyParameters)).call()
             if (ec.message.hasError()) return
             notifiedFollowerUserIds = followerOut.notifiedUserIds
+        ]]></script></actions>
+    </service>
+
+    <service verb="check" noun="RecordNoteAccess" allow-remote="false">
+        <description>
+            Whether the current user may change (action update) or delete (action delete) a note on a record's timeline: a
+            Comment communication event (a note, a comment or a reply to one, not cancelled; a Message or an email once sent
+            stays as it is) on a record the user may see (get#RecordLinkInfo with checkRecord: the entity filters and the
+            per-user rules of IronStone R5 and R28). The note is on the record through the record's own join or a
+            CommunicationEventRecord, of the note or of the root of its thread; for a party the note is from or to it or has
+            a CommunicationEventParty row of it. Its author (the from party is the user's party) changes it; its author or a
+            user in the ADMIN group deletes it, and not while it has replies. An error otherwise; a note that is not on the
+            record is not found.
+        </description>
+        <in-parameters>
+            <parameter name="recordEntityName" required="true"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="communicationEventId" required="true"/>
+            <parameter name="action" default-value="update"><description>update or delete</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="recordEntityName"><description>The full entity name</description></parameter>
+            <parameter name="commEvent" type="Map"/>
+            <parameter name="ownJoin" type="Map"><description>{entityName, keyField} when the note itself has the record's own
+                join row (RequestCommEvent for a request); null when it is on the record otherwise</description></parameter>
+            <parameter name="isAuthor" type="Boolean"/>
+            <parameter name="isAdmin" type="Boolean"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            isAuthor = false
+            isAdmin = false
+            ownJoin = null
+            if (action !== 'update' && action !== 'delete') { ec.message.addError(`Note action ${action} is not update or delete`); return }
+            const info = ec.service.sync().name('mantle.party.CommunicationServices.get#RecordLinkInfo')
+                    .parameters({recordEntityName: recordEntityName, recordId: recordId}).call()
+            if (ec.message.hasError()) return
+            recordEntityName = info.recordEntityName
+            const notFound = () => ec.message.addError(`Note ${communicationEventId} not found on ${info.recordTypeName} ${recordId}`)
+            const value = ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', communicationEventId).one()
+            if (value == null || value.statusId === 'CeCancelled') { notFound(); return }
+            const found = (entityName, keys) => ec.entity.find(entityName).condition(keys).count() > 0
+            let on = false
+            if (info.isParty) {
+                on = value.fromPartyId === recordId || value.toPartyId === recordId ||
+                        found('mantle.party.communication.CommunicationEventParty', {communicationEventId: communicationEventId, partyId: recordId})
+            } else {
+                for (const id of [value.communicationEventId, value.rootCommEventId].filter((item) => item)) {
+                    if (info.commEventJoin && found(info.commEventJoin.entityName, {communicationEventId: id, [info.commEventJoin.keyField]: recordId})) {
+                        on = true
+                        if (id === value.communicationEventId) ownJoin = info.commEventJoin
+                    } else if (found('mantle.party.communication.CommunicationEventRecord', {communicationEventId: id,
+                            recordEntityName: recordEntityName, recordId: recordId})) {
+                        on = true
+                    }
+                    if (on) break
+                }
+            }
+            if (!on) { notFound(); return }
+            if (value.communicationEventTypeId !== 'Comment') {
+                ec.message.addError(action === 'update' ? 'Only a note or a comment can be changed: a message once sent stays as it is'
+                        : 'Only a note or a comment can be deleted: take a message off the record instead')
+                return
+            }
+            const partyId = ec.user.userAccount?.partyId || null
+            isAuthor = !!partyId && value.fromPartyId === partyId
+            isAdmin = !!ec.user.userId && ec.user.isInGroup('ADMIN')
+            if (action === 'update' && !isAuthor) { ec.message.addError('You may change only your own notes'); return }
+            if (action === 'delete') {
+                if (!isAuthor && !isAdmin) { ec.message.addError('You may delete only your own notes'); return }
+                const cf = ec.entity.conditionFactory
+                const replies = ec.entity.find('mantle.party.communication.CommunicationEvent').condition(cf.makeCondition([
+                    cf.makeCondition('parentCommEventId', 'equals', communicationEventId),
+                    cf.makeCondition('rootCommEventId', 'equals', communicationEventId)], 'or'))
+                        .condition(cf.makeCondition('communicationEventId', 'not-equals', communicationEventId)).count()
+                if (replies > 0) { ec.message.addError('This note has replies: delete the replies first'); return }
+            }
+            commEvent = value.getMap()
+        ]]></script></actions>
+    </service>
+    <service verb="update" noun="RecordNote">
+        <description>
+            Chatter's edit of a note: its author changes the text, and the subject when given, of a note or comment on a
+            record (check#RecordNoteAccess, action update), and editedDate is set, which the timeline shows as edited. A note
+            on a request through its own join is changed by mantle.request.RequestServices.update#RequestComment, any other by
+            the communication event's update. Only the users mentioned now who were not mentioned before are notified, on
+            topic ChatterMention (notify#RecordMention): a mention in the old body is a data-mention-id of its rich text (a
+            userId, or a partyId whose users count). The record's followers are not told again.
+        </description>
+        <in-parameters>
+            <parameter name="recordEntityName" required="true"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="communicationEventId" required="true"/>
+            <parameter name="body" required="true" allow-html="safe"/>
+            <parameter name="subject"><description>Empty keeps the subject</description></parameter>
+            <parameter name="contentType"><description>Empty keeps the content type</description></parameter>
+            <parameter name="mentionUserIds" type="List"><description>The users the new body mentions</description></parameter>
+            <parameter name="mentionPartyIds" type="List"><description>The parties the new body mentions, whose users count</description></parameter>
+            <parameter name="recordUrl"><description>The record's screen, for the notifications' link</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="communicationEventId"/>
+            <parameter name="editedDate" type="Timestamp"/>
+            <parameter name="mentionedUserIds" type="List"><description>The users notified: mentioned now and not before</description></parameter>
+        </out-parameters>
+        <actions><script><![CDATA[
+            mentionedUserIds = []
+            editedDate = null
+            const access = ec.service.sync().name('mantle.party.CommunicationServices.check#RecordNoteAccess').parameters({
+                recordEntityName: recordEntityName, recordId: recordId, communicationEventId: communicationEventId, action: 'update'}).call()
+            if (ec.message.hasError()) return
+            const old = access.commEvent
+            const text = String(body || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').trim()
+            if (!text) { ec.message.addError('A note needs its text: delete it instead'); return }
+            const newSubject = subject != null && String(subject).trim() !== '' ? subject : (old.subject ?? null)
+            const newType = contentType || old.contentType || 'text/plain'
+            if (access.ownJoin && access.recordEntityName === 'mantle.request.Request') {
+                ec.service.sync().name('mantle.request.RequestServices.update#RequestComment').parameters({requestId: recordId,
+                    communicationEventId: communicationEventId, subject: newSubject, body: body, contentType: newType}).call()
+            } else {
+                ec.service.sync().name('update#mantle.party.communication.CommunicationEvent').parameters({communicationEventId: communicationEventId,
+                    subject: newSubject, body: body, contentType: newType, editedDate: ec.user.nowTimestamp}).call()
+            }
+            if (ec.message.hasError()) return
+            editedDate = ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', communicationEventId)
+                    .one()?.editedDate ?? ec.user.nowTimestamp
+
+            // the users mentioned now and not before: a data-mention-id of the old body is a userId or a partyId
+            const cf = ec.entity.conditionFactory
+            const usersOf = (ids) => {
+                const list = Array.from(new Set(Array.from(ids || []).map((id) => String(id).trim()).filter((id) => id)))
+                if (!list.length) return new Set()
+                return new Set(Array.from(ec.entity.find('moqui.security.UserAccount').condition(cf.makeCondition([
+                    cf.makeCondition('userId', 'in', list), cf.makeCondition('partyId', 'in', list)], 'or'))
+                        .selectField('userId').disableAuthz().list()).map((account) => account.userId))
+            }
+            const before = usersOf(Array.from(String(old.body || '').matchAll(/data-mention-id="([^"]+)"/g)).map((match) => match[1]))
+            const now = new Set(Array.from(mentionUserIds || []).map((id) => String(id).trim()).filter((id) => id))
+            if (mentionPartyIds?.length) for (const account of ec.entity.find('moqui.security.UserAccount')
+                    .condition('partyId', 'in', Array.from(mentionPartyIds)).selectField('userId').disableAuthz().list()) now.add(account.userId)
+            const added = Array.from(now).filter((id) => !before.has(id) && id !== ec.user.userId)
+            if (added.length === 0) return
+            const mentionOut = ec.service.sync().name('mantle.party.CommunicationServices.notify#RecordMention').parameters({
+                recordEntityName: access.recordEntityName, recordId: recordId, communicationEventId: communicationEventId,
+                mentionUserIds: added, subject: newSubject, body: body, recordUrl: recordUrl}).call()
+            if (ec.message.hasError()) return
+            mentionedUserIds = Array.from(mentionOut?.notifiedUserIds || [])
+        ]]></script></actions>
+    </service>
+    <service verb="delete" noun="RecordNote">
+        <description>
+            Chatter's delete of a note: its author, or a user in the ADMIN group, deletes a note or comment on a record that
+            has no replies (check#RecordNoteAccess, action delete). A note on a request through its own join is deleted by
+            mantle.request.RequestServices.delete#RequestComment, any other by delete#CommunicationEventRows: the note, its
+            links to records, its party, purpose and product rows and its attachments (their files too).
+        </description>
+        <in-parameters>
+            <parameter name="recordEntityName" required="true"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="communicationEventId" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="deleted" type="Boolean"/></out-parameters>
+        <actions><script><![CDATA[
+            deleted = false
+            const access = ec.service.sync().name('mantle.party.CommunicationServices.check#RecordNoteAccess').parameters({
+                recordEntityName: recordEntityName, recordId: recordId, communicationEventId: communicationEventId, action: 'delete'}).call()
+            if (ec.message.hasError()) return
+            if (access.ownJoin && access.recordEntityName === 'mantle.request.Request') {
+                ec.service.sync().name('mantle.request.RequestServices.delete#RequestComment').parameters({requestId: recordId,
+                    communicationEventId: communicationEventId}).call()
+            } else {
+                ec.service.sync().name('mantle.party.CommunicationServices.delete#CommunicationEventRows')
+                        .parameter('communicationEventId', communicationEventId).call()
+            }
+            if (ec.message.hasError()) return
+            deleted = true
+        ]]></script></actions>
+    </service>
+    <service verb="delete" noun="CommunicationEventRows" allow-remote="false">
+        <description>
+            Deletes a communication event with the rows that name it: its links to records (CommunicationEventRecord,
+            RequestCommEvent, WorkEffortCommEvent, OrderCommunicationEvent, WikiPageCommunicationEvent), its
+            CommunicationEventParty, CommunicationEventPurpose and CommunicationEventProduct rows, and its
+            CommunicationEventContent rows with their files under the event's content folder (a file that cannot be
+            deleted is logged; its row is gone). An event with replies is not deleted. For the callers that checked who may
+            delete it (delete#RecordNote, mantle.request.RequestServices.delete#RequestComment).
+        </description>
+        <in-parameters><parameter name="communicationEventId" required="true"/></in-parameters>
+        <out-parameters><parameter name="deletedFileCount" type="Integer"/></out-parameters>
+        <actions><script><![CDATA[
+            deletedFileCount = 0
+            const COMM_EVENT = 'mantle.party.communication.CommunicationEvent'
+            const value = ec.entity.find(COMM_EVENT).condition('communicationEventId', communicationEventId).one()
+            if (value == null) { ec.message.addError(`Communication event ${communicationEventId} not found`); return }
+            const cf = ec.entity.conditionFactory
+            const replies = ec.entity.find(COMM_EVENT).condition(cf.makeCondition([
+                cf.makeCondition('parentCommEventId', 'equals', communicationEventId),
+                cf.makeCondition('rootCommEventId', 'equals', communicationEventId)], 'or'))
+                    .condition(cf.makeCondition('communicationEventId', 'not-equals', communicationEventId)).count()
+            if (replies > 0) { ec.message.addError('This note has replies: delete the replies first'); return }
+            for (const entityName of ['mantle.party.communication.CommunicationEventRecord', 'mantle.request.RequestCommEvent',
+                    'mantle.work.effort.WorkEffortCommEvent', 'mantle.order.OrderCommunicationEvent',
+                    'mantle.party.communication.WikiPageCommunicationEvent', 'mantle.party.communication.CommunicationEventParty',
+                    'mantle.party.communication.CommunicationEventPurpose', 'mantle.party.communication.CommunicationEventProduct']) {
+                ec.entity.find(entityName).condition('communicationEventId', communicationEventId).deleteAll()
+            }
+            // the attachments: a file of the event's own content folder goes with its row (save#CommunicationEventContentFile)
+            const folder = `/CommunicationEvent/${communicationEventId}/`
+            for (const content of ec.entity.find('mantle.party.communication.CommunicationEventContent')
+                    .condition('communicationEventId', communicationEventId).list()) {
+                const location = content.contentLocation ? String(content.contentLocation) : null
+                content.delete()
+                if (!location || !location.includes(folder)) continue
+                try {
+                    const ref = ec.resource.getLocationReference(location)
+                    if (ref && ref.getExists()) { ref.delete(); deletedFileCount++ }
+                } catch (err) {
+                    ec.logger.warn(`Communication event ${communicationEventId}: the row of ${location} is deleted, the file was not: ${err}`)
+                }
+            }
+            ec.service.sync().name('delete#' + COMM_EVENT).parameter('communicationEventId', communicationEventId).call()
         ]]></script></actions>
     </service>
 
