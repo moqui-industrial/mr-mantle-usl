@@ -31,9 +31,10 @@ along with this software (see the LICENSE.md file). If not, see
             owner, with or without a limit. A mailbox post (contactListId of a MAILBOX list) shows, with or without a
             limit, to those who may read the mailbox (its members; any user for a public mailbox that is not a help
             mailbox) and otherwise only to the parties it is from, to or a recipient of. A wiki page shows, with or without
-            a limit and for every user, by the wiki's view rule (org.moqui.impl.WikiServices.get#WikiPageInfo, as
-            get#RecordLinkInfo): its space has no restrictView Y or the user has a WikiSpaceUser row with allowView Y for
-            it, and the page has no restrictView Y or the user has a WikiPageUser row with allowView Y for it.
+            a limit and for every user, by the wiki's view rule (org.moqui.impl.WikiServices.get#WikiViewScope, the rule of
+            get#WikiPageAccess that get#RecordLinkInfo asks): its space has no restrictView Y or the user has a
+            WikiSpaceUser row with allowView or allowAdmin Y for it, and the page has no restrictView Y or the user has a
+            WikiPageUser row with allowView Y for it; the ADMIN group sees every page.
             The limit is a trusted filter: it applies before ranking, totals, facets and highlights, and the query cannot
             widen it. Each result is checked against the entity database before it is returned.
 
@@ -145,20 +146,13 @@ along with this software (see the LICENSE.md file). If not, see
                 documents[documentId] = {name: document.documentName, primaryEntityName: document.primaryEntityName,
                         limit: limit, roles: {}, links: []}
             }
-            // a wiki page by the wiki's view rule: a space the user may view (one without restrictView Y, or with a
-            // WikiSpaceUser row of the user with allowView Y), and not a page with restrictView Y the user has no WikiPageUser
-            // row with allowView Y for; no space the user may view leaves the type out
+            // a wiki page by the wiki's view rule (org.moqui.impl.WikiServices.get#WikiViewScope): a space the user may view,
+            // and not a restricted page hidden from the user; no space the user may view leaves the type out
             const wikiClauses = []
             if (documents.MantleWikiPage) {
-                const userId = ec.user.userId || null
-                const allowed = (entityName, keyField) => userId ? Array.from(ec.entity.find(entityName)
-                        .condition({userId: userId, allowView: 'Y'}).disableAuthz().list()).map((row) => row[keyField]) : []
-                const viewSpaceIds = allowed('moqui.resource.wiki.WikiSpaceUser', 'wikiSpaceId')
-                const spaceIds = Array.from(ec.entity.find('moqui.resource.wiki.WikiSpace').disableAuthz().list())
-                        .filter((space) => space.restrictView !== 'Y' || viewSpaceIds.includes(space.wikiSpaceId)).map((space) => space.wikiSpaceId)
-                const viewPageIds = allowed('moqui.resource.wiki.WikiPageUser', 'wikiPageId')
-                const hiddenPageIds = Array.from(ec.entity.find('moqui.resource.wiki.WikiPage').condition('restrictView', 'Y').disableAuthz().list())
-                        .map((page) => page.wikiPageId).filter((wikiPageId) => !viewPageIds.includes(wikiPageId))
+                const scope = ec.service.sync().name('org.moqui.impl.WikiServices.get#WikiViewScope').call() || {}
+                const spaceIds = Array.from(scope.viewSpaceIdList || [])
+                const hiddenPageIds = Array.from(scope.hiddenPageIdList || [])
                 if (spaceIds.length === 0) delete documents.MantleWikiPage
                 wikiClauses.push({field: {name: 'wikiSpaceId', op: 'in', values: spaceIds}})
                 if (hiddenPageIds.length) wikiClauses.push({field: {name: 'wikiPageId', op: 'in', values: hiddenPageIds, negate: true}})

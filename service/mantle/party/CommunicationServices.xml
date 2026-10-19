@@ -1566,6 +1566,32 @@ along with this software (see the LICENSE.md file). If not, see
                     in-map="{wikiPageId:wikiPageId, communicationEventId:communicationEventId}"/>
         </actions>
     </service>
+    <service verb="delete" noun="WikiPageJoins" allow-remote="false">
+        <description>Mantle's rows that name a wiki page, removed before org.moqui.impl.WikiServices.delete#WikiPage deletes
+            the page (the SECA WikiPageDeleteJoins), which would otherwise fail on their foreign keys: its comments'
+            WikiPageCommunicationEvent joins (the comments themselves stay), its WikiPageWorkEffort and WikiPageRequest
+            joins, and its followers (RecordFollower). The page is wikiPageId, or wikiSpaceId and pagePath as the delete
+            finds it (get#WikiPageId, an alias of a moved page included). Only for a user who may update the page
+            (get#WikiPageAccess); the delete refuses anyone else, and a refused delete is an error that rolls this back.</description>
+        <in-parameters>
+            <parameter name="wikiPageId"/>
+            <parameter name="wikiSpaceId"/>
+            <parameter name="pagePath"/>
+        </in-parameters>
+        <actions><script><![CDATA[
+            let pageId = wikiPageId || null
+            if (!pageId && wikiSpaceId && pagePath) pageId = ec.service.sync().name('org.moqui.impl.WikiServices.get#WikiPageId')
+                    .parameters({wikiSpaceId: wikiSpaceId, pagePath: pagePath}).call()?.wikiPageId || null
+            if (!pageId) return
+            const access = ec.service.sync().name('org.moqui.impl.WikiServices.get#WikiPageAccess').parameter('wikiPageId', pageId).call()
+            if (!access?.canUpdate) return
+            for (const entityName of ['mantle.party.communication.WikiPageCommunicationEvent', 'mantle.work.effort.WikiPageWorkEffort',
+                    'mantle.request.WikiPageRequest'])
+                ec.entity.find(entityName).condition('wikiPageId', pageId).disableAuthz().deleteAll()
+            ec.entity.find('mantle.party.communication.RecordFollower').condition({recordEntityName: 'moqui.resource.wiki.WikiPage',
+                recordId: pageId}).disableAuthz().deleteAll()
+        ]]></script></actions>
+    </service>
 
     <!-- ================================================ -->
     <!-- ========== Record Links, Timeline and Followers ========== -->
@@ -1626,11 +1652,11 @@ along with this software (see the LICENSE.md file). If not, see
             group, ADMIN included, has an entity authorization by default.
 
             A wiki page (moqui.resource.wiki.WikiPage, a framework entity, which no entity filter covers) follows the wiki's
-            own view rule whenever authorization is on, for every user, ADMIN and staff included as in the wiki screens,
-            with or without an organization filter: the rule of org.moqui.impl.WikiServices.get#WikiPageInfo, replicated
-            here because that service also reads the page's file. A space with restrictView Y needs a WikiSpaceUser row of
-            the user with allowView Y, and a page with restrictView Y a WikiPageUser row of the user with allowView Y; a page
-            whose space is not found is not seen.
+            own view rule whenever authorization is on, for every user, staff included as in the wiki screens, with or
+            without an organization filter: org.moqui.impl.WikiServices.get#WikiPageAccess, its canView. A space with
+            restrictView Y needs a WikiSpaceUser row of the user with allowView or allowAdmin Y, and a page with
+            restrictView Y a WikiPageUser row of the user with allowView Y; the ADMIN group sees every page; a page whose
+            space is not found is not seen.
         </description>
         <in-parameters>
             <parameter name="recordEntityName" required="true"/>
@@ -1845,17 +1871,13 @@ along with this software (see the LICENSE.md file). If not, see
                 return ec.entity.find('mantle.order.OrderPartParty').condition('orderId', order.orderId)
                         .condition('partyId', 'in', s.partyIds).disableAuthz().count() > 0
             }
-            // the view rule of org.moqui.impl.WikiServices.get#WikiPageInfo (see the description)
+            // the wiki's own view rule, org.moqui.impl.WikiServices.get#WikiPageAccess (see the description), once a page
+            const wikiViews = {}
             const wikiPageVisible = (page) => {
-                const userId = ec.user.userId || null
-                const space = page.wikiSpaceId ? ec.entity.find('moqui.resource.wiki.WikiSpace').condition('wikiSpaceId', page.wikiSpaceId)
-                        .disableAuthz().one() : null
-                if (space == null) return false
-                if (space.restrictView === 'Y' && !(userId && ec.entity.find('moqui.resource.wiki.WikiSpaceUser')
-                        .condition({wikiSpaceId: page.wikiSpaceId, userId: userId, allowView: 'Y'}).disableAuthz().count() > 0)) return false
-                if (page.restrictView === 'Y' && !(userId && ec.entity.find('moqui.resource.wiki.WikiPageUser')
-                        .condition({wikiPageId: page.wikiPageId, userId: userId, allowView: 'Y'}).disableAuthz().count() > 0)) return false
-                return true
+                const pageId = page.wikiPageId
+                if (!Object.prototype.hasOwnProperty.call(wikiViews, pageId)) wikiViews[pageId] = !!ec.service.sync()
+                        .name('org.moqui.impl.WikiServices.get#WikiPageAccess').parameter('wikiPageId', pageId).call()?.canView
+                return wikiViews[pageId]
             }
             let visible
             const commEventVisible = (commEvent, depth) => {
