@@ -33,6 +33,18 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="countryCode"/><parameter name="areaCode"/><parameter name="contactNumber"/>
             <parameter name="emailAddress"/>
             <parameter name="assetSerialNumber"/>
+            <parameter name="anyField"><description>One text matched against any of these, so a party matching one of them
+                is found (the other parameters still narrow the find): an organization's name; a person's first or last name,
+                or first and last name together in either order ('Kim Lund', 'Lund, Kim'); a current email address; a current
+                phone number by its digits, whatever the formatting and with or without a leading country code ('+1 (801)
+                555-0123', '801.555.0123' and '5550123' all find 801 555-0123; at least three digits, matching the number's
+                trailing part); and the people whose current contact or employee relationship (PrtContact, PrtEmployee) is to
+                an organization of that name the user may see. leadingWildcard applies to the names and the email. One find of
+                distinct parties, so the count is exact (the people of organizations and the phone matches are found first,
+                up to 5000 each).</description></parameter>
+            <parameter name="hasRole" type="Boolean"><description>True finds only parties with a PartyRole of any type (the
+                directory's customers, suppliers, contacts and the like). The user's personal contacts, which have no role,
+                are not left out by it: personalContacts=exclude does that.</description></parameter>
             <parameter name="personalContacts"><description>Personal contacts (Party.privateOwnerUserId) are only ever the
                 current user's: empty includes the user's own with the directory, 'exclude' leaves them out, 'only' finds
                 only them.</description></parameter>
