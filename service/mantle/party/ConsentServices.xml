@@ -47,8 +47,9 @@ along with this software (see the LICENSE.md file). If not, see
         data, and they answer only about the token's party and the lists of the token list's organization.
 
         The RFC 8058 one-click POST (List-Unsubscribe-Post: List-Unsubscribe=One-Click) goes to the List-Unsubscribe URL,
-        /u/<token>/oneClick: a transition of the route's screen (a POST to /u/<token> itself renders the public shell),
-        which calls unsubscribe#ContactListParty({token: '<token from the URL>', listUnsubscribe: 'One-Click'}) with the
+        the page's own /u/<token>: the route's post-transition runs a transition of the route's screen for a POST there,
+        after the token check (/u/<token>/oneClick, the List-Unsubscribe of the messages sent before, runs it too), which
+        calls unsubscribe#ContactListParty({token: '<token from the URL>', listUnsubscribe: 'One-Click'}) with the
         form field List-Unsubscribe: it unsubscribes the party from the token's list, CLPT_UNSUBSCRIBED with no
         confirmation step, and records the withdrawal with source PcsEmailLink; a second POST changes nothing. The header
         values come from create#UnsubscribeToken (listUnsubscribeHeaders); mantle.marketing.ContactListServices
@@ -1081,8 +1082,10 @@ along with this software (see the LICENSE.md file). If not, see
             The List-Unsubscribe mailto of a list email (create#UnsubscribeToken with mailtoAddress): a received email whose
             subject is "unsubscribe" and a token unsubscribes the token's party from the token's list at once, as the
             one-click POST does (unsubscribe#ContactListParty with listUnsubscribe Mailto, the sender as evidence). The
-            email ECA rule of MantleConsent.emecas.xml calls it for each email polled (poll#EmailServer) with such a
-            subject, so the address only needs to be an email server the deployment polls. A token that is unknown,
+            email ECA rule of MantleConsent.emecas.xml calls it for each such email an email server brings in: polled
+            (poll#EmailServer), or new in the Inbox of a mail account the deployment syncs (sync#EmailAccount runs the email
+            ECAs once on each new Inbox message it stores), so the address only needs to be an email server the deployment
+            polls or a mail account it syncs. A token that is unknown,
             ended or refused is logged and the email is taken as handled, so the poll does not keep it; unsubscribed
             tells whether it unsubscribed.
         </description>
@@ -1148,9 +1151,10 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="create" noun="UnsubscribeToken">
         <description>
             A new unsubscribe link token for a party on a contact list, usually one per message sent: the token (given only
-            here; the row keeps its hash), the page's URL (baseUrl + /u/ + token), the one-click URL (the page's URL +
-            /oneClick, the route screen's transition that takes the RFC 8058 POST) and the List-Unsubscribe and
-            List-Unsubscribe-Post header values for the message: List-Unsubscribe is the one-click URL, then with
+            here; the row keeps its hash), the page's URL (baseUrl + /u/ + token), the one-click URL (the page's URL itself,
+            RFC 8058: the route's post-transition runs the screen's one-click transition for a POST there; the page's URL +
+            /oneClick, the List-Unsubscribe of the messages sent before, takes the POST too) and the List-Unsubscribe and
+            List-Unsubscribe-Post header values for the message: List-Unsubscribe is the page's URL, then with
             mailtoAddress a mailto (RFC 2369) whose subject is "unsubscribe" and the token. A messageId of a
             ContactListCommStatus fills the list, party, address and communication event. The address defaults to the
             party's preferredContactMechId on the list, the purpose to PcpSms for a list of phone numbers, else
@@ -1216,7 +1220,8 @@ along with this software (see the LICENSE.md file). If not, see
             let root = String(baseUrl || '').trim()
             if (!root) { try { root = ec.web ? String(ec.web.getWebappRootUrl() || '') : '' } catch (err) { root = '' } }
             unsubscribeUrl = `${root.replace(/\/+$/, '')}/u/${token}`
-            oneClickUrl = `${unsubscribeUrl}/oneClick`
+            // RFC 8058: the one-click POST goes to the List-Unsubscribe URL, the page a person opens to choose
+            oneClickUrl = unsubscribeUrl
             const uris = [`<${oneClickUrl}>`]
             const mailto = String(mailtoAddress || '').trim()
             // one plain address: no display name, brackets, spaces or a query of its own

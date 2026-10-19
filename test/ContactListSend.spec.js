@@ -2,7 +2,7 @@
 // send#ContactListEmail; mantle.party.ConsentServices create#UnsubscribeToken, check#UnsubscribeToken,
 // unsubscribe#ContactListParty, apply#UnsubscribePreferences, send#UnsubscribeVerifyEmail), through the framework's
 // MailCapture: the members who get the email and those consent keeps out, one token and one link per message, the
-// List-Unsubscribe values (the one-click URL and the mailto) and the Message-ID kept on the list's send status and the
+// List-Unsubscribe values (the one-click URL, the page's own as RFC 8058 has it, and the mailto) and the Message-ID kept on the list's send status and the
 // token; the RFC 8058 one-click call from the link of a captured email, again changing nothing; the token-route check of
 // /u/<token>; an unsubscribe that waits for its confirmation sending the verification email, whose link completes it; the
 // reason given kept on the consent rows; resubscribing. The Mantle side of IronStone M11. New spec, no Groovy original.
@@ -155,7 +155,7 @@ feature("send#ContactListEmail: each subscribed member once, the others left out
     },
 })
 
-feature("the List-Unsubscribe values of each message: the one-click URL of its token, then the mailto with the token", {
+feature("the List-Unsubscribe values of each message: the one-click URL of its token (the page's URL itself), then the mailto with the token", {
     expect() {
         const ann = sendOut.recipientList.find((row) => row.partyId === party.Ann)
         const token = tokenIn(sentTo("ann.sendspec@example.com")[0].body)
@@ -163,7 +163,7 @@ feature("the List-Unsubscribe values of each message: the one-click URL of its t
         links.fay = tokenIn(sentTo("fay.lists@example.com")[0].body)
         ann.unsubscribeUrl == `https://news.sendspec.example.com/u/${token}`
         ann.listUnsubscribeHeaders["List-Unsubscribe"] ==
-            `<https://news.sendspec.example.com/u/${token}/oneClick>, <mailto:leave@sendspec.example.com?subject=unsubscribe%20${token}>`
+            `<https://news.sendspec.example.com/u/${token}>, <mailto:leave@sendspec.example.com?subject=unsubscribe%20${token}>`
         ann.listUnsubscribeHeaders["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
         ann.messageId == sentTo("ann.sendspec@example.com")[0].messageId
     },
@@ -181,7 +181,8 @@ feature("a mailto that is not one plain address is left out of List-Unsubscribe"
     expect() {
         const out = call(`${CONSENT}.create#UnsubscribeToken`, { contactListId: newsId, partyId: party.Ann, baseUrl: "https://news.sendspec.example.com",
             mailtoAddress: "leave@sendspec.example.com, list@sendspec.example.com" })
-        out.listUnsubscribeHeaders["List-Unsubscribe"] == `<https://news.sendspec.example.com/u/${out.token}/oneClick>`
+        out.listUnsubscribeHeaders["List-Unsubscribe"] == `<https://news.sendspec.example.com/u/${out.token}>`
+        out.oneClickUrl == out.unsubscribeUrl
     },
 })
 
@@ -237,7 +238,7 @@ feature("the next send leaves out the member who unsubscribed", {
         againOut.sentCount == 1
         messages.length == 1
         messages[0].toList == ["ann.sendspec@example.com"]
-        againOut.recipientList[0].listUnsubscribeHeaders["List-Unsubscribe"].endsWith("/oneClick>")
+        againOut.recipientList[0].listUnsubscribeHeaders["List-Unsubscribe"] == `<${againOut.recipientList[0].unsubscribeUrl}>`
     },
 })
 
