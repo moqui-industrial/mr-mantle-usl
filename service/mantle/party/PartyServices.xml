@@ -265,7 +265,8 @@ along with this software (see the LICENSE.md file). If not, see
               feeds, system messages, job reports), no badge (count#UserNotifications)
             - messages: the unread internal messages and Inbox-delivered mailbox posts
               (mantle.party.CommunicationServices.count#UnreadInternalMessages), the Messages badge
-            - email: the unread external mail, the Mail badge; 0 until the mail accounts (IronStone M5)
+            - email: the unread mail in the Inbox folders of the user's mail accounts, not snoozed or archived
+              (org.moqui.impl.EmailClientServices.count#UnreadEmail), the Mail badge
             - chat: 0 until chat
             Each part stands alone: one that fails is logged by name, null in counts and named in failedParts. The counts
             read only the user's own rows, with authorization disabled; another user's counts only for internal work, with
@@ -310,8 +311,9 @@ along with this software (see the LICENSE.md file). If not, see
                         ec.message.popErrors()
                     }
                 }
+                // each part in a transaction of its own: an error in one marks only its own transaction rollback-only
                 const callService = (name, parameters) => {
-                    const out = ec.service.sync().name(name).parameters(parameters).call()
+                    const out = ec.service.sync().name(name).parameters(parameters).requireNewTransaction(true).call()
                     if (out == null) throw new Error(`${name} answered nothing`)
                     return out
                 }
@@ -325,7 +327,7 @@ along with this software (see the LICENSE.md file). If not, see
                     return {notifications: out.notificationCount, approvals: out.approvalCount, updates: out.updateCount}
                 })
                 part('messages', ['messages'], () => ({messages: callService('mantle.party.CommunicationServices.count#UnreadInternalMessages', {userId: userId}).unreadCount}))
-                counts.email = 0
+                part('email', ['email'], () => ({email: callService('org.moqui.impl.EmailClientServices.count#UnreadEmail', {userId: userId}).unreadCount}))
                 counts.chat = 0
             } finally {
                 if (!wasDisabled) ec.artifactExecution.enableAuthz()
@@ -417,9 +419,11 @@ along with this software (see the LICENSE.md file). If not, see
             an update is one when a counted field of newValues differs from oldValues, the row before the write (none is a
             change). The counted fields: WorkEffortParty statusId, thruDate and snoozedThruDate; WorkEffort statusId,
             workEffortTypeEnumId, estimatedStartDate, estimatedCompletionDate, allDayStart and allDayEnd;
-            NotificationMessageUser viewedDate; CommunicationEventParty readDate, archivedDate and snoozedThruDate. The
-            users: those of the WorkEffortParty's or CommunicationEventParty's party, the NotificationMessageUser's user,
-            those of a WorkEffort's parties in effect. Never fails the write: a failure is logged.
+            NotificationMessageUser viewedDate; CommunicationEventParty readDate, archivedDate and snoozedThruDate;
+            EmailMessage isRead, archivedDate, emailFolderId and snoozedThruDate, of an unread message (before or after the
+            write; a read message changes no count). The users: those of the WorkEffortParty's or CommunicationEventParty's
+            party, the NotificationMessageUser's user, those of a WorkEffort's parties in effect, the owner and current
+            members of an EmailMessage's account (emailAccountId). Never fails the write: a failure is logged.
         </description>
         <in-parameters>
             <parameter name="entityName"/>
@@ -427,6 +431,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="partyId"/>
             <parameter name="userId"/>
             <parameter name="workEffortId"/>
+            <parameter name="emailAccountId"/>
             <parameter name="newValues" type="Map"/>
             <parameter name="oldValues" type="Map"/>
         </in-parameters>
@@ -442,7 +447,8 @@ along with this software (see the LICENSE.md file). If not, see
                 'mantle.work.effort.WorkEffort': ['statusId', 'workEffortTypeEnumId', 'estimatedStartDate', 'estimatedCompletionDate',
                     'allDayStart', 'allDayEnd'],
                 'moqui.security.user.NotificationMessageUser': ['viewedDate'],
-                'mantle.party.communication.CommunicationEventParty': ['readDate', 'archivedDate', 'snoozedThruDate']}
+                'mantle.party.communication.CommunicationEventParty': ['readDate', 'archivedDate', 'snoozedThruDate'],
+                'moqui.basic.email.EmailMessage': ['isRead', 'archivedDate', 'emailFolderId', 'snoozedThruDate']}
             const fields = counted[entityName]
             if (!fields) return
             const plain = (value) => value == null || value === '' ? null : (value instanceof Date ? String(value.getTime()) : String(value))
@@ -450,10 +456,24 @@ along with this software (see the LICENSE.md file). If not, see
             try {
                 changed = eecaOperation !== 'update' || oldValues == null ||
                         fields.some((field) => plain(newValues?.[field]) !== plain(oldValues[field]))
+                // mail counts only unread messages: a read one that moves, or is created or deleted read, changes no count
+                if (changed && entityName === 'moqui.basic.email.EmailMessage') {
+                    const unreadAfter = newValues?.isRead !== 'Y'
+                    const unreadBefore = oldValues != null && oldValues.isRead !== 'Y'
+                    changed = !!emailAccountId && (eecaOperation === 'create' ? unreadAfter
+                            : (eecaOperation === 'delete' ? (oldValues != null ? unreadBefore : unreadAfter) : unreadAfter || unreadBefore))
+                }
                 if (!changed) return
                 const parameters = {}
                 if (entityName === 'moqui.security.user.NotificationMessageUser') {
                     parameters.userIdList = [userId]
+                } else if (entityName === 'moqui.basic.email.EmailMessage') {
+                    const users = new Set()
+                    const account = ec.entity.find('moqui.basic.email.EmailAccount').condition('emailAccountId', emailAccountId).disableAuthz().one()
+                    if (account?.ownerUserId) users.add(account.ownerUserId)
+                    for (const row of ec.entity.find('moqui.basic.email.EmailAccountUser').condition('emailAccountId', emailAccountId)
+                            .conditionDate('fromDate', 'thruDate', null).disableAuthz().list()) users.add(row.userId)
+                    parameters.userIdList = Array.from(users)
                 } else if (entityName === 'mantle.work.effort.WorkEffort') {
                     parameters.partyIdList = Array.from(ec.entity.find('mantle.work.effort.WorkEffortParty').condition('workEffortId', workEffortId)
                             .condition(ec.entity.conditionFactory.makeConditionDate('fromDate', 'thruDate', ec.user.nowTimestamp))
