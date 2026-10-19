@@ -528,6 +528,8 @@ along with this software (see the LICENSE.md file). If not, see
                     <date-filter/>
                     <econdition field-name="workEffortId" from="rootWorkEffortId"/>
                     <econdition field-name="roleTypeId" operator="in" ignore-if-empty="true"/>
+                    <!-- a personal contact only for its owner -->
+                    <econdition field-name="privateOwnerUserId" from="ec.user.userId" or-null="true"/>
                     <econditions combine="or">
                         <econdition field-name="firstName" operator="like" value="${term}%" ignore-case="true" ignore="!term"/>
                         <econdition field-name="lastName" operator="like" value="${term}%" ignore-case="true" ignore="!term"/>
@@ -546,6 +548,9 @@ along with this software (see the LICENSE.md file). If not, see
 
                 <entity-find-one entity-name="mantle.party.PartyDetail" value-field="partyDetail">
                     <field-map field-name="partyId" from="term"/></entity-find-one>
+                <!-- someone else's personal contact is not found -->
+                <if condition="partyDetail?.privateOwnerUserId &amp;&amp; partyDetail.privateOwnerUserId != ec.user.userId">
+                    <set field="partyDetail" from="null"/></if>
                 <if condition="partyDetail != null"><then>
                     <script>ec.web.sendJsonResponse([{partyId:partyDetail.partyId, name:ec.resource.expand("PartyNameTemplate", "", partyDetail)}])</script>
                 </then><else>
@@ -567,7 +572,12 @@ along with this software (see the LICENSE.md file). If not, see
                         let ownerPartyIds = null
                         if ('MANTLE_USER_ORG' === entityFilterSetId) ownerPartyIds = (filterOrgIds || []).concat(['_NA_'])
                         else if ('MANTLE_ACTIVE_ORG' === entityFilterSetId && activeOrgId) ownerPartyIds = [activeOrgId, '_NA_']
-                        if (ownerPartyIds != null) partySearch.filter = {field: {name: 'ownerPartyId', op: 'in', values: ownerPartyIds}}
+                        // a personal contact (privateOwnerUserId) only for its owner, with or without an org filter
+                        const notPrivate = {field: {name: 'privateOwnerUserId', op: 'exists', negate: true}}
+                        const privateFilter = ec.user.userId ? {bool: {any: [notPrivate,
+                                {field: {name: 'privateOwnerUserId', op: 'eq', value: ec.user.userId}}]}} : notPrivate
+                        partySearch.filter = ownerPartyIds != null ? {bool: {all: [{field: {name: 'ownerPartyId', op: 'in', values: ownerPartyIds}},
+                                privateFilter]}} : privateFilter
                     ]]></script>
                     <!-- <log level="warn" message="Doing party search with queryString [${termSb.toString()}], indexName:${indexName}, documentType:${documentType}"/> -->
                     <service-call name="org.moqui.search.SearchServices.search#DataDocuments" out-map="context"

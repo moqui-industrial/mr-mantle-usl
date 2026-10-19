@@ -33,6 +33,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="countryCode"/><parameter name="areaCode"/><parameter name="contactNumber"/>
             <parameter name="emailAddress"/>
             <parameter name="assetSerialNumber"/>
+            <parameter name="personalContacts"><description>Personal contacts (Party.privateOwnerUserId) are only ever the
+                current user's: empty includes the user's own with the directory, 'exclude' leaves them out, 'only' finds
+                only them.</description></parameter>
 
             <parameter name="orderByField" default-value="firstName,organizationName"/>
             <parameter name="pageIndex" type="Integer" default="0"/>
@@ -176,7 +179,12 @@ along with this software (see the LICENSE.md file). If not, see
                 let ownerPartyIds = null;
                 if ('MANTLE_USER_ORG' === entityFilterSetId) ownerPartyIds = (filterOrgIds || []).concat(['_NA_']);
                 else if ('MANTLE_ACTIVE_ORG' === entityFilterSetId && activeOrgId) ownerPartyIds = [activeOrgId, '_NA_'];
-                filter = ownerPartyIds != null ? {field: {name: 'ownerPartyId', op: 'in', values: ownerPartyIds}} : null;
+                // a personal contact (privateOwnerUserId) only for its owner, with or without an org filter, as trusted
+                const privateFilter = ec.user.userId ? {bool: {any: [{field: {name: 'privateOwnerUserId', op: 'exists', negate: true}},
+                        {field: {name: 'privateOwnerUserId', op: 'eq', value: ec.user.userId}}]}}
+                        : {field: {name: 'privateOwnerUserId', op: 'exists', negate: true}};
+                filter = ownerPartyIds != null ? {bool: {all: [{field: {name: 'ownerPartyId', op: 'in', values: ownerPartyIds}}, privateFilter]}}
+                        : privateFilter;
             ]]></script>
 
             <set field="orderByFields" from="orderByField ? [orderByField.replace('combinedName', 'combinedName.keyword').replace('username', 'userAccounts.username.keyword')] : null"/>
@@ -205,6 +213,8 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="lastName" operator="like" value="%${term}%" ignore-case="true"/>
                     <econdition field-name="username" operator="like" value="%${term}%" ignore-case="true"/>
                 </econditions>
+                <!-- a personal contact only for its owner -->
+                <econdition field-name="privateOwnerUserId" from="ec.user.userId" or-null="true"/>
                 <order-by field-name="^firstName,^lastName,^username"/>
             </entity-find>
             <script>outList = pauList.map((pau) =&gt; ({value:pau.partyId, label:ec.resource.expand('UsernameTemplate','',pau)}))</script>

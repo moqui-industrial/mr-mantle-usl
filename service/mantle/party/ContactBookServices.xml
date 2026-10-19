@@ -1,0 +1,1027 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- Contact books (mantle.party.contact.ContactBook): a user's personal books and shared books, their members, groups
+        and favorites, personal contacts (Party.privateOwnerUserId) and linking them to the directory. These services
+        enforce access, as entity filters do not apply to contact books: the owner manages a personal book, and on a
+        shared book a current ContactBookShare for the user or one of the user's groups gives view (read and export), edit
+        (members, groups, favorites) or manage (the book and its shares). A personal contact is seen only by its owner
+        and goes only in the owner's personal books. -->
+
+    <service verb="check" noun="ContactBookAccess">
+        <description>
+            The current user's permission on a contact book: CbpManage for the owner of a personal book (a personal book
+            has no shares), else the highest current ContactBookShare for the user or one of the user's groups. With
+            permissionEnumId, an error when the user has less; a book the user has no permission on is "not found".
+        </description>
+        <in-parameters>
+            <parameter name="contactBookId" required="true"/>
+            <parameter name="permissionEnumId"><description>The permission needed: CbpView, CbpEdit or CbpManage. Empty
+                only reports.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="contactBook" type="Map"><description>Null when the user has no permission</description></parameter>
+            <parameter name="userPermissionEnumId"/>
+            <parameter name="isOwner" type="Boolean"/>
+            <parameter name="isPersonal" type="Boolean"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const levels = {CbpView: 1, CbpEdit: 2, CbpManage: 3}
+            const names = [null, 'CbpView', 'CbpEdit', 'CbpManage']
+            const verbs = {CbpView: 'view', CbpEdit: 'edit', CbpManage: 'manage'}
+            if (permissionEnumId && !levels[permissionEnumId]) { ec.message.addError(`Unknown contact book permission ${permissionEnumId}`); return }
+            const userId = ec.user.userId
+            const book = ec.entity.find('mantle.party.contact.ContactBook').condition('contactBookId', contactBookId).one()
+            let level = 0
+            isOwner = false
+            isPersonal = book != null && book.visibilityEnumId !== 'CbvShared'
+            if (book != null && userId) {
+                if (isPersonal) {
+                    if (book.ownerUserId === userId) { level = 3; isOwner = true }
+                } else {
+                    const groups = Array.from(ec.user.getUserGroupIdSet() || [])
+                    const shares = ec.entity.find('mantle.party.contact.ContactBookShare').condition('contactBookId', contactBookId)
+                            .condition(ec.entity.conditionFactory.makeConditionDate('fromDate', 'thruDate', null)).list()
+                    for (const share of shares) {
+                        const applies = share.userId ? share.userId === userId : (share.userGroupId && groups.includes(share.userGroupId))
+                        if (applies) level = Math.max(level, levels[share.permissionEnumId] || 0)
+                    }
+                }
+            }
+            userPermissionEnumId = names[level]
+            contactBook = level ? book.getMap() : null
+            if (!permissionEnumId) return
+            if (level === 0) { ec.message.addError(`Contact book ${contactBookId} not found`); return }
+            if (level < levels[permissionEnumId])
+                ec.message.addError(`You need ${verbs[permissionEnumId]} permission on contact book ${book.contactBookName || contactBookId}`)
+        ]]></script></actions>
+    </service>
+
+    <service verb="create" noun="ContactBook">
+        <description>
+            A personal book (the default) belongs to the current user; the user's first personal book is the default one,
+            and isDefault=Y makes this one the default. A shared book may belong to an organization (ownerPartyId), and
+            its creator gets a manage share.
+        </description>
+        <in-parameters>
+            <parameter name="contactBookName" required="true"/>
+            <parameter name="description"/>
+            <parameter name="color"/>
+            <parameter name="visibilityEnumId" default-value="CbvPersonal"/>
+            <parameter name="ownerPartyId"><description>For a shared book, the organization it belongs to</description></parameter>
+            <parameter name="isDefault"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="contactBookId"/>
+            <parameter name="contactBookShareId"><description>The creator's manage share of a shared book</description></parameter>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const userId = ec.user.userId
+            if (!userId) { ec.message.addError('Creating a contact book needs a user'); return }
+            if (visibilityEnumId !== 'CbvPersonal' && visibilityEnumId !== 'CbvShared') {
+                ec.message.addError(`Unknown contact book visibility ${visibilityEnumId}`); return }
+            const now = ec.user.nowTimestamp
+            const fields = {contactBookName: contactBookName, description: description, color: color,
+                visibilityEnumId: visibilityEnumId, createdDate: now}
+            if (visibilityEnumId === 'CbvPersonal') {
+                if (ownerPartyId) { ec.message.addError('A personal book belongs to its user; ownerPartyId is for a shared book'); return }
+                const defaults = ec.entity.find('mantle.party.contact.ContactBook').condition('ownerUserId', userId)
+                        .condition('visibilityEnumId', 'CbvPersonal').condition('isDefault', 'Y').list()
+                const makeDefault = isDefault === 'Y' || defaults.length === 0
+                if (makeDefault) for (const other of defaults) { other.set('isDefault', 'N'); other.update() }
+                fields.ownerUserId = userId
+                fields.isDefault = makeDefault ? 'Y' : 'N'
+            } else {
+                if (ownerPartyId) {
+                    // the organization as the user may see it
+                    const owner = ec.entity.find('mantle.party.Party').condition('partyId', ownerPartyId).one()
+                    if (owner == null || owner.privateOwnerUserId) { ec.message.addError(`Party ${ownerPartyId} not found`); return }
+                    fields.ownerPartyId = ownerPartyId
+                }
+                fields.isDefault = 'N'
+            }
+            contactBookId = ec.service.sync().name('create#mantle.party.contact.ContactBook').parameters(fields).call()?.contactBookId
+            if (ec.message.hasError()) return
+            if (visibilityEnumId === 'CbvShared') {
+                contactBookShareId = ec.service.sync().name('create#mantle.party.contact.ContactBookShare').parameters({
+                    contactBookId: contactBookId, userId: userId, permissionEnumId: 'CbpManage', fromDate: now}).call()?.contactBookShareId
+            }
+        ]]></script></actions>
+    </service>
+    <service verb="update" noun="ContactBook">
+        <description>Needs manage permission. A field left out (null) is not changed. isDefault=Y makes a personal book the
+            user's default; the default stays until another book is made the default.</description>
+        <in-parameters>
+            <parameter name="contactBookId" required="true"/>
+            <parameter name="contactBookName"/>
+            <parameter name="description"/>
+            <parameter name="color"/>
+            <parameter name="ownerPartyId"><description>A shared book's organization</description></parameter>
+            <parameter name="isDefault"/>
+        </in-parameters>
+        <actions><script><![CDATA[
+            const access = ec.service.sync().name('mantle.party.ContactBookServices.check#ContactBookAccess')
+                    .parameters({contactBookId: contactBookId, permissionEnumId: 'CbpManage'}).call()
+            if (ec.message.hasError()) return
+            const book = ec.entity.find('mantle.party.contact.ContactBook').condition('contactBookId', contactBookId).one()
+            if (contactBookName != null) {
+                if (!String(contactBookName).trim()) { ec.message.addError('A contact book needs a name'); return }
+                book.set('contactBookName', contactBookName)
+            }
+            if (description != null) book.set('description', description || null)
+            if (color != null) book.set('color', color || null)
+            if (ownerPartyId != null) {
+                if (access.isPersonal) { ec.message.addError('A personal book belongs to its user; ownerPartyId is for a shared book'); return }
+                if (ownerPartyId) {
+                    const owner = ec.entity.find('mantle.party.Party').condition('partyId', ownerPartyId).one()
+                    if (owner == null || owner.privateOwnerUserId) { ec.message.addError(`Party ${ownerPartyId} not found`); return }
+                }
+                book.set('ownerPartyId', ownerPartyId || null)
+            }
+            if (isDefault != null && isDefault !== book.isDefault) {
+                if (!access.isPersonal) { ec.message.addError('Only a personal book can be the default'); return }
+                if (isDefault !== 'Y') { ec.message.addError('Make another book the default instead'); return }
+                for (const other of ec.entity.find('mantle.party.contact.ContactBook').condition('ownerUserId', book.ownerUserId)
+                        .condition('visibilityEnumId', 'CbvPersonal').condition('isDefault', 'Y').list()) {
+                    other.set('isDefault', 'N'); other.update()
+                }
+                book.set('isDefault', 'Y')
+            }
+            book.update()
+        ]]></script></actions>
+    </service>
+    <service verb="delete" noun="ContactBook">
+        <description>
+            Needs manage permission. Removes the book with its members, groups and shares. A personal contact that would be
+            in none of its owner's books after this moves to the owner's default book; the default book itself is not
+            deleted (make another book the default first).
+        </description>
+        <in-parameters><parameter name="contactBookId" required="true"/></in-parameters>
+        <out-parameters><parameter name="movedPartyIdList" type="List"><description>Personal contacts moved to the default
+            book</description></parameter></out-parameters>
+        <actions><script><![CDATA[
+            const access = ec.service.sync().name('mantle.party.ContactBookServices.check#ContactBookAccess')
+                    .parameters({contactBookId: contactBookId, permissionEnumId: 'CbpManage'}).call()
+            if (ec.message.hasError()) return
+            const book = access.contactBook
+            if (access.isPersonal && book.isDefault === 'Y') {
+                ec.message.addError('The default book cannot be deleted; make another book the default first'); return }
+            const cf = ec.entity.conditionFactory
+            movedPartyIdList = []
+            if (access.isPersonal) {
+                // the personal contacts of this book in no other current book of the owner
+                const memberIds = Array.from(ec.entity.find('mantle.party.contact.ContactBookPartyDetail').condition('contactBookId', contactBookId)
+                        .condition('privateOwnerUserId', book.ownerUserId).condition(cf.makeConditionDate('fromDate', 'thruDate', null))
+                        .selectField('partyId').list()).map((row) => row.partyId)
+                const orphanIds = memberIds.filter((partyId) => ec.entity.find('mantle.party.contact.ContactBookParty')
+                        .condition('partyId', partyId).condition(cf.makeCondition('contactBookId', 'not-equals', contactBookId))
+                        .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).count() === 0)
+                if (orphanIds.length) {
+                    const defaultOut = ec.service.sync().name('mantle.party.ContactBookServices.ensure#UserDefaultContactBook').call()
+                    if (ec.message.hasError()) return
+                    ec.service.sync().name('mantle.party.ContactBookServices.add#ContactBookParties')
+                            .parameters({contactBookId: defaultOut.contactBookId, partyIdList: orphanIds}).call()
+                    if (ec.message.hasError()) return
+                    movedPartyIdList = orphanIds
+                }
+            }
+            const groupIds = Array.from(ec.entity.find('mantle.party.contact.ContactBookGroup').condition('contactBookId', contactBookId)
+                    .list()).map((group) => group.contactBookGroupId)
+            for (const groupId of groupIds) {
+                for (const row of ec.entity.find('mantle.party.contact.ContactBookGroupParty').condition('contactBookGroupId', groupId).list()) row.delete()
+            }
+            for (const entityName of ['mantle.party.contact.ContactBookGroup', 'mantle.party.contact.ContactBookParty',
+                    'mantle.party.contact.ContactBookShare']) {
+                for (const row of ec.entity.find(entityName).condition('contactBookId', contactBookId).list()) row.delete()
+            }
+            ec.entity.find('mantle.party.contact.ContactBook').condition('contactBookId', contactBookId).one().delete()
+        ]]></script></actions>
+    </service>
+    <service verb="ensure" noun="UserDefaultContactBook">
+        <description>The current user's default personal book, created on first use; when the user has personal books but
+            none is the default, the oldest becomes it.</description>
+        <in-parameters><parameter name="contactBookName" default-value="My Contacts"><description>For a new book</description></parameter></in-parameters>
+        <out-parameters>
+            <parameter name="contactBookId"/>
+            <parameter name="created" type="Boolean"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            created = false
+            const userId = ec.user.userId
+            if (!userId) { ec.message.addError('A default contact book needs a user'); return }
+            const personal = Array.from(ec.entity.find('mantle.party.contact.ContactBook').condition('ownerUserId', userId)
+                    .condition('visibilityEnumId', 'CbvPersonal').orderBy('createdDate,contactBookId').list())
+            const found = personal.find((book) => book.isDefault === 'Y') || personal[0]
+            if (found != null) {
+                if (found.isDefault !== 'Y') { found.set('isDefault', 'Y'); found.update() }
+                contactBookId = found.contactBookId
+                return
+            }
+            contactBookId = ec.service.sync().name('create#mantle.party.contact.ContactBook').parameters({contactBookName: contactBookName,
+                visibilityEnumId: 'CbvPersonal', ownerUserId: userId, isDefault: 'Y', createdDate: ec.user.nowTimestamp}).call()?.contactBookId
+            created = !ec.message.hasError()
+        ]]></script></actions>
+    </service>
+
+    <service verb="share" noun="ContactBook">
+        <description>Needs manage permission; a shared book only. Opens the book to a user or a user group; when that user
+            or group already has a current share, its permission (and thruDate) change instead. The last manage share
+            cannot be lowered.</description>
+        <in-parameters>
+            <parameter name="contactBookId" required="true"/>
+            <parameter name="userId"/>
+            <parameter name="userGroupId"/>
+            <parameter name="permissionEnumId" default-value="CbpView"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters><parameter name="contactBookShareId"/></out-parameters>
+        <actions><script><![CDATA[
+            const access = ec.service.sync().name('mantle.party.ContactBookServices.check#ContactBookAccess')
+                    .parameters({contactBookId: contactBookId, permissionEnumId: 'CbpManage'}).call()
+            if (ec.message.hasError()) return
+            if (access.isPersonal) { ec.message.addError('A personal book is not shared; share a shared book instead'); return }
+            if (!['CbpView', 'CbpEdit', 'CbpManage'].includes(permissionEnumId)) {
+                ec.message.addError(`Unknown contact book permission ${permissionEnumId}`); return }
+            if (!userId === !userGroupId) { ec.message.addError('Share a contact book with a user or a user group'); return }
+            if (userId && ec.entity.find('moqui.security.UserAccount').condition('userId', userId).one() == null) {
+                ec.message.addError(`User ${userId} not found`); return }
+            if (userGroupId && ec.entity.find('moqui.security.UserGroup').condition('userGroupId', userGroupId).one() == null) {
+                ec.message.addError(`User group ${userGroupId} not found`); return }
+            const cf = ec.entity.conditionFactory
+            const current = Array.from(ec.entity.find('mantle.party.contact.ContactBookShare').condition('contactBookId', contactBookId)
+                    .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).list())
+            const existing = current.find((share) => userId ? share.userId === userId : share.userGroupId === userGroupId)
+            if (existing != null) {
+                if (existing.permissionEnumId === 'CbpManage' && permissionEnumId !== 'CbpManage'
+                        && !current.some((share) => share !== existing && share.permissionEnumId === 'CbpManage')) {
+                    ec.message.addError('A shared book keeps at least one manage share'); return }
+                existing.set('permissionEnumId', permissionEnumId)
+                existing.set('thruDate', thruDate)
+                existing.update()
+                contactBookShareId = existing.contactBookShareId
+                return
+            }
+            contactBookShareId = ec.service.sync().name('create#mantle.party.contact.ContactBookShare').parameters({
+                contactBookId: contactBookId, userId: userId, userGroupId: userGroupId, permissionEnumId: permissionEnumId,
+                fromDate: ec.user.nowTimestamp, thruDate: thruDate}).call()?.contactBookShareId
+        ]]></script></actions>
+    </service>
+    <service verb="unshare" noun="ContactBook">
+        <description>Needs manage permission. Ends (thruDate now) the current shares named by contactBookShareId, userId or
+            userGroupId; the last manage share is not ended.</description>
+        <in-parameters>
+            <parameter name="contactBookId" required="true"/>
+            <parameter name="contactBookShareId"/>
+            <parameter name="userId"/>
+            <parameter name="userGroupId"/>
+        </in-parameters>
+        <out-parameters><parameter name="unsharedCount" type="Integer"/></out-parameters>
+        <actions><script><![CDATA[
+            unsharedCount = 0
+            ec.service.sync().name('mantle.party.ContactBookServices.check#ContactBookAccess')
+                    .parameters({contactBookId: contactBookId, permissionEnumId: 'CbpManage'}).call()
+            if (ec.message.hasError()) return
+            if (!contactBookShareId && !userId && !userGroupId) { ec.message.addError('Name the share, user or user group to unshare'); return }
+            const cf = ec.entity.conditionFactory
+            const current = Array.from(ec.entity.find('mantle.party.contact.ContactBookShare').condition('contactBookId', contactBookId)
+                    .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).list())
+            const ending = current.filter((share) => (contactBookShareId && share.contactBookShareId === contactBookShareId)
+                    || (userId && share.userId === userId) || (userGroupId && share.userGroupId === userGroupId))
+            const managersLeft = current.filter((share) => !ending.includes(share) && share.permissionEnumId === 'CbpManage').length
+            if (managersLeft === 0 && ending.some((share) => share.permissionEnumId === 'CbpManage')) {
+                ec.message.addError('A shared book keeps at least one manage share'); return }
+            for (const share of ending) { share.set('thruDate', ec.user.nowTimestamp); share.update(); unsharedCount++ }
+        ]]></script></actions>
+    </service>
+
+    <service verb="add" noun="ContactBookParties">
+        <description>
+            Needs edit permission. Adds parties to a book (and to groups of that book), skipping those already in it. Each
+            party must be one the user may see; a personal contact goes only in its owner's personal books. A party that
+            cannot be added is skipped and listed in failedPartyIdList with a warning, and the rest are added.
+        </description>
+        <in-parameters>
+            <parameter name="contactBookId" required="true"/>
+            <parameter name="partyIdList" type="List"><parameter name="partyId"/></parameter>
+            <parameter name="partyId"/>
+            <parameter name="contactBookGroupIdList" type="List"><parameter name="contactBookGroupId"/></parameter>
+            <parameter name="isFavorite"><description>Y or N to set on each, when given</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="addedCount" type="Integer"/>
+            <parameter name="alreadyCount" type="Integer"/>
+            <parameter name="failedPartyIdList" type="List"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            addedCount = 0
+            alreadyCount = 0
+            failedPartyIdList = []
+            const access = ec.service.sync().name('mantle.party.ContactBookServices.check#ContactBookAccess')
+                    .parameters({contactBookId: contactBookId, permissionEnumId: 'CbpEdit'}).call()
+            if (ec.message.hasError()) return
+            const cf = ec.entity.conditionFactory
+            const userId = ec.user.userId
+            const now = ec.user.nowTimestamp
+            const textList = (value) => value == null ? [] : (typeof value === 'string' ? value.split(',') : Array.from(value))
+                    .map((item) => String(item).trim()).filter((item) => item)
+            const partyIds = Array.from(new Set(textList(partyIdList).concat(textList(partyId))))
+            const groupIds = Array.from(new Set(textList(contactBookGroupIdList)))
+            for (const groupId of groupIds) {
+                const group = ec.entity.find('mantle.party.contact.ContactBookGroup').condition('contactBookGroupId', groupId).one()
+                if (group == null || group.contactBookId !== contactBookId) {
+                    ec.message.addError(`Group ${groupId} is not in contact book ${contactBookId}`); return }
+            }
+            const skip = (id, why) => {
+                failedPartyIdList.push(id)
+                ec.logger.warn(`Contact book ${contactBookId}: party ${id} not added: ${why}`)
+                ec.message.addMessage(`Party ${id} not added: ${why}`, 'warning')
+            }
+            for (const id of partyIds) {
+                // the party as the user may see it: the entity filters, and a personal contact only for its owner
+                const party = ec.entity.find('mantle.party.Party').condition('partyId', id).one()
+                if (party == null || (party.privateOwnerUserId && party.privateOwnerUserId !== userId)) { skip(id, 'not found'); continue }
+                if (party.privateOwnerUserId && !access.isPersonal) {
+                    skip(id, 'it is a personal contact; link it to the directory before adding it to a shared book'); continue }
+                const current = ec.entity.find('mantle.party.contact.ContactBookParty').condition('contactBookId', contactBookId)
+                        .condition('partyId', id).condition(cf.makeConditionDate('fromDate', 'thruDate', null)).list()
+                if (current.length) {
+                    alreadyCount++
+                    if (isFavorite && current[0].isFavorite !== isFavorite) { current[0].set('isFavorite', isFavorite); current[0].update() }
+                } else {
+                    // a row removed at this same moment has this key: open it again
+                    const sameKey = ec.entity.find('mantle.party.contact.ContactBookParty').condition('contactBookId', contactBookId)
+                            .condition('partyId', id).condition('fromDate', now).one()
+                    if (sameKey != null) {
+                        sameKey.set('thruDate', null)
+                        if (isFavorite) sameKey.set('isFavorite', isFavorite)
+                        sameKey.update()
+                    } else {
+                        ec.service.sync().name('create#mantle.party.contact.ContactBookParty').parameters({contactBookId: contactBookId,
+                            partyId: id, fromDate: now, isFavorite: isFavorite || null}).call()
+                        if (ec.message.hasError()) return
+                    }
+                    addedCount++
+                }
+                for (const groupId of groupIds) {
+                    if (ec.entity.find('mantle.party.contact.ContactBookGroupParty').condition('contactBookGroupId', groupId)
+                            .condition('partyId', id).one() != null) continue
+                    ec.service.sync().name('create#mantle.party.contact.ContactBookGroupParty')
+                            .parameters({contactBookGroupId: groupId, partyId: id, fromDate: now}).call()
+                    if (ec.message.hasError()) return
+                }
+            }
+        ]]></script></actions>
+    </service>
+    <service verb="remove" noun="ContactBookParties">
+        <description>Needs edit permission. Ends (thruDate now) the parties' current membership of the book and removes them
+            from its groups. A personal contact stays its owner's (find#Party with personalContacts=only finds it).</description>
+        <in-parameters>
+            <parameter name="contactBookId" required="true"/>
+            <parameter name="partyIdList" type="List"><parameter name="partyId"/></parameter>
+            <parameter name="partyId"/>
+        </in-parameters>
+        <out-parameters><parameter name="removedCount" type="Integer"/></out-parameters>
+        <actions><script><![CDATA[
+            removedCount = 0
+            ec.service.sync().name('mantle.party.ContactBookServices.check#ContactBookAccess')
+                    .parameters({contactBookId: contactBookId, permissionEnumId: 'CbpEdit'}).call()
+            if (ec.message.hasError()) return
+            const cf = ec.entity.conditionFactory
+            const textList = (value) => value == null ? [] : (typeof value === 'string' ? value.split(',') : Array.from(value))
+                    .map((item) => String(item).trim()).filter((item) => item)
+            const partyIds = Array.from(new Set(textList(partyIdList).concat(textList(partyId))))
+            if (!partyIds.length) return
+            const groupIds = Array.from(ec.entity.find('mantle.party.contact.ContactBookGroup').condition('contactBookId', contactBookId)
+                    .list()).map((group) => group.contactBookGroupId)
+            for (const row of ec.entity.find('mantle.party.contact.ContactBookParty').condition('contactBookId', contactBookId)
+                    .condition(cf.makeCondition('partyId', 'in', partyIds)).condition(cf.makeConditionDate('fromDate', 'thruDate', null)).list()) {
+                row.set('thruDate', ec.user.nowTimestamp)
+                row.update()
+                removedCount++
+            }
+            if (groupIds.length) for (const row of ec.entity.find('mantle.party.contact.ContactBookGroupParty')
+                    .condition(cf.makeCondition('contactBookGroupId', 'in', groupIds)).condition(cf.makeCondition('partyId', 'in', partyIds)).list()) row.delete()
+        ]]></script></actions>
+    </service>
+
+    <service verb="create" noun="ContactBookGroup">
+        <description>Needs edit permission. A group with the same name (ignoring case) in the book is returned instead of a
+            new one.</description>
+        <in-parameters>
+            <parameter name="contactBookId" required="true"/>
+            <parameter name="groupName" required="true"/>
+            <parameter name="sequenceNum" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="contactBookGroupId"/>
+            <parameter name="created" type="Boolean"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            created = false
+            ec.service.sync().name('mantle.party.ContactBookServices.check#ContactBookAccess')
+                    .parameters({contactBookId: contactBookId, permissionEnumId: 'CbpEdit'}).call()
+            if (ec.message.hasError()) return
+            const name = String(groupName).trim()
+            if (!name) { ec.message.addError('A group needs a name'); return }
+            const groups = Array.from(ec.entity.find('mantle.party.contact.ContactBookGroup').condition('contactBookId', contactBookId).list())
+            const existing = groups.find((group) => String(group.groupName || '').toLowerCase() === name.toLowerCase())
+            if (existing != null) { contactBookGroupId = existing.contactBookGroupId; return }
+            const nextSeq = groups.reduce((max, group) => Math.max(max, Number(group.sequenceNum || 0)), 0) + 1
+            contactBookGroupId = ec.service.sync().name('create#mantle.party.contact.ContactBookGroup').parameters({
+                contactBookId: contactBookId, groupName: name, sequenceNum: sequenceNum != null ? sequenceNum : nextSeq}).call()?.contactBookGroupId
+            created = !ec.message.hasError()
+        ]]></script></actions>
+    </service>
+    <service verb="update" noun="ContactBookGroup">
+        <description>Needs edit permission on the group's book. A field left out (null) is not changed.</description>
+        <in-parameters>
+            <parameter name="contactBookGroupId" required="true"/>
+            <parameter name="groupName"/>
+            <parameter name="sequenceNum" type="Integer"/>
+        </in-parameters>
+        <actions><script><![CDATA[
+            const group = ec.entity.find('mantle.party.contact.ContactBookGroup').condition('contactBookGroupId', contactBookGroupId).one()
+            if (group == null) { ec.message.addError(`Group ${contactBookGroupId} not found`); return }
+            ec.service.sync().name('mantle.party.ContactBookServices.check#ContactBookAccess')
+                    .parameters({contactBookId: group.contactBookId, permissionEnumId: 'CbpEdit'}).call()
+            if (ec.message.hasError()) return
+            if (groupName != null) {
+                const name = String(groupName).trim()
+                if (!name) { ec.message.addError('A group needs a name'); return }
+                const clash = Array.from(ec.entity.find('mantle.party.contact.ContactBookGroup').condition('contactBookId', group.contactBookId).list())
+                        .find((other) => other.contactBookGroupId !== contactBookGroupId && String(other.groupName || '').toLowerCase() === name.toLowerCase())
+                if (clash != null) { ec.message.addError(`The book already has a group ${name}`); return }
+                group.set('groupName', name)
+            }
+            if (sequenceNum != null) group.set('sequenceNum', sequenceNum)
+            group.update()
+        ]]></script></actions>
+    </service>
+    <service verb="delete" noun="ContactBookGroup">
+        <description>Needs edit permission on the group's book. The parties stay in the book.</description>
+        <in-parameters><parameter name="contactBookGroupId" required="true"/></in-parameters>
+        <actions><script><![CDATA[
+            const group = ec.entity.find('mantle.party.contact.ContactBookGroup').condition('contactBookGroupId', contactBookGroupId).one()
+            if (group == null) { ec.message.addError(`Group ${contactBookGroupId} not found`); return }
+            ec.service.sync().name('mantle.party.ContactBookServices.check#ContactBookAccess')
+                    .parameters({contactBookId: group.contactBookId, permissionEnumId: 'CbpEdit'}).call()
+            if (ec.message.hasError()) return
+            for (const row of ec.entity.find('mantle.party.contact.ContactBookGroupParty').condition('contactBookGroupId', contactBookGroupId).list()) row.delete()
+            group.delete()
+        ]]></script></actions>
+    </service>
+    <service verb="add" noun="ContactBookGroupParties">
+        <description>Needs edit permission on the group's book. A party not yet in the book is added to it, as
+            add#ContactBookParties does (and skipped the same way).</description>
+        <in-parameters>
+            <parameter name="contactBookGroupId" required="true"/>
+            <parameter name="partyIdList" type="List"><parameter name="partyId"/></parameter>
+            <parameter name="partyId"/>
+        </in-parameters>
+        <out-parameters><parameter name="failedPartyIdList" type="List"/></out-parameters>
+        <actions><script><![CDATA[
+            const group = ec.entity.find('mantle.party.contact.ContactBookGroup').condition('contactBookGroupId', contactBookGroupId).one()
+            if (group == null) { ec.message.addError(`Group ${contactBookGroupId} not found`); return }
+            const out = ec.service.sync().name('mantle.party.ContactBookServices.add#ContactBookParties').parameters({contactBookId: group.contactBookId,
+                partyIdList: partyIdList, partyId: partyId, contactBookGroupIdList: [contactBookGroupId]}).call()
+            failedPartyIdList = out?.failedPartyIdList || []
+        ]]></script></actions>
+    </service>
+    <service verb="remove" noun="ContactBookGroupParties">
+        <description>Needs edit permission on the group's book. The parties stay in the book.</description>
+        <in-parameters>
+            <parameter name="contactBookGroupId" required="true"/>
+            <parameter name="partyIdList" type="List"><parameter name="partyId"/></parameter>
+            <parameter name="partyId"/>
+        </in-parameters>
+        <out-parameters><parameter name="removedCount" type="Integer"/></out-parameters>
+        <actions><script><![CDATA[
+            removedCount = 0
+            const group = ec.entity.find('mantle.party.contact.ContactBookGroup').condition('contactBookGroupId', contactBookGroupId).one()
+            if (group == null) { ec.message.addError(`Group ${contactBookGroupId} not found`); return }
+            ec.service.sync().name('mantle.party.ContactBookServices.check#ContactBookAccess')
+                    .parameters({contactBookId: group.contactBookId, permissionEnumId: 'CbpEdit'}).call()
+            if (ec.message.hasError()) return
+            const textList = (value) => value == null ? [] : (typeof value === 'string' ? value.split(',') : Array.from(value))
+                    .map((item) => String(item).trim()).filter((item) => item)
+            const partyIds = Array.from(new Set(textList(partyIdList).concat(textList(partyId))))
+            if (!partyIds.length) return
+            for (const row of ec.entity.find('mantle.party.contact.ContactBookGroupParty').condition('contactBookGroupId', contactBookGroupId)
+                    .condition(ec.entity.conditionFactory.makeCondition('partyId', 'in', partyIds)).list()) { row.delete(); removedCount++ }
+        ]]></script></actions>
+    </service>
+    <service verb="set" noun="ContactFavorite">
+        <description>Stars (isFavorite=Y) or unstars a party in a book, the user's default book when contactBookId is empty.
+            Needs edit permission; starring a party not in the book adds it.</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="contactBookId"/>
+            <parameter name="isFavorite" default-value="Y"/>
+        </in-parameters>
+        <out-parameters><parameter name="contactBookId"/></out-parameters>
+        <actions><script><![CDATA[
+            if (!contactBookId) {
+                contactBookId = ec.service.sync().name('mantle.party.ContactBookServices.ensure#UserDefaultContactBook').call()?.contactBookId
+                if (ec.message.hasError()) return
+            }
+            const favorite = isFavorite === 'Y' ? 'Y' : 'N'
+            const current = ec.entity.find('mantle.party.contact.ContactBookParty').condition('contactBookId', contactBookId)
+                    .condition('partyId', partyId).condition(ec.entity.conditionFactory.makeConditionDate('fromDate', 'thruDate', null)).list()
+            if (!current.length && favorite === 'N') {
+                ec.service.sync().name('mantle.party.ContactBookServices.check#ContactBookAccess')
+                        .parameters({contactBookId: contactBookId, permissionEnumId: 'CbpEdit'}).call()
+                return
+            }
+            const out = ec.service.sync().name('mantle.party.ContactBookServices.add#ContactBookParties')
+                    .parameters({contactBookId: contactBookId, partyId: partyId, isFavorite: favorite}).call()
+            if (!ec.message.hasError() && out?.failedPartyIdList?.length) ec.message.addError(`Party ${partyId} not found`)
+        ]]></script></actions>
+    </service>
+
+    <service verb="find" noun="ContactBookParties">
+        <description>
+            Needs view permission. The book's current members the user may see, by name, organization, email or phone
+            (text), group and favorite, a page at a time: the names, the organization and title (a person's current
+            PrtContact or PrtEmployee relationship), the primary email (EmailPrimary first) and phone (PhonePrimary, then
+            PhoneMobile, first), the groups of this book, isFavorite and isPersonal.
+        </description>
+        <in-parameters>
+            <parameter name="contactBookId" required="true"/>
+            <parameter name="contactBookGroupId"/>
+            <parameter name="favoritesOnly" type="Boolean" default="false"/>
+            <parameter name="text"/>
+            <parameter name="orderByField" default-value="^firstName,^lastName,^organizationName"/>
+            <parameter name="pageIndex" type="Integer" default="0"/>
+            <parameter name="pageSize" type="Integer" default="50"/>
+            <parameter name="pageNoLimit" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="contactList" type="List"><parameter name="contact" type="Map"/></parameter>
+            <parameter name="contactListCount" type="Integer"/>
+            <parameter name="contactListPageIndex" type="Integer"/>
+            <parameter name="contactListPageSize" type="Integer"/>
+            <parameter name="contactListPageMaxIndex" type="Integer"/>
+            <parameter name="contactListPageRangeLow" type="Integer"/>
+            <parameter name="contactListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            contactList = []
+            contactListCount = 0
+            ec.service.sync().name('mantle.party.ContactBookServices.check#ContactBookAccess')
+                    .parameters({contactBookId: contactBookId, permissionEnumId: 'CbpView'}).call()
+            if (ec.message.hasError()) return
+            const cf = ec.entity.conditionFactory
+            const userId = ec.user.userId || null
+            const pageIndexInt = Math.trunc(Number(pageIndex || 0))
+            const pageSizeInt = Math.max(1, Math.trunc(Number(pageSize || 50)))
+            contactListPageIndex = pageNoLimit ? 0 : pageIndexInt
+            contactListPageSize = pageSizeInt
+
+            // the book's current members the user may see; merged (disabled) parties are left out
+            const memberConditions = [cf.makeCondition('contactBookId', 'equals', contactBookId),
+                cf.makeConditionDate('fromDate', 'thruDate', null),
+                cf.makeCondition([cf.makeCondition('privateOwnerUserId', 'equals', null),
+                    cf.makeCondition('privateOwnerUserId', 'equals', userId)], 'or'),
+                cf.makeCondition('disabled', 'not-equals', 'Y', true)]
+            if (favoritesOnly) memberConditions.push(cf.makeCondition('isFavorite', 'equals', 'Y'))
+            const onlyIds = []
+            if (contactBookGroupId) {
+                const group = ec.entity.find('mantle.party.contact.ContactBookGroup').condition('contactBookGroupId', contactBookGroupId).one()
+                if (group == null || group.contactBookId !== contactBookId) { ec.message.addError(`Group ${contactBookGroupId} is not in contact book ${contactBookId}`); return }
+                onlyIds.push(Array.from(ec.entity.find('mantle.party.contact.ContactBookGroupParty').condition('contactBookGroupId', contactBookGroupId)
+                        .selectField('partyId').list()).map((row) => row.partyId))
+            }
+            const words = text ? String(text).trim() : ''
+            if (words) {
+                // the members matching by name, or by a current email or phone (one view row per contact mechanism)
+                const like = (field, value) => cf.makeCondition(field, 'like', `%${value}%`, false, true)
+                const currentPcm = cf.makeConditionDate('pcmFromDate', 'pcmThruDate', null)
+                const textConditions = ['firstName', 'lastName', 'nickname', 'organizationName', 'pseudoId'].map((field) => like(field, words))
+                textConditions.push(cf.makeCondition([cf.makeCondition('contactMechTypeEnumId', 'equals', 'CmtEmailAddress'),
+                    like('infoString', words), currentPcm], 'and'))
+                const digits = words.replace(/\D/g, '')
+                if (digits.length >= 3) textConditions.push(cf.makeCondition([like('contactNumber', digits.length > 4 ? digits.slice(-4) : digits), currentPcm], 'and'))
+                let textFind = ec.entity.find('mantle.party.contact.FindContactBookPartyView').distinct(true).selectField('partyId')
+                for (const condition of memberConditions) textFind = textFind.condition(condition)
+                textFind = textFind.condition(cf.makeCondition(textConditions, 'or'))
+                let matched = Array.from(textFind.list()).map((row) => row.partyId)
+                // a phone matched on its last digits: check all of them
+                if (digits.length > 4) {
+                    const byName = new Set()
+                    let nameFind = ec.entity.find('mantle.party.contact.ContactBookPartyDetail').selectField('partyId')
+                    for (const condition of memberConditions) nameFind = nameFind.condition(condition)
+                    nameFind = nameFind.condition(cf.makeCondition(['firstName', 'lastName', 'nickname', 'organizationName', 'pseudoId']
+                            .map((field) => like(field, words)), 'or'))
+                    for (const row of nameFind.list()) byName.add(row.partyId)
+                    matched = matched.filter((id) => {
+                        if (byName.has(id)) return true
+                        const emailHit = ec.entity.find('mantle.party.contact.PartyContactMechInfo').condition('partyId', id)
+                                .condition('contactMechTypeEnumId', 'CmtEmailAddress').condition(cf.makeConditionDate('fromDate', 'thruDate', null))
+                                .condition(like('infoString', words)).count() > 0
+                        if (emailHit) return true
+                        return Array.from(ec.entity.find('mantle.party.contact.PartyContactMechTelecomNumber').condition('partyId', id)
+                                .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).list())
+                                .some((tn) => `${tn.countryCode || ''}${tn.areaCode || ''}${tn.contactNumber || ''}`.replace(/\D/g, '').includes(digits))
+                    })
+                }
+                onlyIds.push(matched)
+            }
+            let find = ec.entity.find('mantle.party.contact.ContactBookPartyDetail')
+            for (const condition of memberConditions) find = find.condition(condition)
+            for (const ids of onlyIds) {
+                if (!ids.length) return
+                find = find.condition(cf.makeCondition('partyId', 'in', ids))
+            }
+            if (orderByField) find = find.orderBy(orderByField)
+            const countFind = find.copy()
+            if (!pageNoLimit) find = find.offset(pageIndexInt * pageSizeInt).limit(pageSizeInt)
+            const rows = Array.from(find.list()).map((row) => row.getMap())
+            contactListCount = countFind.count()
+            contactListPageMaxIndex = Math.trunc((contactListCount - 1) / contactListPageSize)
+            contactListPageRangeLow = contactListPageIndex * contactListPageSize + 1
+            contactListPageRangeHigh = Math.min(contactListPageIndex * contactListPageSize + contactListPageSize, contactListCount)
+            if (!rows.length) return
+
+            const ids = rows.map((row) => row.partyId)
+            const byParty = (list) => {
+                const map = new Map()
+                for (const item of list) { if (!map.has(item.partyId)) map.set(item.partyId, []); map.get(item.partyId).push(item) }
+                return map
+            }
+            const rank = (order, purposeId) => { const index = order.indexOf(purposeId); return index < 0 ? order.length : index }
+            const emails = byParty(Array.from(ec.entity.find('mantle.party.contact.PartyContactMechInfo').condition(cf.makeCondition('partyId', 'in', ids))
+                    .condition('contactMechTypeEnumId', 'CmtEmailAddress').condition(cf.makeConditionDate('fromDate', 'thruDate', null))
+                    .orderBy('fromDate').list()).map((row) => row.getMap()))
+            const phones = byParty(Array.from(ec.entity.find('mantle.party.contact.PartyContactMechTelecomNumber').condition(cf.makeCondition('partyId', 'in', ids))
+                    .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).orderBy('fromDate').list()).map((row) => row.getMap()))
+            const groups = new Map(Array.from(ec.entity.find('mantle.party.contact.ContactBookGroup').condition('contactBookId', contactBookId)
+                    .orderBy('sequenceNum,groupName').list()).map((group) => [group.contactBookGroupId, group.getMap()]))
+            const groupRows = groups.size ? byParty(Array.from(ec.entity.find('mantle.party.contact.ContactBookGroupParty')
+                    .condition(cf.makeCondition('contactBookGroupId', 'in', Array.from(groups.keys())))
+                    .condition(cf.makeCondition('partyId', 'in', ids)).list()).map((row) => row.getMap())) : new Map()
+            const relationships = byParty(Array.from(ec.entity.find('mantle.party.PartyRelationship').condition(cf.makeCondition('fromPartyId', 'in', ids))
+                    .condition(cf.makeCondition('relationshipTypeEnumId', 'in', ['PrtContact', 'PrtEmployee']))
+                    .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).orderBy('-fromDate').list())
+                    .map((row) => Object.assign(row.getMap(), {partyId: row.fromPartyId})))
+            const orgIds = Array.from(new Set(Array.from(relationships.values()).flat().map((rel) => rel.toPartyId)))
+            const orgNames = new Map(orgIds.length ? Array.from(ec.entity.find('mantle.party.PartyDetail').condition(cf.makeCondition('partyId', 'in', orgIds))
+                    .list()).filter((org) => !org.privateOwnerUserId || org.privateOwnerUserId === userId)
+                    .map((org) => [org.partyId, org.organizationName]) : [])
+            const phoneText = (tn) => [tn.countryCode ? '+' + tn.countryCode : null, tn.areaCode, tn.contactNumber].filter((part) => part).join(' ')
+
+            for (const row of rows) {
+                const email = (emails.get(row.partyId) || []).slice().sort((a, b) => rank(['EmailPrimary'], a.contactMechPurposeId)
+                        - rank(['EmailPrimary'], b.contactMechPurposeId))[0]
+                const phone = (phones.get(row.partyId) || []).slice().sort((a, b) => rank(['PhonePrimary', 'PhoneMobile'], a.contactMechPurposeId)
+                        - rank(['PhonePrimary', 'PhoneMobile'], b.contactMechPurposeId))[0]
+                const rel = (relationships.get(row.partyId) || []).find((candidate) => orgNames.has(candidate.toPartyId))
+                const isOrg = row.partyTypeEnumId === 'PtyOrganization'
+                contactList.push({partyId: row.partyId, pseudoId: row.pseudoId, partyTypeEnumId: row.partyTypeEnumId,
+                    name: ec.resource.expand('PartyNameOnlyTemplate', '', row).trim(), firstName: row.firstName ?? null,
+                    middleName: row.middleName ?? null, lastName: row.lastName ?? null, nickname: row.nickname ?? null,
+                    organizationName: isOrg ? (row.organizationName ?? null) : (rel ? orgNames.get(rel.toPartyId) : null),
+                    organizationPartyId: !isOrg && rel ? rel.toPartyId : null, jobTitle: !isOrg && rel ? (rel.relationshipName ?? null) : null,
+                    emailAddress: email ? email.infoString : null, emailContactMechId: email ? email.contactMechId : null,
+                    phone: phone ? phoneText(phone) : null, telecomContactMechId: phone ? phone.contactMechId : null,
+                    isFavorite: row.isFavorite === 'Y', isPersonal: !!row.privateOwnerUserId, fromDate: row.fromDate,
+                    groupList: (groupRows.get(row.partyId) || []).map((gp) => groups.get(gp.contactBookGroupId))
+                            .map((group) => ({contactBookGroupId: group.contactBookGroupId, groupName: group.groupName}))})
+            }
+        ]]></script></actions>
+    </service>
+    <service verb="get" noun="UserContactBooks">
+        <description>
+            The current user's personal books (the default first) and the shared books shared with the user or the user's
+            groups, each with the user's permission, its current member count (the members the user may see), and its
+            groups with their counts.
+        </description>
+        <out-parameters>
+            <parameter name="contactBookList" type="List"><parameter name="contactBook" type="Map"/></parameter>
+        </out-parameters>
+        <actions><script><![CDATA[
+            contactBookList = []
+            const userId = ec.user.userId
+            if (!userId) return
+            const cf = ec.entity.conditionFactory
+            const levels = {CbpView: 1, CbpEdit: 2, CbpManage: 3}
+            const names = [null, 'CbpView', 'CbpEdit', 'CbpManage']
+            const books = []
+            for (const book of ec.entity.find('mantle.party.contact.ContactBook').condition('ownerUserId', userId)
+                    .condition('visibilityEnumId', 'CbvPersonal').list()) books.push({book: book.getMap(), level: 3, isOwner: true})
+            const groups = Array.from(ec.user.getUserGroupIdSet() || [])
+            const shareCondition = groups.length ? cf.makeCondition([cf.makeCondition('userId', 'equals', userId),
+                cf.makeCondition('userGroupId', 'in', groups)], 'or') : cf.makeCondition('userId', 'equals', userId)
+            const sharedLevels = new Map()
+            for (const share of ec.entity.find('mantle.party.contact.ContactBookShare').condition(shareCondition)
+                    .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).list()) {
+                sharedLevels.set(share.contactBookId, Math.max(sharedLevels.get(share.contactBookId) || 0, levels[share.permissionEnumId] || 0))
+            }
+            if (sharedLevels.size) for (const book of ec.entity.find('mantle.party.contact.ContactBook')
+                    .condition(cf.makeCondition('contactBookId', 'in', Array.from(sharedLevels.keys()))).condition('visibilityEnumId', 'CbvShared').list()) {
+                const level = sharedLevels.get(book.contactBookId)
+                if (level) books.push({book: book.getMap(), level: level, isOwner: false})
+            }
+            const byName = (a, b) => String(a.book.contactBookName || '').localeCompare(String(b.book.contactBookName || ''))
+            const personal = books.filter((entry) => entry.isOwner).sort((a, b) =>
+                    (a.book.isDefault === 'Y' ? 0 : 1) - (b.book.isDefault === 'Y' ? 0 : 1) || byName(a, b))
+            const shared = books.filter((entry) => !entry.isOwner).sort(byName)
+            const memberFind = (bookId) => ec.entity.find('mantle.party.contact.ContactBookPartyDetail').condition('contactBookId', bookId)
+                    .condition(cf.makeConditionDate('fromDate', 'thruDate', null))
+                    .condition(cf.makeCondition([cf.makeCondition('privateOwnerUserId', 'equals', null),
+                        cf.makeCondition('privateOwnerUserId', 'equals', userId)], 'or'))
+                    .condition(cf.makeCondition('disabled', 'not-equals', 'Y', true))
+            for (const entry of personal.concat(shared)) {
+                const book = entry.book
+                const memberIds = new Set(Array.from(memberFind(book.contactBookId).selectField('partyId').list()).map((row) => row.partyId))
+                const groupList = Array.from(ec.entity.find('mantle.party.contact.ContactBookGroup').condition('contactBookId', book.contactBookId)
+                        .orderBy('sequenceNum,groupName').list()).map((group) => ({contactBookGroupId: group.contactBookGroupId,
+                            groupName: group.groupName, sequenceNum: group.sequenceNum,
+                            partyCount: Array.from(ec.entity.find('mantle.party.contact.ContactBookGroupParty')
+                                    .condition('contactBookGroupId', group.contactBookGroupId).selectField('partyId').list())
+                                    .filter((row) => memberIds.has(row.partyId)).length}))
+                const shareCount = entry.isOwner ? 0 : ec.entity.find('mantle.party.contact.ContactBookShare').condition('contactBookId', book.contactBookId)
+                        .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).count()
+                contactBookList.push({contactBookId: book.contactBookId, contactBookName: book.contactBookName,
+                    description: book.description ?? null, color: book.color ?? null, visibilityEnumId: book.visibilityEnumId,
+                    isDefault: book.isDefault === 'Y', ownerUserId: book.ownerUserId ?? null, ownerPartyId: book.ownerPartyId ?? null,
+                    permissionEnumId: names[entry.level], isOwner: entry.isOwner, partyCount: memberIds.size,
+                    favoriteCount: memberFind(book.contactBookId).condition('isFavorite', 'Y').count(),
+                    groupCount: groupList.length, groupList: groupList, shareCount: shareCount})
+            }
+        ]]></script></actions>
+    </service>
+
+    <service verb="store" noun="ContactParty">
+        <description>
+            Creates a party from a contact map, or with partyId adds to one (fills empty fields when updateData, and adds
+            the emails, phones, addresses and websites it does not have). Used by create#PersonalContact and
+            mantle.party.ContactImportServices; access to the party is the caller's to check. The contact map:
+            partyTypeEnumId (PtyPerson, the default, or PtyOrganization), firstName, middleName, lastName, personalTitle,
+            suffix, nickname, birthDate (yyyy-MM-dd), comments, organizationName (an organization's name, or for a person
+            the organization found by name among those the user may see, or created, linked by a PrtContact
+            relationship), organizationPartyId (for a person), jobTitle (the relationship's name), and the lists emails
+            [{emailAddress, contactMechPurposeId}], phones [{countryCode, areaCode, contactNumber, contactMechPurposeId}],
+            addresses [{address1, address2, unitNumber, city, stateProvinceGeoId, postalCode, countryGeoId, contactMechPurposeId}]
+            and websites [{webAddress, contactMechPurposeId}].
+        </description>
+        <in-parameters>
+            <parameter name="contact" type="Map" required="true"/>
+            <parameter name="partyId"><description>An existing party to add to; empty creates one</description></parameter>
+            <parameter name="privateOwnerUserId"><description>For a new personal contact, its owner (the current user)</description></parameter>
+            <parameter name="roleTypeId"><description>For a new directory party, its role</description></parameter>
+            <parameter name="updateData" type="Boolean" default="true"><description>For an existing party: fill its empty
+                fields and add the contact mechanisms it lacks. False changes nothing.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="partyId"/>
+            <parameter name="created" type="Boolean"/>
+            <parameter name="changed" type="Boolean"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const cf = ec.entity.conditionFactory
+            const userId = ec.user.userId || null
+            const c = contact || {}
+            const text = (value) => value == null ? null : (String(value).trim() || null)
+            const call = (name, parameters) => ec.service.sync().name(name).parameters(parameters).call() || {}
+            created = false
+            changed = false
+            const isOrg = c.partyTypeEnumId === 'PtyOrganization'
+            if (privateOwnerUserId && privateOwnerUserId !== userId) { ec.message.addError('A personal contact belongs to the current user'); return }
+
+            if (!partyId) {
+                const common = {privateOwnerUserId: privateOwnerUserId || null, comments: text(c.comments), roleTypeId: roleTypeId || null}
+                if (isOrg) {
+                    if (!text(c.organizationName)) { ec.message.addError('An organization needs a name'); return }
+                    partyId = call('mantle.party.PartyServices.create#Organization', Object.assign({organizationName: text(c.organizationName)}, common)).partyId
+                } else {
+                    const person = {firstName: text(c.firstName), middleName: text(c.middleName), lastName: text(c.lastName),
+                        personalTitle: text(c.personalTitle), suffix: text(c.suffix), nickname: text(c.nickname), birthDate: text(c.birthDate)}
+                    if (!person.firstName && !person.lastName) { ec.message.addError('A person needs a first or last name'); return }
+                    if (person.firstName && person.lastName) {
+                        partyId = call('mantle.party.PartyServices.create#Person', Object.assign(person, common)).partyId
+                    } else {
+                        // create#Person needs both names; a personal contact often has one ("Mom"), so as it does, by parts
+                        partyId = call('create#mantle.party.Party', {partyTypeEnumId: 'PtyPerson', privateOwnerUserId: common.privateOwnerUserId,
+                            comments: common.comments}).partyId
+                        if (ec.message.hasError()) return
+                        call('create#mantle.party.Person', Object.assign({partyId: partyId}, person))
+                        if (!ec.message.hasError() && roleTypeId) call('create#mantle.party.PartyRole', {partyId: partyId, roleTypeId: roleTypeId})
+                    }
+                }
+                if (ec.message.hasError()) return
+                created = true
+                changed = true
+            } else if (updateData) {
+                // fill the fields the party does not have
+                const party = ec.entity.find('mantle.party.Party').condition('partyId', partyId).one()
+                if (party == null) { ec.message.addError(`Party ${partyId} not found`); return }
+                if (!party.comments && text(c.comments)) { party.set('comments', text(c.comments)); party.update(); changed = true }
+                const detailEntity = party.partyTypeEnumId === 'PtyOrganization' ? 'mantle.party.Organization' : 'mantle.party.Person'
+                const detail = ec.entity.find(detailEntity).condition('partyId', partyId).one()
+                if (detail != null) {
+                    const fields = party.partyTypeEnumId === 'PtyOrganization' ? ['organizationName']
+                            : ['firstName', 'middleName', 'lastName', 'personalTitle', 'suffix', 'nickname', 'birthDate']
+                    let detailChanged = false
+                    for (const field of fields) if (detail.get(field) == null && text(c[field])) { detail.set(field, text(c[field])); detailChanged = true }
+                    if (detailChanged) { detail.update(); changed = true }
+                }
+            } else {
+                return
+            }
+
+            // a person's organization: the party given, else one the user may see by that name, else a new one
+            if (!isOrg && (text(c.organizationPartyId) || text(c.organizationName))) {
+                let orgId = text(c.organizationPartyId)
+                if (orgId) {
+                    const org = ec.entity.find('mantle.party.Party').condition('partyId', orgId).one()
+                    if (org == null || (org.privateOwnerUserId && org.privateOwnerUserId !== userId)) { ec.message.addError(`Organization ${orgId} not found`); return }
+                } else {
+                    const found = Array.from(ec.entity.find('mantle.party.PartyDetail').condition('partyTypeEnumId', 'PtyOrganization')
+                            .condition(cf.makeCondition('organizationName', 'equals', text(c.organizationName), false, true))
+                            .condition(cf.makeCondition('disabled', 'not-equals', 'Y', true)).orderBy('partyId').list())
+                            .filter((org) => !org.privateOwnerUserId || org.privateOwnerUserId === userId)
+                    // a directory organization first, else the user's own
+                    const org = found.find((candidate) => !candidate.privateOwnerUserId) || found[0]
+                    if (org != null) orgId = org.partyId
+                    else {
+                        const person = ec.entity.find('mantle.party.Party').condition('partyId', partyId).one()
+                        orgId = call('mantle.party.PartyServices.create#Organization', {organizationName: text(c.organizationName),
+                            privateOwnerUserId: person?.privateOwnerUserId || null}).partyId
+                        if (ec.message.hasError()) return
+                    }
+                }
+                const relCount = ec.entity.find('mantle.party.PartyRelationship').condition('fromPartyId', partyId).condition('toPartyId', orgId)
+                        .condition(cf.makeCondition('relationshipTypeEnumId', 'in', ['PrtContact', 'PrtEmployee']))
+                        .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).count()
+                if (relCount === 0) {
+                    call('create#mantle.party.PartyRelationship', {relationshipTypeEnumId: 'PrtContact', fromPartyId: partyId, toPartyId: orgId,
+                        relationshipName: text(c.jobTitle), fromDate: ec.user.nowTimestamp})
+                    if (ec.message.hasError()) return
+                    changed = true
+                }
+            }
+
+            // the contact mechanisms the party does not have yet
+            const current = cf.makeConditionDate('fromDate', 'thruDate', null)
+            const haveEmails = new Set(Array.from(ec.entity.find('mantle.party.contact.PartyContactMechInfo').condition('partyId', partyId)
+                    .condition('contactMechTypeEnumId', 'CmtEmailAddress').condition(current).list()).map((row) => String(row.infoString || '').toLowerCase()))
+            for (const email of c.emails || []) {
+                const address = text(email.emailAddress)
+                if (!address || haveEmails.has(address.toLowerCase())) continue
+                call('mantle.party.ContactServices.create#EmailAddress', {partyId: partyId, emailAddress: address,
+                    contactMechPurposeId: email.contactMechPurposeId || 'EmailPrimary'})
+                if (ec.message.hasError()) return
+                haveEmails.add(address.toLowerCase())
+                changed = true
+            }
+            const digitsOf = (tn) => `${tn.areaCode || ''}${tn.contactNumber || ''}`.replace(/\D/g, '')
+            const havePhones = new Set(Array.from(ec.entity.find('mantle.party.contact.PartyContactMechTelecomNumber').condition('partyId', partyId)
+                    .condition(current).list()).map(digitsOf))
+            for (const phone of c.phones || []) {
+                const digits = digitsOf(phone)
+                if (!digits || havePhones.has(digits)) continue
+                call('mantle.party.ContactServices.create#TelecomNumber', {partyId: partyId, countryCode: text(phone.countryCode),
+                    areaCode: text(phone.areaCode), contactNumber: text(phone.contactNumber), contactMechPurposeId: phone.contactMechPurposeId || 'PhonePrimary'})
+                if (ec.message.hasError()) return
+                havePhones.add(digits)
+                changed = true
+            }
+            const addressKey = (pa) => `${String(pa.address1 || '').trim().toLowerCase()}|${String(pa.postalCode || '').trim().toLowerCase()}`
+            const haveAddresses = new Set(Array.from(ec.entity.find('mantle.party.contact.PartyContactMechPostalAddressOnly').condition('partyId', partyId)
+                    .condition(current).list()).map(addressKey))
+            for (const address of c.addresses || []) {
+                if (!text(address.address1) || haveAddresses.has(addressKey(address))) continue
+                call('mantle.party.ContactServices.create#PostalAddress', {partyId: partyId, address1: text(address.address1),
+                    address2: text(address.address2), unitNumber: text(address.unitNumber), city: text(address.city),
+                    stateProvinceGeoId: text(address.stateProvinceGeoId), postalCode: text(address.postalCode),
+                    countryGeoId: text(address.countryGeoId), contactMechPurposeId: address.contactMechPurposeId || 'PostalPrimary'})
+                if (ec.message.hasError()) return
+                haveAddresses.add(addressKey(address))
+                changed = true
+            }
+            const haveWebsites = new Set(Array.from(ec.entity.find('mantle.party.contact.PartyContactMechInfo').condition('partyId', partyId)
+                    .condition('contactMechTypeEnumId', 'CmtWebAddress').condition(current).list()).map((row) => String(row.infoString || '').toLowerCase()))
+            for (const website of c.websites || []) {
+                let url = text(website.webAddress)
+                if (!url) continue
+                if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) url = 'https://' + url
+                if (haveWebsites.has(url.toLowerCase())) continue
+                call('mantle.party.ContactServices.create#WebAddress', {partyId: partyId, webAddress: url,
+                    contactMechPurposeId: website.contactMechPurposeId || 'WebUrlPrimary'})
+                if (ec.message.hasError()) return
+                haveWebsites.add(url.toLowerCase())
+                changed = true
+            }
+        ]]></script></actions>
+    </service>
+
+    <service verb="create" noun="PersonalContact">
+        <description>
+            A person (the default) or an organization seen only by the current user (Party.privateOwnerUserId), with an
+            email, phone and address, in one of the user's personal books (the default book when contactBookId is empty)
+            and its groups. A person needs a first or last name; organizationPartyId and jobTitle link the person to an
+            organization (PrtContact).
+        </description>
+        <in-parameters>
+            <parameter name="contactBookId"/>
+            <parameter name="contactBookGroupIdList" type="List"><parameter name="contactBookGroupId"/></parameter>
+            <parameter name="isFavorite"/>
+            <parameter name="partyTypeEnumId" default-value="PtyPerson"/>
+            <parameter name="firstName"/><parameter name="middleName"/><parameter name="lastName"/>
+            <parameter name="personalTitle"/><parameter name="suffix"/><parameter name="nickname"/>
+            <parameter name="birthDate"/>
+            <parameter name="organizationName"><description>An organization's name</description></parameter>
+            <parameter name="organizationPartyId"><description>A person's organization</description></parameter>
+            <parameter name="jobTitle"/>
+            <parameter name="comments"/>
+            <parameter name="emailAddress"/>
+            <parameter name="emailPurposeId" default-value="EmailPrimary"/>
+            <parameter name="countryCode"/><parameter name="areaCode"/><parameter name="contactNumber"/>
+            <parameter name="phonePurposeId" default-value="PhonePrimary"/>
+            <parameter name="address1"/><parameter name="address2"/><parameter name="city"/>
+            <parameter name="stateProvinceGeoId"/><parameter name="postalCode"/><parameter name="countryGeoId"/>
+            <parameter name="postalPurposeId" default-value="PostalPrimary"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="partyId"/>
+            <parameter name="contactBookId"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            if (!ec.user.userId) { ec.message.addError('A personal contact needs a user'); return }
+            if (!contactBookId) {
+                contactBookId = ec.service.sync().name('mantle.party.ContactBookServices.ensure#UserDefaultContactBook').call()?.contactBookId
+                if (ec.message.hasError()) return
+            }
+            const access = ec.service.sync().name('mantle.party.ContactBookServices.check#ContactBookAccess')
+                    .parameters({contactBookId: contactBookId, permissionEnumId: 'CbpEdit'}).call()
+            if (ec.message.hasError()) return
+            if (!access.isOwner) {
+                ec.message.addError('A personal contact goes in one of your personal books; add a directory party to a shared book instead'); return }
+            const contact = {partyTypeEnumId: partyTypeEnumId, firstName: firstName, middleName: middleName, lastName: lastName,
+                personalTitle: personalTitle, suffix: suffix, nickname: nickname, birthDate: birthDate, comments: comments,
+                organizationName: partyTypeEnumId === 'PtyOrganization' ? organizationName : null, organizationPartyId: organizationPartyId,
+                jobTitle: jobTitle,
+                emails: emailAddress ? [{emailAddress: emailAddress, contactMechPurposeId: emailPurposeId}] : [],
+                phones: contactNumber ? [{countryCode: countryCode, areaCode: areaCode, contactNumber: contactNumber, contactMechPurposeId: phonePurposeId}] : [],
+                addresses: address1 ? [{address1: address1, address2: address2, city: city, stateProvinceGeoId: stateProvinceGeoId,
+                    postalCode: postalCode, countryGeoId: countryGeoId, contactMechPurposeId: postalPurposeId}] : []}
+            partyId = ec.service.sync().name('mantle.party.ContactBookServices.store#ContactParty')
+                    .parameters({contact: contact, privateOwnerUserId: ec.user.userId}).call()?.partyId
+            if (ec.message.hasError()) return
+            const out = ec.service.sync().name('mantle.party.ContactBookServices.add#ContactBookParties').parameters({contactBookId: contactBookId,
+                partyIdList: [partyId], contactBookGroupIdList: contactBookGroupIdList, isFavorite: isFavorite}).call()
+            if (!ec.message.hasError() && out?.failedPartyIdList?.length) ec.message.addError(`Contact ${partyId} could not be added to the book`)
+        ]]></script></actions>
+    </service>
+    <service verb="link" noun="PersonalContactToDirectory">
+        <description>
+            Makes one of the current user's personal contacts a directory party: with targetPartyId it is merged into that
+            directory party (mantle.party.DuplicateServices.merge#Parties, which moves its book memberships and the rest),
+            else its privateOwnerUserId is cleared, with roleTypeId added when given.
+        </description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="targetPartyId"/>
+            <parameter name="roleTypeId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="directoryPartyId"/>
+            <parameter name="merged" type="Boolean"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            merged = false
+            const userId = ec.user.userId
+            const party = ec.entity.find('mantle.party.Party').condition('partyId', partyId).one()
+            if (party == null || !userId || party.privateOwnerUserId !== userId) { ec.message.addError(`Personal contact ${partyId} not found`); return }
+            if (targetPartyId) {
+                const target = ec.entity.find('mantle.party.Party').condition('partyId', targetPartyId).one()
+                if (target == null || target.privateOwnerUserId) { ec.message.addError(`Directory party ${targetPartyId} not found`); return }
+                if (target.disabled === 'Y') { ec.message.addError(`Directory party ${targetPartyId} is disabled`); return }
+                ec.service.sync().name('mantle.party.DuplicateServices.merge#Parties').parameters({toPartyId: targetPartyId, fromPartyId: partyId}).call()
+                if (ec.message.hasError()) return
+                const after = ec.entity.find('mantle.party.Party').condition('partyId', partyId).one()
+                if (after?.mergedToPartyId !== targetPartyId) { ec.message.addError(`Personal contact ${partyId} was not merged into ${targetPartyId}`); return }
+                directoryPartyId = targetPartyId
+                merged = true
+                return
+            }
+            party.set('privateOwnerUserId', null)
+            party.update()
+            if (roleTypeId) ec.service.sync().name('mantle.party.PartyServices.ensure#PartyRole').parameters({partyId: partyId, roleTypeId: roleTypeId}).call()
+            directoryPartyId = partyId
+        ]]></script></actions>
+    </service>
+</services>

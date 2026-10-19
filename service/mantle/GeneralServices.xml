@@ -157,6 +157,11 @@ along with this software (see the LICENSE.md file). If not, see
                     <field-map field-name="partyId" from="partyBadge.partyId"/></entity-find-one>
                 <set field="partyId" from="party?.partyId"/>
             </if>
+            <!-- someone else's personal contact is not found, with or without an entity filter -->
+            <if condition="party != null &amp;&amp; party.privateOwnerUserId &amp;&amp; party.privateOwnerUserId != ec.user.userId">
+                <if condition="partyBadge?.partyId == party.partyId"><set field="partyBadge" from="null"/><set field="partyBadgeId" from="null"/></if>
+                <set field="party" from="null"/><set field="partyId" from="null"/>
+            </if>
 
             <!-- Payment -->
             <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment">
@@ -260,6 +265,13 @@ along with this software (see the LICENSE.md file). If not, see
                 if (ownerPartyIds != null) {
                     const orgFilter = {field: {name: 'ownerPartyId', op: 'in', values: ownerPartyIds}};
                     filter = filter ? {bool: {all: [filter, orgFilter]}} : orgFilter;
+                }
+                // a personal contact (privateOwnerUserId, on parties only) only for its owner, with or without an org filter
+                if (!documentType || documentType === 'MantleParty') {
+                    const notPrivate = {field: {name: 'privateOwnerUserId', op: 'exists', negate: true}};
+                    const privateFilter = ec.user.userId ? {bool: {any: [notPrivate,
+                            {field: {name: 'privateOwnerUserId', op: 'eq', value: ec.user.userId}}]}} : notPrivate;
+                    filter = filter ? {bool: {all: [filter, privateFilter]}} : privateFilter;
                 }
             ]]></script>
             <!-- <log level="warn" message="Doing general search with documentType ${documentType} indexName ${indexName} queryString ${queryString}"/> -->

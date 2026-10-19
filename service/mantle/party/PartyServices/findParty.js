@@ -66,6 +66,17 @@ if (emailAddress) ef = ef.condition(like("emailAddress", emailAddress))
 
 if (assetSerialNumber) ef = ef.condition(like("assetSerialNumber", assetSerialNumber))
 
+// a personal contact (privateOwnerUserId) is found only by its owner, whether or not an entity filter applies
+const userId = ec.user.userId || null
+if (personalContacts === "only") {
+    ef = ef.condition(cf.makeCondition("privateOwnerUserId", "equals", userId ?? "_NA_"))
+} else if (personalContacts === "exclude" || !userId) {
+    ef = ef.condition(cf.makeCondition("privateOwnerUserId", "equals", null))
+} else {
+    ef = ef.condition(cf.makeCondition([cf.makeCondition("privateOwnerUserId", "equals", null),
+        cf.makeCondition("privateOwnerUserId", "equals", userId)], "or"))
+}
+
 if (orderByField) {
     if (orderByField.includes("combinedName")) {
         if (orderByField.includes("-")) ef = ef.orderBy("-organizationName,-firstName,-lastName")

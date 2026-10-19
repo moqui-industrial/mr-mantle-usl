@@ -59,6 +59,7 @@ along with this software (see the LICENSE.md file). If not, see
         <alias entity-alias="PTY" name="partyTypeEnumId"/>
         <alias entity-alias="PTY" name="disabled"/>
         <alias entity-alias="PTY" name="hasDuplicates"/>
+        <alias entity-alias="PTY" name="privateOwnerUserId"/>
 
         <alias entity-alias="PTRL" name="roleTypeId"/>
         <alias entity-alias="USRACT" name="username"/>
@@ -106,6 +107,7 @@ along with this software (see the LICENSE.md file). If not, see
         <alias name="pseudoId" entity-alias="PTY"/>
         <alias name="ownerPartyId" entity-alias="PTY"/>
         <alias name="externalId" entity-alias="PTY"/>
+        <alias name="privateOwnerUserId" entity-alias="PTY"/>
     </view-entity>
     <view-entity entity-name="PersonWithUserAccount" package="mantle.party">
         <description>Like PersonAndUserAccount but UserAccount not optional (necessary for find by userId that might be null)</description>
@@ -120,6 +122,7 @@ along with this software (see the LICENSE.md file). If not, see
         <alias name="pseudoId" entity-alias="PTY"/>
         <alias name="ownerPartyId" entity-alias="PTY"/>
         <alias name="externalId" entity-alias="PTY"/>
+        <alias name="privateOwnerUserId" entity-alias="PTY"/>
     </view-entity>
 
     <view-entity entity-name="PartyDetail" package="mantle.party">
@@ -296,6 +299,58 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- ========================================================= -->
     <!-- mantle.party.contact -->
     <!-- ========================================================= -->
+
+    <view-entity entity-name="ContactBookPartyDetail" package="mantle.party.contact">
+        <description>A contact book's member rows with the party, person and organization fields.</description>
+        <member-entity entity-alias="CBP" entity-name="mantle.party.contact.ContactBookParty"/>
+        <member-entity entity-alias="PTY" entity-name="mantle.party.Party" join-from-alias="CBP">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="PER" entity-name="mantle.party.Person" join-from-alias="PTY" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="ORG" entity-name="mantle.party.Organization" join-from-alias="PTY" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <alias-all entity-alias="CBP"/>
+        <alias-all entity-alias="PTY"><exclude field="partyId"/><exclude field="comments"/></alias-all>
+        <alias-all entity-alias="PER"><exclude field="partyId"/><exclude field="mothersMaidenName"/></alias-all>
+        <alias-all entity-alias="ORG"><exclude field="partyId"/></alias-all>
+    </view-entity>
+    <view-entity entity-name="FindContactBookPartyView" package="mantle.party.contact">
+        <description>For mantle.party.ContactBookServices.find#ContactBookParties: a contact book's members with one row per
+            contact mechanism (optional), to find by name, email or phone; select partyId and the sort fields distinct.</description>
+        <member-entity entity-alias="CBP" entity-name="mantle.party.contact.ContactBookParty"/>
+        <member-entity entity-alias="PTY" entity-name="mantle.party.Party" join-from-alias="CBP">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="PER" entity-name="mantle.party.Person" join-from-alias="PTY" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="ORG" entity-name="mantle.party.Organization" join-from-alias="PTY" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="PCM" entity-name="mantle.party.contact.PartyContactMech" join-from-alias="PTY" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="CM" entity-name="mantle.party.contact.ContactMech" join-from-alias="PCM" join-optional="true">
+            <key-map field-name="contactMechId"/></member-entity>
+        <member-entity entity-alias="TN" entity-name="mantle.party.contact.TelecomNumber" join-from-alias="PCM" join-optional="true">
+            <key-map field-name="contactMechId"/></member-entity>
+        <alias entity-alias="CBP" name="contactBookId"/>
+        <alias entity-alias="CBP" name="partyId"/>
+        <alias entity-alias="CBP" name="fromDate"/>
+        <alias entity-alias="CBP" name="thruDate"/>
+        <alias entity-alias="CBP" name="isFavorite"/>
+        <alias entity-alias="PTY" name="pseudoId"/>
+        <alias entity-alias="PTY" name="partyTypeEnumId"/>
+        <alias entity-alias="PTY" name="disabled"/>
+        <alias entity-alias="PTY" name="ownerPartyId"/>
+        <alias entity-alias="PTY" name="privateOwnerUserId"/>
+        <alias entity-alias="ORG" name="organizationName"/>
+        <alias entity-alias="PER" name="firstName"/>
+        <alias entity-alias="PER" name="lastName"/>
+        <alias entity-alias="PER" name="nickname"/>
+        <alias entity-alias="PCM" name="pcmFromDate" field="fromDate"/>
+        <alias entity-alias="PCM" name="pcmThruDate" field="thruDate"/>
+        <alias entity-alias="CM" name="contactMechTypeEnumId"/>
+        <alias entity-alias="CM" name="infoString"/>
+        <alias entity-alias="TN" name="areaCode"/>
+        <alias entity-alias="TN" name="contactNumber"/>
+    </view-entity>
 
     <view-entity entity-name="ContactMechTelecomNumber" package="mantle.party.contact">
         <member-entity entity-alias="CTM" entity-name="mantle.party.contact.ContactMech"/>

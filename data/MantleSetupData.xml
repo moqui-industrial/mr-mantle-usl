@@ -108,6 +108,11 @@ along with this software (see the LICENSE.md file). If not, see
         <!-- Party filter allows _NA_ for user org, needed for general/shared parties like carriers, etc -->
         <filters entityFilterId="MANTLE_USER_ORG_9" entityName="mantle.party.Party" joinOr="Y"
                 filterMap="({ownerPartyId: ['_NA_'].concat(filterOrgIds || [])})"/>
+        <!-- Personal contacts: a party with privateOwnerUserId is seen only by that user. A second filter on Party, so it
+            is ANDed with the one above; the or-list form because a null in an IN list is not IS NULL. The same condition
+            is explicit in find#Party, search#Party, lookup#ById, the duplicate services and the party drop-downs. -->
+        <filters entityFilterId="MANTLE_USER_ORG_9P" entityName="mantle.party.Party"
+                filterMap="({_join: 'or', _list: [{privateOwnerUserId: null}, {privateOwnerUserId: ec.user.userId || null}]})"/>
         <!-- NOTE: Product, Category, and Feature user org filters do not include ownerPartyId '_NA_', if not associated can't see/use -->
         <filters entityFilterId="MANTLE_USER_ORG_A" entityName="mantle.product.Product" filterMap="({ownerPartyId: filterOrgIds})"/>
         <filters entityFilterId="MANTLE_USER_ORG_B" entityName="mantle.product.category.ProductCategory" filterMap="({ownerPartyId: filterOrgIds})"/>
@@ -138,6 +143,9 @@ along with this software (see the LICENSE.md file). If not, see
         <!-- Space before '[' and parentheses: Groovy parses '?[' as the safe-index operator, not a ternary. -->
         <filters entityFilterId="MANTLE_ACTIVE_ORG_9" entityName="mantle.party.Party" joinOr="Y"
                 filterMap="({ownerPartyId: (activeOrgId ? [activeOrgId, '_NA_'] : null)})"/>
+        <!-- Personal contacts, as MANTLE_USER_ORG_9P -->
+        <filters entityFilterId="MANTLE_ACTIVE_ORG_9P" entityName="mantle.party.Party"
+                filterMap="({_join: 'or', _list: [{privateOwnerUserId: null}, {privateOwnerUserId: ec.user.userId || null}]})"/>
         <filters entityFilterId="MANTLE_ACTIVE_ORG_A" entityName="mantle.product.Product"
                 filterMap="({ownerPartyId: (activeOrgId ? [activeOrgId, '_NA_'] : null)})"/>
         <filters entityFilterId="MANTLE_ACTIVE_ORG_B" entityName="mantle.product.category.ProductCategory"
@@ -149,6 +157,13 @@ along with this software (see the LICENSE.md file). If not, see
         <!-- allow these for 3rd party facilities regardless of active org:
         <filters entityFilterId="MANTLE_ACTIVE_ORG_F" entityName="mantle.facility.Facility"
                 filterMap="({ownerPartyId: (activeOrgId ? [activeOrgId, '_NA_'] : null)})"/> -->
+    </moqui.security.EntityFilterSet>
+    <!-- Personal contacts on their own, for an app whose authz has the active organization filter: that set applies only
+        while an organization is active, and a personal contact must stay hidden from other users without one too. The
+        IronStone apps' authz records carry this set beside MANTLE_ACTIVE_ORG. -->
+    <moqui.security.EntityFilterSet entityFilterSetId="MANTLE_PRIVATE_CONTACT" description="Personal Contact Filter" allowMissingAlias="Y">
+        <filters entityFilterId="MANTLE_PRIVATE_CONTACT_1" entityName="mantle.party.Party"
+                filterMap="({_join: 'or', _list: [{privateOwnerUserId: null}, {privateOwnerUserId: ec.user.userId || null}]})"/>
     </moqui.security.EntityFilterSet>
 
     <!-- ========== Notifications - Business Event ========== -->

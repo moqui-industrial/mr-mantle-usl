@@ -23,7 +23,8 @@ along with this software (see the LICENSE.md file). If not, see
             filter (MANTLE_USER_ORG or MANTLE_ACTIVE_ORG) each type is limited to records of those organizations, by the
             type's organization fields, and to records that name the user: a project, task, event or request the user's
             party owns, filed or is a party to (or one of those organizations is), and a communication event the user's
-            party is from, to or a party to. A type with neither is left out under the limit, except wiki pages.
+            party is from, to or a party to. A type with neither is left out under the limit, except wiki pages. A party
+            that is a personal contact (privateOwnerUserId) shows only to its owner, with or without a limit.
             The limit is a trusted filter: it applies before ranking, totals, facets and highlights, and the query cannot
             widen it. Each result is checked against the entity database before it is returned.
 
@@ -127,10 +128,15 @@ along with this software (see the LICENSE.md file). If not, see
                         .condition('linkSet', linkSet).orderBy('linkSeqId').useCache(true).list())
             }
 
-            // the trusted filter: per type, the type and its organization and user limit
+            // the trusted filter: per type, the type and its organization and user limit; a party that is a personal
+            // contact (privateOwnerUserId) only for its owner, with or without a limit
+            const notPrivate = {field: {name: 'privateOwnerUserId', op: 'exists', negate: true}}
+            const privateClause = ec.user.userId ? {bool: {any: [notPrivate,
+                    {field: {name: 'privateOwnerUserId', op: 'eq', value: ec.user.userId}}]}} : notPrivate
             const typeClauses = types.map((type) => {
                 const all = [{field: {name: '_document', op: 'eq', value: type}}]
                 if (documents[type].limit != null) all.push({bool: {any: documents[type].limit}})
+                if (type === 'MantleParty') all.push(privateClause)
                 return {bool: {all: all}}
             })
             const filterClauses = [{bool: {any: typeClauses}}]

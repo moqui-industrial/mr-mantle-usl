@@ -202,8 +202,11 @@ along with this software (see the LICENSE.md file). If not, see
                 return
             }
             recordKeyField = keyNames[0]
-            // the record under the user's filters: a record the user may not see has no links for them
-            if (checkRecord && ec.entity.find(recordEntityName).condition(recordKeyField, recordId).one() == null) {
+            // the record under the user's filters: a record the user may not see has no links for them; someone else's
+            // personal contact (Party.privateOwnerUserId) is not found, with or without an entity filter
+            const record = checkRecord ? ec.entity.find(recordEntityName).condition(recordKeyField, recordId).one() : null
+            if (checkRecord && (record == null || (recordEntityName === 'mantle.party.Party' && record.privateOwnerUserId
+                    && record.privateOwnerUserId !== ec.user.userId))) {
                 ec.message.addError(`${recordTypeName} ${recordId} not found`)
                 return
             }
