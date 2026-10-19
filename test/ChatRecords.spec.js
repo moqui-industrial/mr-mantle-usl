@@ -22,7 +22,6 @@ const party = {}
 const room = {}
 const seq = {}
 let themeResourceAdded = false
-let shellTopicAdded = false
 
 spec({
     stepwise: true,
@@ -33,9 +32,6 @@ spec({
     cleanupSpec() {
         ec.artifactExecution.disableAuthz()
         try {
-            if (user.Tia) ec.entity.find("moqui.security.user.NotificationTopicUser").condition("topic", "shellCounts").condition("userId", user.Tia).deleteAll()
-            // the spec's email template stays: its messages refer to it
-            if (shellTopicAdded) call("delete#moqui.security.user.NotificationTopic", { topic: "shellCounts" })
             if (themeResourceAdded) call("delete#moqui.screen.ScreenThemeResource", { screenThemeId: "DEFAULT_QUASAR", sequenceNum: 398 })
         } finally { ec.artifactExecution.enableAuthz() }
     },
@@ -178,35 +174,31 @@ feature("a mention is a ChatMention notification as the seed has it: its title, 
 
 // The framework's chat services publish the counts of the users whose chat counts change (publish#ChatCounts through
 // org.moqui.impl.ShellServices.publish#ShellCounts, after the commit, on a thread of the server, coalesced per user), so
-// Mantle adds no entity ECA for them. The spec hears the shellCounts notifications as a user who takes that topic by email.
+// Mantle adds no entity ECA for them. The spec hears the shellCounts notifications through the notification capture,
+// which listens on the topic as the server's socket does (without a listener nothing is sent; docs/Testing.md).
 feature("the counts go to the users whose chat counts change: a new message and a read marker publish them", {
     when() {
-        if (ec.entity.find("moqui.security.user.NotificationTopic").condition("topic", "shellCounts").one() == null) {
-            call("create#moqui.basic.email.EmailTemplate", { emailTemplateId: "CH_SHELL_COUNTS", description: "Shell counts (ChatRecords spec)",
-                emailServerId: "SYSTEM", emailTypeEnumId: "EMT_NOTIFICATION", bodyScreenLocation: "classpath://screen/NotificationEmail.xml",
-                webappName: "webroot", fromAddress: "chat.spec@example.com", subject: "Shell counts", sendPartial: "Y" })
-            call("create#moqui.security.user.NotificationTopic", { topic: "shellCounts", description: "Shell counts (ChatRecords spec)",
-                persistOnSend: "N", receiveNotifications: "Y", emailTemplateId: "CH_SHELL_COUNTS", emailMessageSave: "Y" })
-            shellTopicAdded = true
+        const capture = ec.factory.getTool("NotificationCapture")
+        capture.enable()
+        try {
+            const sentTo = (userId) => capture.getMessages("shellCounts").filter((row) => (row.userIds || []).includes(userId)).length
+            const before = sentTo(user.Tia)
+            at(4)
+            send("Uri", room.ops, "<p>Another one</p>")
+            const afterMessage = waitFor(() => sentTo(user.Tia) > before, 15000) ? sentTo(user.Tia) : before
+            as("Tia", () => call(`${CHAT}.mark#Read`, { chatRoomId: room.ops }))
+            const afterRead = waitFor(() => sentTo(user.Tia) > afterMessage, 15000) ? sentTo(user.Tia) : afterMessage
+            // Vik's count is not changed by a message without a mention at the mentions level
+            return { before, afterMessage, afterRead, vik: sentTo(user.Vik) }
+        } finally {
+            capture.disable()
+            capture.clear()
         }
-        call("create#moqui.security.user.NotificationTopicUser", { topic: "shellCounts", userId: user.Tia, receiveNotifications: "Y",
-            emailNotifications: "Y" })
-        const sent = () => ec.entity.find("moqui.basic.email.EmailMessage").condition("toAddresses", "ch.tia@example.com")
-                .condition("emailTemplateId", "CH_SHELL_COUNTS").count()
-        const before = sent()
-        at(4)
-        send("Uri", room.ops, "<p>Another one</p>")
-        const afterMessage = waitFor(() => sent() > before, 15000) ? sent() : before
-        as("Tia", () => call(`${CHAT}.mark#Read`, { chatRoomId: room.ops }))
-        const afterRead = waitFor(() => sent() > afterMessage, 15000) ? sent() : afterMessage
-        // Vik's count is not changed by a message without a mention at the mentions level, and Vik takes no email anyway
-        const vikEmails = ec.entity.find("moqui.basic.email.EmailMessage").condition("toAddresses", "ch.vik@example.com").count()
-        return { before, afterMessage, afterRead, vikEmails }
     },
-    then({ before, afterMessage, afterRead, vikEmails }) {
+    then({ before, afterMessage, afterRead, vik }) {
         afterMessage > before
         afterRead > afterMessage
-        vikEmails == 0
+        vik == 0
     },
 })
 
