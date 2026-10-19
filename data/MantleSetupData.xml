@@ -205,10 +205,14 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.security.user.NotificationTopic topic="WorkEffortReminder" description="Task or Event Reminder" typeString="info"
             showAlert="Y" alertNoAutoHide="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="Reminder: ${workEffortName}, ${whenText}" linkTemplate=""/>
-    <!-- a page to review: wikiSpaceId, pagePath, pageName, authorUserId, authorName -->
-    <moqui.security.user.NotificationTopic topic="WikiPageReview" description="Page to Review" typeString="info"
-            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
-            titleTemplate="${authorName} asked you to review ${pageName}" linkTemplate=""/>
+    <!-- a page to review and the decision on it: the framework seeds both topics (moqui.resource.wiki.WikiPageReview in
+        framework/entity/ResourceEntities.xml), with the approval services of WikiPageReview (approveServiceName,
+        refuseServiceName, refuseReasonRequired) and the message fields (wikiPageReviewId, wikiPageId, wikiSpaceId, pagePath,
+        pageName, versionName, authorName, note, dueDate; for the decision reviewerName, decision, decisionText, decisionNote).
+        Mantle sets only the email template, so the framework's row wins whichever file loads first (a data load updates
+        only the fields an element has). -->
+    <moqui.security.user.NotificationTopic topic="WikiPageReview" emailTemplateId="NOTIFICATION"/>
+    <moqui.security.user.NotificationTopic topic="WikiPageReviewDecision" emailTemplateId="NOTIFICATION"/>
     <!-- a file or folder shared with the user: fileName, location, authorUserId, authorName -->
     <moqui.security.user.NotificationTopic topic="FileShare" description="File Shared with You" typeString="info"
             showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
