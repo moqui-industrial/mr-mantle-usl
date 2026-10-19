@@ -22,6 +22,11 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.security.ArtifactGroupMember artifactGroupId="MANTLE_API" artifactName="mantle\..*"
             nameIsPattern="Y" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     -->
+    <!-- The members of a project (active WorkEffortParty, through their UserAccount's party) may clone, fetch and push
+        to the git repositories linked to it; force pushes and ref deletes take a grant of their own -->
+    <moqui.security.ArtifactAuthz artifactAuthzId="GitRepositoriesProjectMember" userGroupId="ALL_USERS"
+            artifactGroupId="GitRepositories" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"
+            authzServiceName="mantle.work.GitServices.check#GitRepositoryAuthz"/>
     <!-- Artifact group for all of the Mantle REST API via the mantle resource (the root resource) -->
     <artifactGroups artifactGroupId="MANTLE_MY_API" description="Mantle My Info REST API">
         <artifacts artifactTypeEnumId="AT_REST_PATH" artifactName="/mantle/my" inheritAuthz="Y"/>
