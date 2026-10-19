@@ -1,9 +1,11 @@
 // Which records a user may see through the record link services (mantle.party.CommunicationServices get#RecordLinkInfo
-// with checkRecord or checkOnly, and so get#RecordTimeline, get#RecordFollowers and follow#Record): a request, a work effort
-// and a communication event have no entity filter, so under an organization filter they follow per-user rules (IronStone
-// R4, R5); ADMIN and an explicit entity authorization see them all; without an organization filter they are seen as found,
-// except a post of a mailbox the user may not read. And the timeline cursor (beforeDate with seenKeys) across entries of one
-// date. New spec, no Groovy original.
+// with checkRecord or checkOnly, and so get#RecordTimeline, get#RecordFollowers and follow#Record): a request, a work effort,
+// a communication event and an order have no entity filter of their own, so under an organization filter they follow
+// per-user rules (IronStone R4, R5); ADMIN and an explicit entity authorization see them all; without an organization filter
+// they are seen as found, except a post of a mailbox the user may not read. A wiki page follows the wiki's own view rule for
+// every user. The universal search's organization limit under the active organization filter with no active organization,
+// and its wiki rule. And the timeline cursor (beforeDate with seenKeys) across entries of one date. New spec, no Groovy
+// original.
 function errorOf(name, params) {
     try { call(name, params) } catch (e) { ec.message.clearErrors(); return String(e.message) }
     return null
@@ -16,6 +18,9 @@ const COMM = "mantle.party.CommunicationServices"
 const REQUEST = "mantle.request.Request"
 const WORK = "mantle.work.effort.WorkEffort"
 const EVENT = "mantle.party.communication.CommunicationEvent"
+const ORDER = "mantle.order.OrderHeader"
+const WIKI = "moqui.resource.wiki.WikiPage"
+const SEARCH = "mantle.search.UniversalSearchServices.search#Universal"
 const users = {}
 const parties = {}
 const events = {}
@@ -49,10 +54,13 @@ function as(username, run) {
 const records = () => ({ R1: [REQUEST, "RV-R1"], T1: [WORK, "RV-T1"], T2: [WORK, "RV-T2"], ceRequest: [EVENT, events.request],
     ceReply: [EVENT, events.reply], ceTask: [EVENT, events.task], ceToOz: [EVENT, events.toOz], cePublic: [EVENT, events.publicPost],
     cePrivate: [EVENT, events.privatePost], ceNone: [EVENT, events.unlinked] })
+// the orders, wiki pages and their messages
+const moreRecords = () => ({ O1: [ORDER, "RV-O1"], O2: [ORDER, "RV-O2"], ceOrder: [EVENT, events.order],
+    WP1: [WIKI, "RV_WP1"], WP2: [WIKI, "RV_WP2"], WP3: [WIKI, "RV_WP3"], ceWiki: [EVENT, events.wiki] })
 // what checkOnly answers for each record, with no error left
-function sees() {
+function sees(recordMap) {
     const out = {}
-    for (const [name, [recordEntityName, recordId]] of Object.entries(records())) {
+    for (const [name, [recordEntityName, recordId]] of Object.entries(recordMap || records())) {
         const result = ec.service.sync().name(`${COMM}.get#RecordLinkInfo`).parameters({ recordEntityName, recordId, checkOnly: true }).call()
         if (ec.message.hasError()) { out[name] = `error: ${ec.message.getErrorsString()}`; ec.message.clearErrors(); continue }
         out[name] = result.recordVisible === true
@@ -318,5 +326,146 @@ feature("the timeline cursor pages through entries of one date with no entry ski
         strict.length < all.length
         Number(firstPage.nextBeforeDate) == sameMinute
         firstPage.nextSeenKeys == [firstPage.entryList[1].entryKey]
+    },
+})
+
+feature("orders of two organizations with a bill-to party, a customer and an enterer; an open and a restricted wiki space and a restricted page", {
+    when() {
+        at(30)
+        // RV-O1: RV_ORG sells to ORG_ZIZI_RETAIL, Pat its bill-to party, with a message filed on it; RV-O2: ORG_ZIZI_RETAIL
+        // sells to Pat, and Oz entered it
+        call("create#mantle.order.OrderHeader", { orderId: "RV-O1", orderName: "Visibility order one", statusId: "OrderOpen",
+                entryDate: ec.user.nowTimestamp })
+        call("create#mantle.order.OrderPart", { orderId: "RV-O1", orderPartSeqId: "01", vendorPartyId: "RV_ORG", customerPartyId: "ORG_ZIZI_RETAIL" })
+        call("create#mantle.order.OrderPartParty", { orderId: "RV-O1", orderPartSeqId: "01", partyId: parties.Pat, roleTypeId: "CustomerBillTo" })
+        call("create#mantle.order.OrderHeader", { orderId: "RV-O2", orderName: "Visibility order two", statusId: "OrderOpen",
+                entryDate: ec.user.nowTimestamp, enteredByPartyId: parties.Oz })
+        call("create#mantle.order.OrderPart", { orderId: "RV-O2", orderPartSeqId: "01", vendorPartyId: "ORG_ZIZI_RETAIL", customerPartyId: parties.Pat })
+        events.order = call(`${COMM}.create#Message`, { subject: "On the order", body: "On the order body", fromPartyId: "EX_JOHN_DOE",
+                toPartyId: "ORG_ZIZI_RETAIL" }).communicationEventId
+        call(`${COMM}.link#CommunicationEventRecord`, { communicationEventId: events.order, recordEntityName: ORDER, recordId: "RV-O1" })
+        // an open space and a restricted one Mo may view; Oz has a row of it with update and admin but not view
+        for (const [wikiSpaceId, restrictView] of [["RVWOPEN", "N"], ["RVWSHUT", "Y"]]) {
+            call("create#moqui.resource.wiki.WikiSpace", { wikiSpaceId, description: `Visibility space ${wikiSpaceId}`, restrictView,
+                    restrictUpdate: restrictView })
+        }
+        call("create#moqui.resource.wiki.WikiSpaceUser", { wikiSpaceId: "RVWSHUT", userId: users.Mo, allowView: "Y", allowUpdate: "Y" })
+        call("create#moqui.resource.wiki.WikiSpaceUser", { wikiSpaceId: "RVWSHUT", userId: users.Oz, allowView: "N", allowUpdate: "Y", allowAdmin: "Y" })
+        // a page of each space, and a restricted page of the open space Pat may view; a comment on the restricted space's page
+        call("create#moqui.resource.wiki.WikiPage", { wikiPageId: "RV_WP1", wikiSpaceId: "RVWOPEN", pagePath: "visibility-open" })
+        call("create#moqui.resource.wiki.WikiPage", { wikiPageId: "RV_WP2", wikiSpaceId: "RVWSHUT", pagePath: "visibility-shut" })
+        call("create#moqui.resource.wiki.WikiPage", { wikiPageId: "RV_WP3", wikiSpaceId: "RVWOPEN", pagePath: "visibility-private", restrictView: "Y" })
+        call("create#moqui.resource.wiki.WikiPageUser", { wikiPageId: "RV_WP3", userId: users.Pat, allowView: "Y" })
+        events.wiki = call(`${COMM}.add#WikiPageComment`, { wikiPageId: "RV_WP2", subject: "On the shut page", body: "A comment" }).communicationEventId
+        return { orderLinks: ec.entity.find("mantle.order.OrderCommunicationEvent").condition("orderId", "RV-O1").count() }
+    },
+    then({ orderLinks }) {
+        orderLinks == 1
+        events.order != null
+        events.wiki != null
+    },
+})
+
+feature("an order is seen by its organizations' members, its parties and its enterer, a wiki page by the wiki's rule, ADMIN included", {
+    when() {
+        at(31)
+        const run = () => sees(moreRecords())
+        const internal = sees(moreRecords())
+        return { pat: as("rv.pat", run), mo: as("rv.mo", run), oz: as("rv.oz", run), stan: as("rv.stan", run), ace: as("rv.ace", run),
+            axel: as("rv.axel", run), opal: as("rv.opal", run), admin: as("john.doe", run), internal }
+    },
+    then({ pat, mo, oz, stan, ace, axel, opal, admin, internal }) {
+        // Pat: RV-O1 as its bill-to party and so its message, RV-O2 as its customer; the open page and the page Pat may view
+        pat == { O1: true, O2: true, ceOrder: true, WP1: true, WP2: false, WP3: true, ceWiki: false }
+        // Mo: RV-O1 by its vendor organization; the restricted space as a member, and the comment on its page
+        mo == { O1: true, O2: false, ceOrder: true, WP1: true, WP2: true, WP3: false, ceWiki: true }
+        // Oz: RV-O2 as its enterer; a space row without allowView is not a view
+        oz == { O1: false, O2: true, ceOrder: false, WP1: true, WP2: false, WP3: false, ceWiki: false }
+        // Stan: request staff only
+        stan == { O1: false, O2: false, ceOrder: false, WP1: true, WP2: false, WP3: false, ceWiki: false }
+        // the active organization filter with no active organization: all of Ace's organizations, none of Axel's
+        ace == { O1: true, O2: false, ceOrder: true, WP1: true, WP2: false, WP3: false, ceWiki: false }
+        axel == { O1: false, O2: false, ceOrder: false, WP1: true, WP2: false, WP3: false, ceWiki: false }
+        // no organization filter: every order, and still the wiki's rule, also for a comment on a page Opal may not see
+        opal == { O1: true, O2: true, ceOrder: true, WP1: true, WP2: false, WP3: false, ceWiki: false }
+        // ADMIN: every order and message, but restricted wiki pages only as a member, as the wiki screens
+        admin == { O1: true, O2: true, ceOrder: true, WP1: true, WP2: false, WP3: false, ceWiki: true }
+        // authorization disabled: all
+        internal == { O1: true, O2: true, ceOrder: true, WP1: true, WP2: true, WP3: true, ceWiki: true }
+    },
+})
+
+feature("a user who may not see an order or a wiki page reads none of its timeline or followers; a member reads the wiki page's", {
+    when() {
+        const read = (recordEntityName, recordId) => ({
+            timeline: errorOf(`${COMM}.get#RecordTimeline`, { recordEntityName, recordId }),
+            followers: errorOf(`${COMM}.get#RecordFollowers`, { recordEntityName, recordId }),
+            follow: errorOf(`${COMM}.follow#Record`, { recordEntityName, recordId }) })
+        const oz = as("rv.oz", () => ({ order: read(ORDER, "RV-O1"), page: read(WIKI, "RV_WP2") }))
+        const mo = as("rv.mo", () => call(`${COMM}.get#RecordTimeline`, { recordEntityName: WIKI, recordId: "RV_WP2", kinds: "messages,notes" })
+                .entryList.map((entry) => entry.title))
+        return { oz, mo }
+    },
+    then({ oz, mo }) {
+        Object.values(oz.order).every((error) => error != null && error.includes("RV-O1 not found"))
+        Object.values(oz.page).every((error) => error != null && error.includes("RV_WP2 not found"))
+        mo.includes("On the shut page")
+    },
+})
+
+feature("search#Universal limits the active organization filter with no active organization to the user's organizations, beside the personal contact filter too, and wiki pages by the wiki's rule", {
+    when() {
+        at(32)
+        const past = effectiveTime - dayMillis
+        // the groups search too; RV_BOSS has the IronStone apps' filter sets, the active organization and personal contact ones
+        for (const groupId of ["RV_FILTERED", "RV_ACTIVE", "RV_OPEN"]) call("create#moqui.security.ArtifactGroupMember", { artifactGroupId: groupId,
+                artifactTypeEnumId: "AT_SERVICE", artifactName: SEARCH, nameIsPattern: "N", inheritAuthz: "Y" })
+        call("create#moqui.security.UserGroup", { userGroupId: "RV_BOSS", description: "Record visibility RV_BOSS" })
+        call("create#moqui.security.ArtifactGroup", { artifactGroupId: "RV_BOSS", description: "Record visibility RV_BOSS" })
+        for (const artifactName of [SEARCH, `${COMM}.get#RecordLinkInfo`]) call("create#moqui.security.ArtifactGroupMember", { artifactGroupId: "RV_BOSS",
+                artifactTypeEnumId: "AT_SERVICE", artifactName, nameIsPattern: "N", inheritAuthz: "Y" })
+        call("create#moqui.security.ArtifactAuthz", { artifactAuthzId: "RV_BOSS", userGroupId: "RV_BOSS", artifactGroupId: "RV_BOSS",
+                authzTypeEnumId: "AUTHZT_ALLOW", authzActionEnumId: "AUTHZA_ALL" })
+        for (const entityFilterSetId of ["MANTLE_ACTIVE_ORG", "MANTLE_PRIVATE_CONTACT"])
+            call("create#moqui.security.ArtifactAuthzFilter", { artifactAuthzId: "RV_BOSS", entityFilterSetId })
+        // Bea, an employee of RV_ORG with RV_BOSS
+        const partyId = call("mantle.party.PartyServices.create#Person", { firstName: "Bea", lastName: "Visibility" }).partyId
+        users.Bea = call("mantle.party.PartyServices.create#PartyUserAccount", { partyId, emailAddress: "rv.bea@example.com", username: "rv.bea",
+                newPassword: "moqui1!!", newPasswordVerify: "moqui1!!" }).userId
+        parties.Bea = partyId
+        call("create#moqui.security.UserGroupMember", { userGroupId: "RV_BOSS", userId: users.Bea, fromDate: past })
+        call("create#mantle.party.PartyRelationship", { relationshipTypeEnumId: "PrtEmployee", fromPartyId: partyId, fromRoleTypeId: "Employee",
+                toPartyId: "RV_ORG", toRoleTypeId: "OrgInternal", fromDate: past })
+
+        // index the records now rather than wait for the data feed's worker
+        const index = (documentId, keyField, ids) => {
+            for (const id of ids) ec.search.indexDocuments(ec.entity.getDataDocuments(documentId, { [keyField]: id }))
+        }
+        index("MantleTask", "workEffortId", ["RV-T1", "RV-T2"])
+        index("MantleRequest", "requestId", ["RV-R1"])
+        index("MantleOrder", "orderId", ["RV-O1", "RV-O2"])
+        index("MantleWikiPage", "wikiPageId", ["RV_WP1", "RV_WP2", "RV_WP3"])
+        const ids = ["RV-T1", "RV-T2", "RV-R1", "RV-O1", "RV-O2", "RV_WP1", "RV_WP2", "RV_WP3"]
+        const search = () => call(SEARCH, { q: "Visibility", entityType: "MantleTask,MantleRequest,MantleOrder,MantleWikiPage", limit: 100,
+            highlight: false }).results.map((result) => result.id).filter((id) => ids.includes(id)).sort()
+        const beaSees = () => sees({ O1: [ORDER, "RV-O1"], O2: [ORDER, "RV-O2"], R1: [REQUEST, "RV-R1"], T2: [WORK, "RV-T2"] })
+        return { ace: as("rv.ace", search), axel: as("rv.axel", search), bea: as("rv.bea", search), beaSees: as("rv.bea", beaSees),
+            mo: as("rv.mo", search), pat: as("rv.pat", search), oz: as("rv.oz", search), opal: as("rv.opal", search),
+            searchAvailable: ec.search.isAvailable() }
+    },
+    then({ ace, axel, bea, beaSees, mo, pat, oz, opal, searchAvailable }) {
+        searchAvailable
+        // the active organization filter with no active organization: RV_ORG's task, request and order, the open page
+        ace == ["RV-O1", "RV-R1", "RV-T1", "RV_WP1"]
+        axel == ["RV_WP1"]
+        // the same beside the personal contact filter, in the search and in the record check
+        bea == ["RV-O1", "RV-R1", "RV-T1", "RV_WP1"]
+        beaSees == { O1: true, O2: false, R1: true, T2: false }
+        // the user organization filter: Mo a member of the restricted space, Pat the viewer of the restricted page
+        mo == ["RV-O1", "RV-R1", "RV-T1", "RV_WP1", "RV_WP2"]
+        pat == ["RV-R1", "RV-T1", "RV_WP1", "RV_WP3"]
+        oz == ["RV_WP1"]
+        // no organization filter: every task, request and order, and the wiki's rule still
+        opal == ["RV-O1", "RV-O2", "RV-R1", "RV-T1", "RV-T2", "RV_WP1"]
     },
 })

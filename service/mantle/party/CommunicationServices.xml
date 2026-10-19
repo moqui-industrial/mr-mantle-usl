@@ -1354,8 +1354,9 @@ along with this software (see the LICENSE.md file). If not, see
             transaction is not marked rollback-only by a record the user may not see; notVisibleReason says why, for a log.
 
             A record the user may see is found under the user's entity filters, and is never someone else's personal
-            contact (Party.privateOwnerUserId). A work effort, a request and a communication event have no entity filter,
-            so under an organization filter they follow per-user rules, those of search#Universal (IronStone R4, R5). The
+            contact (Party.privateOwnerUserId). A work effort, a request, a communication event and an order (whose filter
+            is on OrderPart, not OrderHeader) have no entity filter of their own, so under an organization filter they
+            follow per-user rules, those of search#Universal (IronStone R4, R5). The
             organization filter is the MANTLE_USER_ORG or MANTLE_ACTIVE_ORG filter set of the authorization: its
             organizations are filterOrgIds (setup#UserOrganizationInfo), the active organization for MANTLE_ACTIVE_ORG,
             and all of the user's organizations when the authorization names MANTLE_ACTIVE_ORG and no organization is
@@ -1366,13 +1367,18 @@ along with this software (see the LICENSE.md file). If not, see
             - A request: the user's party filed it (filedByPartyId), or the user's party or one of the user's
               organizations (such as the customer organization) is a current RequestParty, or the organization of its
               product store or the owner of its facility is one of the user's organizations.
+            - An order: the user's party entered it (enteredByPartyId), or the user's party or one of the user's
+              organizations is the vendor or customer of one of its parts (the rule of the OrderPart filter) or an
+              OrderPartParty of it.
             - A communication event: the user's party is its from or to party or a CommunicationEventParty, or it is a
               post of a mailbox the user may read (ContactListServices.get#UserMailboxAccess), or it or the root of its
               thread is linked (the record's own join or a CommunicationEventRecord) to a record the user may see by these
               rules, one level deep: a linked communication event is checked without its own links.
             A post of a mailbox the user may not read follows the communication event rule with or without an
-            organization filter, as in search#Universal. Without an organization filter work efforts, requests and other
-            communication events are seen as found. Any other record type has only its entity filters.
+            organization filter, as in search#Universal, and so does a communication event filed on a wiki page the user
+            may not see (the event or the root of its thread, WikiPageCommunicationEvent). Without an organization filter
+            work efforts, requests, orders and other communication events are seen as found. A wiki page has its own rule
+            (below). Any other record type has only its entity filters.
 
             The per-user rules do not apply with authorization disabled (an internal caller), to a user in the ADMIN
             group, or for a record type the user has an explicit entity authorization for: an ArtifactAuthz of one of the
@@ -1382,6 +1388,13 @@ along with this software (see the LICENSE.md file). If not, see
             that way. isPermitted alone does not tell: an entity inherits the authorization of the app root (an
             AUTHZT_ALWAYS ArtifactAuthz with inheritAuthz), which permits every entity to every user of the app, and no
             group, ADMIN included, has an entity authorization by default.
+
+            A wiki page (moqui.resource.wiki.WikiPage, a framework entity, which no entity filter covers) follows the wiki's
+            own view rule whenever authorization is on, for every user, ADMIN and staff included as in the wiki screens,
+            with or without an organization filter: the rule of org.moqui.impl.WikiServices.get#WikiPageInfo, replicated
+            here because that service also reads the page's file. A space with restrictView Y needs a WikiSpaceUser row of
+            the user with allowView Y, and a page with restrictView Y a WikiPageUser row of the user with allowView Y; a page
+            whose space is not found is not seen.
         </description>
         <in-parameters>
             <parameter name="recordEntityName" required="true"/>
@@ -1445,6 +1458,8 @@ along with this software (see the LICENSE.md file). If not, see
             const WORK_EFFORT = 'mantle.work.effort.WorkEffort'
             const REQUEST = 'mantle.request.Request'
             const COMM_EVENT = 'mantle.party.communication.CommunicationEvent'
+            const ORDER = 'mantle.order.OrderHeader'
+            const WIKI_PAGE = 'moqui.resource.wiki.WikiPage'
             recordVisible = null
             notVisibleReason = null
             // a refusal: an error, or with checkOnly the answer false
@@ -1574,12 +1589,41 @@ along with this software (see the LICENSE.md file). If not, see
                         .condition('facilityId', request.facilityId).disableAuthz().one() : null
                 return !!(facility?.ownerPartyId && s.orgIds.includes(facility.ownerPartyId))
             }
+            const orderVisible = (order, s) => {
+                if (s.userPartyId && order.enteredByPartyId === s.userPartyId) return true
+                if (s.partyIds.length === 0) return false
+                // a part of the user's party or organizations as vendor or customer, as the OrderPart filter has it
+                if (Array.from(ec.entity.find('mantle.order.OrderPart').condition('orderId', order.orderId).disableAuthz().list())
+                        .some((part) => s.partyIds.includes(part.vendorPartyId) || s.partyIds.includes(part.customerPartyId))) return true
+                return ec.entity.find('mantle.order.OrderPartParty').condition('orderId', order.orderId)
+                        .condition('partyId', 'in', s.partyIds).disableAuthz().count() > 0
+            }
+            // the view rule of org.moqui.impl.WikiServices.get#WikiPageInfo (see the description)
+            const wikiPageVisible = (page) => {
+                const userId = ec.user.userId || null
+                const space = page.wikiSpaceId ? ec.entity.find('moqui.resource.wiki.WikiSpace').condition('wikiSpaceId', page.wikiSpaceId)
+                        .disableAuthz().one() : null
+                if (space == null) return false
+                if (space.restrictView === 'Y' && !(userId && ec.entity.find('moqui.resource.wiki.WikiSpaceUser')
+                        .condition({wikiSpaceId: page.wikiSpaceId, userId: userId, allowView: 'Y'}).disableAuthz().count() > 0)) return false
+                if (page.restrictView === 'Y' && !(userId && ec.entity.find('moqui.resource.wiki.WikiPageUser')
+                        .condition({wikiPageId: page.wikiPageId, userId: userId, allowView: 'Y'}).disableAuthz().count() > 0)) return false
+                return true
+            }
             let visible
             const commEventVisible = (commEvent, depth) => {
                 const s = userScope()
                 const mailbox = commEvent.contactListId ? mailboxAccess() : null
                 const hiddenPost = !!(mailbox && mailbox.hidden.includes(commEvent.contactListId))
-                if (s.orgIds == null && !hiddenPost) return true
+                const eventIds = [commEvent.communicationEventId]
+                if (commEvent.rootCommEventId && commEvent.rootCommEventId !== commEvent.communicationEventId) eventIds.push(commEvent.rootCommEventId)
+                // a comment on a wiki page the user may not see, the event's or its thread root's, is kept as a mailbox post is
+                const onHiddenWikiPage = () => Array.from(ec.entity.find('mantle.party.communication.WikiPageCommunicationEvent')
+                        .condition('communicationEventId', 'in', eventIds).disableAuthz().list()).some((row) => {
+                    const page = ec.entity.find(WIKI_PAGE).condition('wikiPageId', row.wikiPageId).disableAuthz().one()
+                    return page == null || !wikiPageVisible(page)
+                })
+                if (s.orgIds == null && !hiddenPost && !onHiddenWikiPage()) return true
                 if (staffSees(COMM_EVENT)) return true
                 const partyId = s.userPartyId
                 if (partyId && (commEvent.fromPartyId === partyId || commEvent.toPartyId === partyId)) return true
@@ -1589,8 +1633,6 @@ along with this software (see the LICENSE.md file). If not, see
                 if (mailbox && mailbox.readable.includes(commEvent.contactListId)) return true
                 if (depth > 0) return false
                 // filed on a record the user may see: the event, or the root of its thread (a record's timeline shows the replies)
-                const eventIds = [commEvent.communicationEventId]
-                if (commEvent.rootCommEventId && commEvent.rootCommEventId !== commEvent.communicationEventId) eventIds.push(commEvent.rootCommEventId)
                 for (const [linkedEntityName, join] of Object.entries(commEventJoins)) {
                     for (const row of ec.entity.find(join.entityName).condition('communicationEventId', 'in', eventIds).disableAuthz().list()) {
                         if (visible(linkedEntityName, join.keyField, row[join.keyField], depth + 1)) return true
@@ -1619,9 +1661,11 @@ along with this software (see the LICENSE.md file). If not, see
                 if (entityName === PARTY) return !value.privateOwnerUserId || value.privateOwnerUserId === ec.user.userId
                 if (!authzOn) return true
                 if (entityName === COMM_EVENT) return commEventVisible(value, depth)
-                if (entityName !== WORK_EFFORT && entityName !== REQUEST) return true
+                if (entityName === WIKI_PAGE) return wikiPageVisible(value)
+                if (entityName !== WORK_EFFORT && entityName !== REQUEST && entityName !== ORDER) return true
                 const s = userScope()
                 if (s.orgIds == null || staffSees(entityName)) return true
+                if (entityName === ORDER) return orderVisible(value, s)
                 return entityName === WORK_EFFORT ? workEffortVisible(value, s) : requestVisible(value, s)
             }
 

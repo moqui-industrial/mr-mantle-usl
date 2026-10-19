@@ -20,14 +20,20 @@ along with this software (see the LICENSE.md file). If not, see
             shipments, assets, communications, and wiki pages.
 
             The document types are those whose primary entity the user may view. When the user has an organization
-            filter (MANTLE_USER_ORG or MANTLE_ACTIVE_ORG) each type is limited to records of those organizations, by the
-            type's organization fields, and to records that name the user: a project, task, event or request the user's
-            party owns, filed or is a party to (or one of those organizations is), and a communication event the user's
-            party is from, to or a party to, or a post of a mailbox the user may read. A type with neither is left out
+            filter (MANTLE_USER_ORG or MANTLE_ACTIVE_ORG, whichever of the filter sets on a party find names, MANTLE_USER_ORG
+            first, as get#RecordLinkInfo) each type is limited to records of its organizations, by the type's organization
+            fields: the user's organizations (filterOrgIds) for MANTLE_USER_ORG, and for MANTLE_ACTIVE_ORG the active
+            organization, or all of the user's organizations when none is active (the set's applyCond leaves it off then,
+            but the user still has the filter here); and to records that name the user: a project, task, event or request
+            the user's party owns, filed or is a party to (or one of those organizations is), and a communication event the
+            user's party is from, to or a party to, or a post of a mailbox the user may read. A type with neither is left out
             under the limit, except wiki pages. A party that is a personal contact (privateOwnerUserId) shows only to its
             owner, with or without a limit. A mailbox post (contactListId of a MAILBOX list) shows, with or without a
             limit, to those who may read the mailbox (its members; any user for a public mailbox that is not a help
-            mailbox) and otherwise only to the parties it is from, to or a recipient of.
+            mailbox) and otherwise only to the parties it is from, to or a recipient of. A wiki page shows, with or without
+            a limit and for every user, by the wiki's view rule (org.moqui.impl.WikiServices.get#WikiPageInfo, as
+            get#RecordLinkInfo): its space has no restrictView Y or the user has a WikiSpaceUser row with allowView Y for
+            it, and the page has no restrictView Y or the user has a WikiPageUser row with allowView Y for it.
             The limit is a trusted filter: it applies before ranking, totals, facets and highlights, and the query cannot
             widen it. Each result is checked against the entity database before it is returned.
 
@@ -82,13 +88,29 @@ along with this software (see the LICENSE.md file). If not, see
                 MantleCommunicationEvent: {user: ['fromPartyId', 'toPartyId', 'parties.partyId']},
                 MantleWikiPage: null}
 
-            // the user's organization limit, as the find filters have it
+            // the user's organization limit, as get#RecordLinkInfo has it: every filter set on a party find is looked at
+            // (an authorization may carry MANTLE_PRIVATE_CONTACT and others beside the organization set)
             if (ec.user.context.filterOrgIds === undefined) ec.service.sync().name('mantle.party.PartyServices.setup#UserOrganizationInfo').call()
-            const findFilters = ec.artifactExecution.getFindFiltersForUser('mantle.party.Party')
-            const filterSetId = findFilters ? findFilters[0].entityFilterSetId : null
+            const filterSetIds = () => new Set(Array.from(ec.artifactExecution.getFindFiltersForUser('mantle.party.Party') || [])
+                    .map((filter) => filter.entityFilterSetId))
+            const activeOrgId = ec.user.context.activeOrgId || null
+            const filterOrgIds = Array.from(ec.user.context.filterOrgIds || [])
+            let filterSets = filterSetIds()
             let orgIds = null
-            if (filterSetId === 'MANTLE_USER_ORG') orgIds = (ec.user.context.filterOrgIds || []).slice()
-            else if (filterSetId === 'MANTLE_ACTIVE_ORG' && ec.user.context.activeOrgId) orgIds = [ec.user.context.activeOrgId]
+            if (filterSets.has('MANTLE_USER_ORG')) orgIds = filterOrgIds
+            else if (filterSets.has('MANTLE_ACTIVE_ORG')) orgIds = activeOrgId ? [activeOrgId] : filterOrgIds
+            else if (!activeOrgId) {
+                // MANTLE_ACTIVE_ORG applies only with an active organization (its applyCond): whether the authorization
+                // names it is asked with one in the user context for the moment
+                const hadActive = 'activeOrgId' in ec.user.context
+                const oldActive = ec.user.context.activeOrgId
+                ec.user.context.activeOrgId = '_NA_'
+                try { filterSets = filterSetIds() } finally {
+                    if (hadActive) ec.user.context.activeOrgId = oldActive ?? null
+                    else delete ec.user.context.activeOrgId
+                }
+                if (filterSets.has('MANTLE_ACTIVE_ORG')) orgIds = filterOrgIds
+            }
 
             // the clauses that show a type's records under the limit, any one of them; none leaves the type out
             const userPartyId = ec.user.userAccount?.partyId || null
@@ -123,6 +145,24 @@ along with this software (see the LICENSE.md file). If not, see
                 documents[documentId] = {name: document.documentName, primaryEntityName: document.primaryEntityName,
                         limit: limit, roles: {}, links: []}
             }
+            // a wiki page by the wiki's view rule: a space the user may view (one without restrictView Y, or with a
+            // WikiSpaceUser row of the user with allowView Y), and not a page with restrictView Y the user has no WikiPageUser
+            // row with allowView Y for; no space the user may view leaves the type out
+            const wikiClauses = []
+            if (documents.MantleWikiPage) {
+                const userId = ec.user.userId || null
+                const allowed = (entityName, keyField) => userId ? Array.from(ec.entity.find(entityName)
+                        .condition({userId: userId, allowView: 'Y'}).disableAuthz().list()).map((row) => row[keyField]) : []
+                const viewSpaceIds = allowed('moqui.resource.wiki.WikiSpaceUser', 'wikiSpaceId')
+                const spaceIds = Array.from(ec.entity.find('moqui.resource.wiki.WikiSpace').disableAuthz().list())
+                        .filter((space) => space.restrictView !== 'Y' || viewSpaceIds.includes(space.wikiSpaceId)).map((space) => space.wikiSpaceId)
+                const viewPageIds = allowed('moqui.resource.wiki.WikiPageUser', 'wikiPageId')
+                const hiddenPageIds = Array.from(ec.entity.find('moqui.resource.wiki.WikiPage').condition('restrictView', 'Y').disableAuthz().list())
+                        .map((page) => page.wikiPageId).filter((wikiPageId) => !viewPageIds.includes(wikiPageId))
+                if (spaceIds.length === 0) delete documents.MantleWikiPage
+                wikiClauses.push({field: {name: 'wikiSpaceId', op: 'in', values: spaceIds}})
+                if (hiddenPageIds.length) wikiClauses.push({field: {name: 'wikiPageId', op: 'in', values: hiddenPageIds, negate: true}})
+            }
             const types = Object.keys(documents)
             if (types.length === 0) return
 
@@ -154,6 +194,7 @@ along with this software (see the LICENSE.md file). If not, see
                 if (documents[type].limit != null) all.push({bool: {any: documents[type].limit}})
                 if (type === 'MantleParty') all.push(privateClause)
                 if (type === 'MantleCommunicationEvent' && mailboxClause) all.push(mailboxClause)
+                if (type === 'MantleWikiPage') all.push(...wikiClauses)
                 return {bool: {all: all}}
             })
             const filterClauses = [{bool: {any: typeClauses}}]
