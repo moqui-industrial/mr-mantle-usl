@@ -1410,7 +1410,9 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- ========== Party ContactMech General Services ========== -->
 
     <service verb="store" noun="PartyContactMech">
-        <description>Add a purpose for a Party to an existing ContactMech or change a Party's purpose for a ContactMech</description>
+        <description>Add a purpose for a Party to an existing ContactMech or change a Party's purpose for a ContactMech.
+            When the party already has the purpose, an allowSolicitation given is set on its current row (consent:
+            mantle.party.ConsentServices.store#PartyConsent).</description>
         <in-parameters>
             <parameter name="partyId" required="true"/>
             <parameter name="contactMechId" required="true"/>
@@ -1434,7 +1436,15 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="contactMechPurposeId"/>
             </entity-find>
             <if condition="!pcmList?.length"><service-call name="create#mantle.party.contact.PartyContactMech" in-map="context"/></if>
-            <!-- TODO: handle other PartyContactMech fields that are not passed to service like extension, comments, allowSolicitation; copy from old or something? -->
+            <if condition="pcmList?.length &amp;&amp; allowSolicitation"><script><![CDATA[
+                // an update, so entity ECAs run
+                for (const pcm of Array.from(pcmList)) {
+                    if (pcm.allowSolicitation === allowSolicitation) continue
+                    pcm.set("allowSolicitation", allowSolicitation)
+                    pcm.update()
+                }
+            ]]></script></if>
+            <!-- TODO: handle other PartyContactMech fields that are not passed to service like extension, comments; copy from old or something? -->
         </actions>
     </service>
     <service verb="delete" noun="PartyContactMech">

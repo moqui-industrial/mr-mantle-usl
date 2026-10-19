@@ -673,6 +673,12 @@ along with this software (see the LICENSE.md file). If not, see
                 listCount = moveKeyed("mantle.marketing.contact.ContactListParty", "partyId")
                 if (listCount) ec.message.addMessage(`Moved ${listCount} Contact List memberships from Party ${fromPartyId} to ${toPartyId}`)
 
+                // PartyConsent (the consent history, kept whole: the merged party's latest rows are as current as the
+                // to Party's) and the unsubscribe link tokens
+                consentCount = moveAll("mantle.party.PartyConsent", "partyId", "partyId")
+                if (consentCount) ec.message.addMessage(`Moved ${consentCount} Consent records from Party ${fromPartyId} to ${toPartyId}`)
+                moveAll("mantle.marketing.contact.ContactListToken", "partyId", "partyId")
+
                 // ContactBookParty: in a book the to Party is already in, its current row stays (a favorite if either was)
                 // and the from Party's current row is removed; every other row moves
                 const bookPartyEntity = "mantle.party.contact.ContactBookParty"

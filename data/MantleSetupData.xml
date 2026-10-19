@@ -185,9 +185,56 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.security.user.NotificationTopic topic="ChatterMention" description="Mentioned on a Record" typeString="info"
             showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="${authorName} mentioned you on ${recordName}: ${summary}" linkTemplate=""/>
-    <moqui.security.user.NotificationTopic topic="RecordFollow" description="Activity on a Followed Record" typeString="info"
+    <moqui.security.user.NotificationTopic topic="RecordFollow" inboxEnumId="NinUpdates" description="Activity on a Followed Record" typeString="info"
             showAlert="N" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="${authorName} on ${recordName}: ${summary}" linkTemplate=""/>
+
+    <!-- Notification: the other topics of the IronStone shell. No link templates: the app passes the link. Each title names
+        the message fields its sender puts in the message map, besides recordEntityName and recordId when it is on a
+        record. A topic that waits on a decision (an approval) is an app's, with the framework's approveServiceName and
+        refuseServiceName on its NotificationTopic; those services get recordEntityName, recordId, the message's
+        messageJson map and, for a refuse, reason. -->
+    <!-- a mention in a chat room: roomName, chatRoomId, authorUserId, authorName, summary -->
+    <moqui.security.user.NotificationTopic topic="ChatMention" description="Mentioned in a Chat Room" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${authorName} mentioned you in ${roomName}: ${summary}" linkTemplate=""/>
+    <!-- a task, activity or event coming due or starting: workEffortId, workEffortName, whenText (the due or start time in
+        the user's words, such as "due today" or "at 2:30 PM") -->
+    <moqui.security.user.NotificationTopic topic="WorkEffortReminder" description="Task or Event Reminder" typeString="info"
+            showAlert="Y" alertNoAutoHide="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Reminder: ${workEffortName}, ${whenText}" linkTemplate=""/>
+    <!-- a page to review: wikiSpaceId, pagePath, pageName, authorUserId, authorName -->
+    <moqui.security.user.NotificationTopic topic="WikiPageReview" description="Page to Review" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${authorName} asked you to review ${pageName}" linkTemplate=""/>
+    <!-- a file or folder shared with the user: fileName, location, authorUserId, authorName -->
+    <moqui.security.user.NotificationTopic topic="FileShare" description="File Shared with You" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${authorName} shared ${fileName} with you" linkTemplate=""/>
+    <!-- new mail in the Inbox (mail, internal messages and the mailbox posts delivered to the Inbox): fromName, subject,
+        communicationEventId or emailMessageId. An alert only: the Inbox count and the Inbox keep it, not the notification
+        list. -->
+    <moqui.security.user.NotificationTopic topic="NewMail" description="New Mail" typeString="info"
+            showAlert="Y" persistOnSend="N" receiveNotifications="Y" isPrivate="Y"
+            titleTemplate="${fromName}: ${subject}" linkTemplate=""/>
+
+    <!-- an event invitation, new or updated (mantle.work.EventServices.send#EventInvitations): workEffortId, workEffortName,
+        organizerName, whenText (the time in the organizer's words), whereText, update (true for a changed event), cancelled,
+        message -->
+    <moqui.security.user.NotificationTopic topic="EventInvitation" description="Event Invitation" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${cancelled ? organizerName + ' cancelled ' + workEffortName : (update ? organizerName + ' updated ' + workEffortName : organizerName + ' invited you to ' + workEffortName)}, ${whenText}"
+            linkTemplate=""/>
+    <!-- an attendee's answer to the organizer (mantle.work.EventServices.respond#EventInvitation): workEffortId, workEffortName,
+        responderName, response (accept, tentative or decline), responseText (accepted, tentatively accepted, declined), message -->
+    <moqui.security.user.NotificationTopic topic="EventInvitationResponse" inboxEnumId="NinUpdates" description="Answer to an Event Invitation" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${responderName} ${responseText} ${workEffortName}${message ? ': ' + message : ''}" linkTemplate=""/>
+
+    <!-- Email: invitations to attendees outside (no user account), iMIP replies and reminders by email. The services pass
+        subject, fromAddress and fromName in bodyParameters, and the body. -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_CALENDAR_EMAIL" description="Calendar Invitation or Reminder" emailServerId="SYSTEM"
+            fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}" sendPartial="Y"/>
 
     <!-- ========== Registered Services ========== -->
 
@@ -236,13 +283,23 @@ along with this software (see the LICENSE.md file). If not, see
     </moqui.service.job.ServiceJob>
 
     <!-- Service Job: Payroll Processing -->
-    <moqui.security.user.NotificationTopic topic="ProcessTimePeriodPay" description="Payroll Period Process Pay Completed"
+    <moqui.security.user.NotificationTopic topic="ProcessTimePeriodPay" inboxEnumId="NinUpdates" description="Payroll Period Process Pay Completed"
             typeString="success" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
             titleTemplate="Process Pay Completed for Payroll Period ${parameters.timePeriodId} for pay date ${ec.l10n.format(results.payDate, '')}, total pay ${ec.l10n.format(results.totalPayAmount, '0.00')}"
             errorTitleTemplate="Error in Process Pay for Payroll Period ${parameters.timePeriodId}: ${serviceCallRun.errors}"
             linkTemplate=""/>
     <moqui.service.job.ServiceJob jobName="ProcessTimePeriodPay" description="Process Pay for Payroll Period"
             serviceName="mantle.humanres.PayrollServices.process#TimePeriodPay" topic="ProcessTimePeriodPay"/>
+
+    <!-- Service Job: Send Due Reminders of tasks and events - every minute -->
+    <moqui.service.job.ServiceJob jobName="send_DueReminders" description="Send Due Task and Event Reminders"
+            serviceName="mantle.work.EventServices.send#DueReminders" cronExpression="0 0/1 * * * ?" paused="N"
+            transactionTimeout="300"/>
+    <!-- Service Job: Fetch Calendar Subscriptions that are due (each its own refresh interval) - every 15 minutes; nothing is
+        fetched until the framework's ICalendar tool exists -->
+    <moqui.service.job.ServiceJob jobName="fetch_CalendarSubscriptions" description="Fetch Calendar Subscriptions"
+            serviceName="mantle.work.CalendarServices.fetch#CalendarSubscriptions" cronExpression="0 0/15 * * * ?" paused="N"
+            transactionTimeout="1800"/>
 
     <!-- Service Job: Check All Parties for Duplicates (paused by default; cron for every night at 2:00 am) -->
     <moqui.service.job.ServiceJob jobName="check_AllPartyDuplicates" description="Check All Parties for Duplicates"
