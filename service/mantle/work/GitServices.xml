@@ -63,13 +63,15 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="create" noun="ProjectRepository">
         <description>Make a git repository for a project and link it: kept on disk (local, the default for code) or
-            in the database (db).</description>
+            in the database (db). A content repository (a web site's images, documents and media) keeps images, video,
+            audio, PDFs and archives in Git LFS.</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <parameter name="repositoryId"><description>The project ID in lower case when empty</description></parameter>
             <parameter name="repositoryKind" default-value="local"><description>local or db</description></parameter>
             <parameter name="description"/>
             <parameter name="branch" default-value="main"/>
+            <parameter name="contentRepository" type="Boolean" default-value="false"/>
         </in-parameters>
         <out-parameters><parameter name="repositoryId"/></out-parameters>
         <actions>
@@ -85,7 +87,8 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="existing != null"><return error="true" message="Git repository ${repositoryId} already exists"/></if>
             <service-call name="create#moqui.resource.GitRepository" in-map="{repositoryId:repositoryId,
                     repositoryKind:repositoryKind, branch:branch, description:description || project.workEffortName}"/>
-            <service-call name="org.moqui.impl.GitServices.init#GitRepository" in-map="{repositoryId:repositoryId}"/>
+            <service-call name="org.moqui.impl.GitServices.init#GitRepository"
+                    in-map="{repositoryId:repositoryId, contentRepository:contentRepository}"/>
             <service-call name="mantle.work.GitServices.add#ProjectRepository"
                     in-map="{workEffortId:workEffortId, repositoryId:repositoryId}"/>
         </actions>
