@@ -21,7 +21,9 @@ along with this software (see the LICENSE.md file). If not, see
 
             The document types are those whose primary entity the user may view. When the user has an organization
             filter (MANTLE_USER_ORG or MANTLE_ACTIVE_ORG) each type is limited to records of those organizations, by the
-            type's organization fields; a type with no organization field is left out under the limit, except wiki pages.
+            type's organization fields, and to records that name the user: a project, task, event or request the user's
+            party owns, filed or is a party to (or one of those organizations is), and a communication event the user's
+            party is from, to or a party to. A type with neither is left out under the limit, except wiki pages.
             The limit is a trusted filter: it applies before ranking, totals, facets and highlights, and the query cannot
             widen it. Each result is checked against the entity database before it is returned.
 
@@ -61,11 +63,20 @@ along with this software (see the LICENSE.md file). If not, see
             capabilities = ec.search.isAvailable() ? ec.search.capabilities() : []
             if (!ec.search.isAvailable()) { ec.message.addError('Search is not configured'); return }
 
-            // the organization fields of each document type; a type that is not here has no organization scope
-            const orgFields = {MantleParty: ['ownerPartyId'], MantleProduct: ['ownerPartyId'], MantleFacility: ['ownerPartyId'],
-                MantleAsset: ['ownerPartyId'], MantleOrder: ['parts.vendorPartyId', 'parts.customerPartyId'],
-                MantleInvoice: ['fromPartyId', 'toPartyId'], MantleShipment: ['fromPartyId', 'toPartyId'],
-                MantleCommunicationEvent: [], MantleWikiPage: null}
+            // what shows a record of each document type under an organization limit: org fields holding one of the user's
+            // organizations, user fields holding the user's party, and party fields holding either; a type that is not here
+            // shows nothing, and null is not limited
+            // TODO: only current party rows (parties.partyThruDate empty or later than now) once the Postgres backend can
+            //     compare a date in a child list (it casts the stored text, which the feed writes as epoch millis)
+            const scopes = {MantleParty: {org: ['ownerPartyId']}, MantleProduct: {org: ['ownerPartyId']},
+                MantleFacility: {org: ['ownerPartyId']}, MantleAsset: {org: ['ownerPartyId']},
+                MantleOrder: {org: ['parts.vendorPartyId', 'parts.customerPartyId']},
+                MantleInvoice: {org: ['fromPartyId', 'toPartyId']}, MantleShipment: {org: ['fromPartyId', 'toPartyId']},
+                MantleProject: {party: ['ownerPartyId', 'parties.partyId']}, MantleTask: {party: ['ownerPartyId', 'parties.partyId']},
+                MantleEvent: {party: ['ownerPartyId', 'parties.partyId']},
+                MantleRequest: {org: ['storeOrganizationPartyId', 'facilityOwnerPartyId'], user: ['filedByPartyId'], party: ['parties.partyId']},
+                MantleCommunicationEvent: {user: ['fromPartyId', 'toPartyId', 'parties.partyId']},
+                MantleWikiPage: null}
 
             // the user's organization limit, as the find filters have it
             if (ec.user.context.filterOrgIds === undefined) ec.service.sync().name('mantle.party.PartyServices.setup#UserOrganizationInfo').call()
@@ -75,6 +86,18 @@ along with this software (see the LICENSE.md file). If not, see
             if (filterSetId === 'MANTLE_USER_ORG') orgIds = (ec.user.context.filterOrgIds || []).slice()
             else if (filterSetId === 'MANTLE_ACTIVE_ORG' && ec.user.context.activeOrgId) orgIds = [ec.user.context.activeOrgId]
 
+            // the clauses that show a type's records under the limit, any one of them; none leaves the type out
+            const userPartyId = ec.user.userAccount?.partyId || null
+            const scopeClauses = (type, scope) => {
+                const orgValues = type === 'MantleParty' ? orgIds.concat(['_NA_']) : orgIds
+                const partyValues = userPartyId ? orgIds.concat([userPartyId]) : orgIds
+                const any = []
+                if (orgValues.length) for (const name of scope.org || []) any.push({field: {name: name, op: 'in', values: orgValues}})
+                if (userPartyId) for (const name of scope.user || []) any.push({field: {name: name, op: 'eq', value: userPartyId}})
+                if (partyValues.length) for (const name of scope.party || []) any.push({field: {name: name, op: 'in', values: partyValues}})
+                return any
+            }
+
             // the document types the user may see: view authz on the primary entity, and an organization scope under a limit
             const requested = entityType ? String(entityType).split(',').map((type) => type.trim()).filter((type) => type) : null
             const documents = {}
@@ -83,10 +106,11 @@ along with this software (see the LICENSE.md file). If not, see
                 const document = ec.entity.find('moqui.entity.document.DataDocument').condition('dataDocumentId', documentId)
                         .useCache(true).one()
                 if (document == null || !ec.artifactExecution.isPermitted(document.primaryEntityName, 'AT_ENTITY', 'view')) continue
-                const fields = Object.prototype.hasOwnProperty.call(orgFields, documentId) ? orgFields[documentId] : []
-                if (orgIds != null && fields != null && fields.length === 0) continue
+                const scope = Object.prototype.hasOwnProperty.call(scopes, documentId) ? scopes[documentId] : {}
+                const limit = orgIds != null && scope != null ? scopeClauses(documentId, scope) : null
+                if (limit != null && limit.length === 0) continue
                 documents[documentId] = {name: document.documentName, primaryEntityName: document.primaryEntityName,
-                        orgFields: fields, roles: {}, links: []}
+                        limit: limit, roles: {}, links: []}
             }
             const types = Object.keys(documents)
             if (types.length === 0) return
@@ -103,14 +127,10 @@ along with this software (see the LICENSE.md file). If not, see
                         .condition('linkSet', linkSet).orderBy('linkSeqId').useCache(true).list())
             }
 
-            // the trusted filter: per type, the type and its organization limit
+            // the trusted filter: per type, the type and its organization and user limit
             const typeClauses = types.map((type) => {
                 const all = [{field: {name: '_document', op: 'eq', value: type}}]
-                const fields = documents[type].orgFields
-                if (orgIds != null && fields != null) {
-                    const values = type === 'MantleParty' ? orgIds.concat(['_NA_']) : orgIds
-                    all.push({bool: {any: fields.map((name) => ({field: {name: name, op: 'in', values: values}}))}})
-                }
+                if (documents[type].limit != null) all.push({bool: {any: documents[type].limit}})
                 return {bool: {all: all}}
             })
             const filterClauses = [{bool: {any: typeClauses}}]

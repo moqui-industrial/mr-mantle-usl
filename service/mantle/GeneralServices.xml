@@ -17,6 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters><parameter name="lookupId"/></in-parameters>
         <out-parameters>
             <parameter name="asset" type="Map"/>
+            <parameter name="communicationEvent" type="Map"/>
             <parameter name="container" type="Map"/>
             <parameter name="facility" type="Map"/>
             <parameter name="invoice" type="Map"/>
@@ -27,11 +28,13 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="payment" type="Map"/>
             <parameter name="product" type="Map"/>
             <parameter name="productList" type="List"><parameter name="product" type="Map"/></parameter>
+            <parameter name="request" type="Map"/>
             <parameter name="shipment" type="Map"/>
             <parameter name="workEffort" type="Map"/>
             <parameter name="acctgTrans" type="Map"/>
 
             <parameter name="assetId"/>
+            <parameter name="communicationEventId"/>
             <parameter name="containerId"/>
             <parameter name="facilityId"/>
             <parameter name="invoiceId"/>
@@ -41,6 +44,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="partyBadgeId"/>
             <parameter name="paymentId"/>
             <parameter name="productId"/>
+            <parameter name="requestId"/>
             <parameter name="shipmentId"/>
             <parameter name="workEffortId"/>
             <parameter name="acctgTransId"/>
@@ -56,6 +60,11 @@ along with this software (see the LICENSE.md file). If not, see
                     <field-map field-name="serialNumber" from="lookupId"/></entity-find-one>
             </if>
             <if condition="asset != null"><set field="assetId" from="asset.assetId"/></if>
+
+            <!-- CommunicationEvent -->
+            <entity-find-one entity-name="mantle.party.communication.CommunicationEvent" value-field="communicationEvent">
+                <field-map field-name="communicationEventId" from="lookupId"/></entity-find-one>
+            <if condition="communicationEvent != null"><set field="communicationEventId" from="communicationEvent.communicationEventId"/></if>
 
             <!-- Container -->
             <entity-find-one entity-name="mantle.product.asset.Container" value-field="container">
@@ -186,6 +195,11 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
             </iterate>
             <if condition="product != null"><set field="productId" from="product.productId"/></if>
+
+            <!-- Request -->
+            <entity-find-one entity-name="mantle.request.Request" value-field="request">
+                <field-map field-name="requestId" from="lookupId"/></entity-find-one>
+            <if condition="request != null"><set field="requestId" from="request.requestId"/></if>
 
             <!-- Shipment -->
             <entity-find-one entity-name="mantle.shipment.Shipment" value-field="shipment">
