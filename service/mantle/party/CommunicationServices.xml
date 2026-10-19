@@ -1348,12 +1348,47 @@ along with this software (see the LICENSE.md file). If not, see
             primary key field, the record's own communication event join and work effort join (null when the generic
             CommunicationEventRecord or WorkEffortRecord holds its links; a party's own communication event link is the
             event's from and to party and its CommunicationEventParty rows), its note entity and its content entity.
-            With checkRecord (the default) the record must be found under the user's filters.
+
+            With checkRecord (the default) the record must be one the user may see, or there is an error (the record is
+            not found). With checkOnly the answer is recordVisible, true or false, and no error, so the caller's
+            transaction is not marked rollback-only by a record the user may not see; notVisibleReason says why, for a log.
+
+            A record the user may see is found under the user's entity filters, and is never someone else's personal
+            contact (Party.privateOwnerUserId). A work effort, a request and a communication event have no entity filter,
+            so under an organization filter they follow per-user rules, those of search#Universal (IronStone R4, R5). The
+            organization filter is the MANTLE_USER_ORG or MANTLE_ACTIVE_ORG filter set of the authorization: its
+            organizations are filterOrgIds (setup#UserOrganizationInfo), the active organization for MANTLE_ACTIVE_ORG,
+            and all of the user's organizations when the authorization names MANTLE_ACTIVE_ORG and no organization is
+            active (the set's applyCond leaves it off then, but the user still has the filter here).
+            - A work effort (task, event, project, ...): its ownerPartyId, or that of its root work effort, is the user's
+              party or one of the user's organizations, or one of those is a current WorkEffortParty of it or of its root
+              work effort.
+            - A request: the user's party filed it (filedByPartyId), or the user's party or one of the user's
+              organizations (such as the customer organization) is a current RequestParty, or the organization of its
+              product store or the owner of its facility is one of the user's organizations.
+            - A communication event: the user's party is its from or to party or a CommunicationEventParty, or it is a
+              post of a mailbox the user may read (ContactListServices.get#UserMailboxAccess), or it or the root of its
+              thread is linked (the record's own join or a CommunicationEventRecord) to a record the user may see by these
+              rules, one level deep: a linked communication event is checked without its own links.
+            A post of a mailbox the user may not read follows the communication event rule with or without an
+            organization filter, as in search#Universal. Without an organization filter work efforts, requests and other
+            communication events are seen as found. Any other record type has only its entity filters.
+
+            The per-user rules do not apply with authorization disabled (an internal caller), to a user in the ADMIN
+            group, or for a record type the user has an explicit entity authorization for: an ArtifactAuthz of one of the
+            user's groups over an ArtifactGroupMember of type AT_ENTITY naming the record entity (by name, or by a pattern
+            that matches it), allow or always, for view or all, with no deny, which ec.artifactExecution.isPermitted
+            confirms. A staff app such as a customer service or projects app gives its users all requests or work efforts
+            that way. isPermitted alone does not tell: an entity inherits the authorization of the app root (an
+            AUTHZT_ALWAYS ArtifactAuthz with inheritAuthz), which permits every entity to every user of the app, and no
+            group, ADMIN included, has an entity authorization by default.
         </description>
         <in-parameters>
             <parameter name="recordEntityName" required="true"/>
             <parameter name="recordId" required="true"/>
             <parameter name="checkRecord" type="Boolean" default="true"/>
+            <parameter name="checkOnly" type="Boolean" default="false"><description>Check the record and answer recordVisible
+                instead of adding an error: a record type that is not one or a record the user may not see gives false</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="recordEntityName"><description>The full entity name</description></parameter>
@@ -1364,6 +1399,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="workEffortJoin" type="Map"><description>{entityName, keyField}</description></parameter>
             <parameter name="noteEntity" type="Map"><description>{entityName, keyField}</description></parameter>
             <parameter name="contentEntity" type="Map"><description>{entityName, keyField, typeField, dateField}</description></parameter>
+            <parameter name="recordVisible" type="Boolean"><description>Whether the user may see the record; null when it was
+                not checked (checkRecord false)</description></parameter>
+            <parameter name="notVisibleReason"><description>With checkOnly, why recordVisible is false (for a log, not for the
+                user)</description></parameter>
         </out-parameters>
         <actions><script><![CDATA[
             const commEventJoins = {
@@ -1402,30 +1441,206 @@ along with this software (see the LICENSE.md file). If not, see
                 'mantle.work.effort.WorkEffort': content('mantle.work.effort.WorkEffortContent', 'workEffortId', 'contentTypeEnumId'),
                 'mantle.facility.Facility': content('mantle.facility.FacilityContent', 'facilityId', 'facilityContentTypeEnumId')}
 
+            const PARTY = 'mantle.party.Party'
+            const WORK_EFFORT = 'mantle.work.effort.WorkEffort'
+            const REQUEST = 'mantle.request.Request'
+            const COMM_EVENT = 'mantle.party.communication.CommunicationEvent'
+            recordVisible = null
+            notVisibleReason = null
+            // a refusal: an error, or with checkOnly the answer false
+            const refuse = (message) => {
+                if (checkOnly) { recordVisible = false; notVisibleReason = message }
+                else ec.message.addError(message)
+            }
+
             let recordValue
             try { recordValue = ec.entity.makeValue(recordEntityName) }
-            catch (err) { ec.message.addError(`The record type ${recordEntityName} is not an entity`); return }
+            catch (err) { refuse(`The record type ${recordEntityName} is not an entity`); return }
             recordEntityName = recordValue.getEntityName()
             recordTypeName = recordValue.getEntityNamePretty()
             const keyNames = Object.keys(recordValue.getPrimaryKeys())
             if (keyNames.length !== 1) {
-                ec.message.addError(`The record type ${recordEntityName} has ${keyNames.length} primary key fields, a record link needs one`)
+                refuse(`The record type ${recordEntityName} has ${keyNames.length} primary key fields, a record link needs one`)
                 return
             }
             recordKeyField = keyNames[0]
-            // the record under the user's filters: a record the user may not see has no links for them; someone else's
-            // personal contact (Party.privateOwnerUserId) is not found, with or without an entity filter
-            const record = checkRecord ? ec.entity.find(recordEntityName).condition(recordKeyField, recordId).one() : null
-            if (checkRecord && (record == null || (recordEntityName === 'mantle.party.Party' && record.privateOwnerUserId
-                    && record.privateOwnerUserId !== ec.user.userId))) {
-                ec.message.addError(`${recordTypeName} ${recordId} not found`)
-                return
-            }
-            isParty = recordEntityName === 'mantle.party.Party'
+            isParty = recordEntityName === PARTY
             commEventJoin = commEventJoins[recordEntityName] || null
             workEffortJoin = workEffortJoins[recordEntityName] || null
             noteEntity = noteEntities[recordEntityName] || null
             contentEntity = contentEntities[recordEntityName] || null
+            if (!checkRecord && !checkOnly) return
+
+            // ===== whether the user may see the record (see the description) =====
+            const cf = ec.entity.conditionFactory
+            const authzOn = !ec.artifactExecution.authzDisabled()
+            const current = () => cf.makeConditionDate('fromDate', 'thruDate', null)
+
+            // the user's party and the organizations of the organization filter (orgIds null: no organization filter)
+            let scope = null
+            const userScope = () => {
+                if (scope) return scope
+                const userPartyId = ec.user.userAccount?.partyId || null
+                let orgIds = null
+                if (authzOn) {
+                    if (userPartyId && ec.user.context.filterOrgIds === undefined)
+                        ec.service.sync().name('mantle.party.PartyServices.setup#UserOrganizationInfo').call()
+                    const filterSets = () => new Set(Array.from(ec.artifactExecution.getFindFiltersForUser(PARTY) || [])
+                            .map((filter) => filter.entityFilterSetId))
+                    const activeOrgId = ec.user.context.activeOrgId || null
+                    const filterOrgIds = Array.from(ec.user.context.filterOrgIds || [])
+                    let sets = filterSets()
+                    if (sets.has('MANTLE_USER_ORG')) orgIds = filterOrgIds
+                    else if (sets.has('MANTLE_ACTIVE_ORG')) orgIds = activeOrgId ? [activeOrgId] : filterOrgIds
+                    else if (!activeOrgId) {
+                        // MANTLE_ACTIVE_ORG applies only with an active organization (its applyCond): whether the
+                        // authorization names it is asked with one in the user context for the moment
+                        const hadActive = 'activeOrgId' in ec.user.context
+                        const oldActive = ec.user.context.activeOrgId
+                        ec.user.context.activeOrgId = '_NA_'
+                        try { sets = filterSets() } finally {
+                            if (hadActive) ec.user.context.activeOrgId = oldActive ?? null
+                            else delete ec.user.context.activeOrgId
+                        }
+                        if (sets.has('MANTLE_ACTIVE_ORG')) orgIds = filterOrgIds
+                    }
+                }
+                scope = {userPartyId: userPartyId, orgIds: orgIds, partyIds: (userPartyId ? [userPartyId] : []).concat(orgIds || [])}
+                return scope
+            }
+            // the mailboxes whose every post the user may read, and the others
+            let mailboxes = null
+            const mailboxAccess = () => {
+                if (mailboxes) return mailboxes
+                const out = ec.service.sync().name('mantle.marketing.ContactListServices.get#UserMailboxAccess')
+                        .parameter('partyId', userScope().userPartyId).call()
+                mailboxes = {readable: Array.from(out?.readableContactListIds || []), hidden: Array.from(out?.hiddenContactListIds || [])}
+                return mailboxes
+            }
+            // staff: ADMIN, or an explicit entity authorization for the record type (not the inherited one of an app root)
+            const staff = {}
+            const staffSees = (entityName) => {
+                if (Object.prototype.hasOwnProperty.call(staff, entityName)) return staff[entityName]
+                let sees = false
+                try {
+                    if (ec.user.isInGroup('ADMIN')) {
+                        sees = true
+                    } else {
+                        const groupIds = Array.from(ec.user.getUserGroupIdSet() || [])
+                        const rows = Array.from(ec.entity.find('moqui.security.ArtifactAuthzCheckView').condition('userGroupId', 'in', groupIds)
+                                .condition('artifactTypeEnumId', 'AT_ENTITY').condition('authzActionEnumId', 'in', ['AUTHZA_ALL', 'AUTHZA_VIEW'])
+                                .disableAuthz().list()).filter((row) => {
+                            if (row.nameIsPattern !== 'Y') return row.artifactName === entityName
+                            try { return new RegExp(`^(?:${row.artifactName})$`).test(entityName) }
+                            catch (err) {
+                                ec.logger.error(`Artifact authz ${row.artifactAuthzId}: the pattern ${row.artifactName} is not valid, skipped: ${err}`)
+                                return false
+                            }
+                        })
+                        sees = rows.some((row) => row.authzTypeEnumId === 'AUTHZT_ALLOW' || row.authzTypeEnumId === 'AUTHZT_ALWAYS')
+                                && !rows.some((row) => row.authzTypeEnumId === 'AUTHZT_DENY')
+                                && ec.artifactExecution.isPermitted(entityName, 'AT_ENTITY', 'view')
+                    }
+                } catch (err) {
+                    ec.logger.error(`Record visibility: the entity authorization of user ${ec.user.userId} for ${entityName} was not read, ` +
+                            `the per-user rules apply: ${err}`)
+                    sees = false
+                }
+                staff[entityName] = sees
+                return sees
+            }
+
+            const workEffortVisible = (workEffort, s) => {
+                if (s.partyIds.length === 0) return false
+                const ids = [workEffort.workEffortId]
+                let root = null
+                if (workEffort.rootWorkEffortId && workEffort.rootWorkEffortId !== workEffort.workEffortId) {
+                    ids.push(workEffort.rootWorkEffortId)
+                    root = ec.entity.find(WORK_EFFORT).condition('workEffortId', workEffort.rootWorkEffortId).disableAuthz().one()
+                }
+                if ([workEffort.ownerPartyId, root?.ownerPartyId].some((partyId) => partyId && s.partyIds.includes(partyId))) return true
+                return ec.entity.find('mantle.work.effort.WorkEffortParty').condition('workEffortId', 'in', ids)
+                        .condition('partyId', 'in', s.partyIds).condition(current()).disableAuthz().count() > 0
+            }
+            const requestVisible = (request, s) => {
+                if (s.userPartyId && request.filedByPartyId === s.userPartyId) return true
+                if (s.partyIds.length && ec.entity.find('mantle.request.RequestParty').condition('requestId', request.requestId)
+                        .condition('partyId', 'in', s.partyIds).condition(current()).disableAuthz().count() > 0) return true
+                if (s.orgIds.length === 0) return false
+                const store = request.productStoreId ? ec.entity.find('mantle.product.store.ProductStore')
+                        .condition('productStoreId', request.productStoreId).disableAuthz().one() : null
+                if (store?.organizationPartyId && s.orgIds.includes(store.organizationPartyId)) return true
+                const facility = request.facilityId ? ec.entity.find('mantle.facility.Facility')
+                        .condition('facilityId', request.facilityId).disableAuthz().one() : null
+                return !!(facility?.ownerPartyId && s.orgIds.includes(facility.ownerPartyId))
+            }
+            let visible
+            const commEventVisible = (commEvent, depth) => {
+                const s = userScope()
+                const mailbox = commEvent.contactListId ? mailboxAccess() : null
+                const hiddenPost = !!(mailbox && mailbox.hidden.includes(commEvent.contactListId))
+                if (s.orgIds == null && !hiddenPost) return true
+                if (staffSees(COMM_EVENT)) return true
+                const partyId = s.userPartyId
+                if (partyId && (commEvent.fromPartyId === partyId || commEvent.toPartyId === partyId)) return true
+                if (partyId && ec.entity.find('mantle.party.communication.CommunicationEventParty')
+                        .condition('communicationEventId', commEvent.communicationEventId).condition('partyId', partyId)
+                        .disableAuthz().count() > 0) return true
+                if (mailbox && mailbox.readable.includes(commEvent.contactListId)) return true
+                if (depth > 0) return false
+                // filed on a record the user may see: the event, or the root of its thread (a record's timeline shows the replies)
+                const eventIds = [commEvent.communicationEventId]
+                if (commEvent.rootCommEventId && commEvent.rootCommEventId !== commEvent.communicationEventId) eventIds.push(commEvent.rootCommEventId)
+                for (const [linkedEntityName, join] of Object.entries(commEventJoins)) {
+                    for (const row of ec.entity.find(join.entityName).condition('communicationEventId', 'in', eventIds).disableAuthz().list()) {
+                        if (visible(linkedEntityName, join.keyField, row[join.keyField], depth + 1)) return true
+                    }
+                }
+                for (const row of ec.entity.find('mantle.party.communication.CommunicationEventRecord')
+                        .condition('communicationEventId', 'in', eventIds).disableAuthz().list()) {
+                    let keyField = null
+                    try {
+                        const keys = Object.keys(ec.entity.makeValue(row.recordEntityName).getPrimaryKeys())
+                        if (keys.length === 1) keyField = keys[0]
+                    } catch (err) { keyField = null }
+                    if (keyField == null) {
+                        ec.logger.warn(`Communication event ${row.communicationEventId} is filed on ${row.recordEntityName} ${row.recordId}, ` +
+                                'which is not a record type, skipped')
+                        continue
+                    }
+                    if (visible(row.recordEntityName, keyField, row.recordId, depth + 1)) return true
+                }
+                return false
+            }
+            visible = (entityName, keyField, id, depth) => {
+                // under the user's entity filters
+                const value = ec.entity.find(entityName).condition(keyField, id).one()
+                if (value == null) return false
+                if (entityName === PARTY) return !value.privateOwnerUserId || value.privateOwnerUserId === ec.user.userId
+                if (!authzOn) return true
+                if (entityName === COMM_EVENT) return commEventVisible(value, depth)
+                if (entityName !== WORK_EFFORT && entityName !== REQUEST) return true
+                const s = userScope()
+                if (s.orgIds == null || staffSees(entityName)) return true
+                return entityName === WORK_EFFORT ? workEffortVisible(value, s) : requestVisible(value, s)
+            }
+
+            // strict: a check that fails (an exception, or an error from a service it calls) is not visible, and logged
+            let isVisible = false
+            ec.message.pushErrors()
+            try {
+                isVisible = visible(recordEntityName, recordKeyField, recordId, 0)
+                if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+            } catch (err) {
+                ec.logger.error(`Record visibility of ${recordEntityName} ${recordId} for user ${ec.user.userId} not checked, not visible: ` +
+                        `${err && err.message ? err.message : err}`)
+                isVisible = false
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+            if (isVisible) recordVisible = true
+            else refuse(`${recordTypeName} ${recordId} not found`)
         ]]></script></actions>
     </service>
 
@@ -2047,15 +2262,20 @@ along with this software (see the LICENSE.md file). If not, see
             activities come apart in plannedActivities, soonest due first, with the assignee.
 
             kinds limits the entries to messages, notes, activities, changes and files (a list or comma-separated text;
-            empty is all). Page with pageIndex and pageSize, or give beforeDate (the date of the last entry shown) for
-            the entries before it.
+            empty is all). Page with pageIndex and pageSize, or by a cursor: beforeDate with seenKeys, which are
+            nextBeforeDate and nextSeenKeys of the page before, gives the entries before that date and those of that date
+            not shown yet, so the pages neither skip nor repeat an entry when entries share a date. beforeDate alone
+            gives the entries strictly before it, as before seenKeys (an entry of the same date as the last one shown is
+            not on the next page).
 
             Each source stands alone: one that fails is logged by name and left out, and its name is in failedSources.
             The services of the ServiceRegister rows of type RecordTimelineSource are sources too: each gets
-            recordEntityName, recordId, kinds (the wanted entry kinds), beforeDate and limit, and returns entryList.
+            recordEntityName, recordId, kinds (the wanted entry kinds), beforeDate and limit, and returns entryList;
+            an entry of a registered source may have an entryKey (or an id) that is stable for it.
 
-            An entry is {kind (message, note, activity, change or file), date, authorPartyId, authorUserId, title, body,
-            contentType, statusId, source (the entity or service it came from)} with the fields of its kind:
+            An entry is {kind (message, note, activity, change or file), date, entryKey (the source and the entry's key,
+            stable for the entry: the cursor's seenKeys), authorPartyId, authorUserId, title, body, contentType, statusId,
+            source (the entity or service it came from)} with the fields of its kind:
             communicationEventId, communicationEventTypeId, fromPartyId, toPartyId, parentCommEventId, rootCommEventId,
             emailMessageId, contactListId and attachments (the CommunicationEventContent rows) for a message or a Comment
             note; noteDate and internalNote for a *Note row; workEffortId and purposeEnumId for an activity;
@@ -2069,6 +2289,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="pageIndex" type="Integer" default="0"/>
             <parameter name="pageSize" type="Integer" default="50"/>
             <parameter name="beforeDate" type="Timestamp"/>
+            <parameter name="seenKeys" type="List"><description>With beforeDate: the entryKey of each entry shown whose date is
+                beforeDate (nextSeenKeys); the other entries of that date come too. A list or comma-separated.</description></parameter>
             <parameter name="includeListPosts" type="Boolean" default="false"/>
         </in-parameters>
         <out-parameters>
@@ -2080,12 +2302,18 @@ along with this software (see the LICENSE.md file). If not, see
                 <parameter name="overdue" type="Boolean"/><parameter name="assigneePartyId"/>
             </parameter></parameter>
             <parameter name="hasMore" type="Boolean"/>
+            <parameter name="nextBeforeDate" type="Timestamp"><description>The cursor of the next page: the date of the last
+                entry of this one (null when it has none)</description></parameter>
+            <parameter name="nextSeenKeys" type="List"><description>The cursor's seenKeys: the entryKey of each entry shown so
+                far whose date is nextBeforeDate</description></parameter>
             <parameter name="failedSources" type="List"/>
         </out-parameters>
         <actions><script><![CDATA[
             entryList = []
             plannedActivities = []
             hasMore = false
+            nextBeforeDate = null
+            nextSeenKeys = []
             failedSources = []
             const info = ec.service.sync().name('mantle.party.CommunicationServices.get#RecordLinkInfo')
                     .parameters({recordEntityName: recordEntityName, recordId: recordId}).call()
@@ -2108,7 +2336,14 @@ along with this software (see the LICENSE.md file). If not, see
             const start = pageIndex * pageSize
             const need = start + pageSize + 1
             const beforeMillis = toMillis(beforeDate)
-            const before = beforeMillis == null ? null : new Date(beforeMillis)
+            // the cursor: with seenKeys the entries of beforeDate not shown yet come too
+            const seen = new Set(beforeMillis == null || seenKeys == null ? [] : (typeof seenKeys === 'string' ? seenKeys.split(',')
+                    : Array.from(seenKeys)).map((key) => String(key).trim()).filter((key) => key))
+            const inclusive = seen.size > 0
+            // each source's bound (before it): beforeDate, or with seenKeys the millisecond after it; and its limit, with
+            // room for the seen entries it may return
+            const before = beforeMillis == null ? null : new Date(inclusive ? beforeMillis + 1 : beforeMillis)
+            const fetch = need + seen.size
             const entries = []
 
             // one source: a failure (an exception or error messages) is logged and the source left out
@@ -2133,8 +2368,8 @@ along with this software (see the LICENSE.md file). If not, see
                     const typeIds = ec.entity.find('mantle.party.communication.CommunicationEventType').useCache(true).list()
                             .map((type) => type.communicationEventTypeId).join(',')
                     const parameters = {partyId: recordId, communicationEventTypeId: typeIds, includeListPosts: includeListPosts,
-                        orderByField: '-entryDate', pageIndex: 0, pageSize: need}
-                    if (before) parameters.entryDate_thru = new Date(beforeMillis - 1)
+                        orderByField: '-entryDate', pageIndex: 0, pageSize: fetch}
+                    if (before) parameters.entryDate_thru = new Date(before.getTime() - 1)
                     const found = callSource('mantle.party.CommunicationServices.find#PartyCommunicationEvents', parameters)
                     if (ec.message.hasError()) return
                     for (const commEvent of found.commEventList) ids.add(commEvent.communicationEventId)
@@ -2150,14 +2385,15 @@ along with this software (see the LICENSE.md file). If not, see
                 const idCondition = info.isParty ? cf.makeCondition('communicationEventId', 'in', idList) : cf.makeCondition([
                     cf.makeCondition('communicationEventId', 'in', idList), cf.makeCondition('rootCommEventId', 'in', idList)], 'or')
                 let find = ec.entity.find('mantle.party.communication.CommunicationEvent').condition(idCondition)
-                        .condition(cf.makeCondition('statusId', 'not-equals', 'CeCancelled', true)).orderBy('-entryDate').limit(need)
+                        .condition(cf.makeCondition('statusId', 'not-equals', 'CeCancelled', true)).orderBy('-entryDate').limit(fetch)
                 if (before) find = find.condition(cf.makeCondition('entryDate', 'less', before))
                 for (const value of find.list()) {
                     const commEvent = value.getMap()
                     const kind = commEvent.communicationEventTypeId === 'Comment' ? 'note' : 'message'
                     if (!wants(kind)) continue
                     entries.push({kind: kind, date: commEvent.entryDate ?? commEvent.datetimeStarted ?? commEvent.lastUpdatedStamp,
-                        authorPartyId: commEvent.fromPartyId ?? null, authorUserId: null, title: commEvent.subject ?? null,
+                        entryKey: `ce:${commEvent.communicationEventId}`, authorPartyId: commEvent.fromPartyId ?? null, authorUserId: null,
+                        title: commEvent.subject ?? null,
                         body: commEvent.body ?? null, contentType: commEvent.contentType ?? null, statusId: commEvent.statusId ?? null,
                         source: 'mantle.party.communication.CommunicationEvent', communicationEventId: commEvent.communicationEventId,
                         communicationEventTypeId: commEvent.communicationEventTypeId, fromPartyId: commEvent.fromPartyId ?? null,
@@ -2170,11 +2406,12 @@ along with this software (see the LICENSE.md file). If not, see
             // notes: the record's *Note rows
             if (wants('note') && info.noteEntity) runSource('notes', () => {
                 let find = ec.entity.find(info.noteEntity.entityName).condition(info.noteEntity.keyField, recordId)
-                        .orderBy('-noteDate').limit(need)
+                        .orderBy('-noteDate').limit(fetch)
                 if (before) find = find.condition(cf.makeCondition('noteDate', 'less', before))
                 for (const value of find.list()) {
                     const note = value.getMap()
-                    entries.push({kind: 'note', date: note.noteDate, authorPartyId: null, authorUserId: note.userId ?? null,
+                    entries.push({kind: 'note', date: note.noteDate, entryKey: `note:${toMillis(note.noteDate)}`, authorPartyId: null,
+                        authorUserId: note.userId ?? null,
                         title: null, body: note.noteText ?? null, contentType: 'text/plain', statusId: null,
                         source: info.noteEntity.entityName, noteDate: note.noteDate, internalNote: note.internalNote ?? null})
                 }
@@ -2201,8 +2438,9 @@ along with this software (see the LICENSE.md file). If not, see
                     if (activity.statusId === 'WeComplete' || activity.statusId === 'WeClosed') {
                         const date = activity.actualCompletionDate ?? activity.estimatedCompletionDate ?? activity.actualStartDate ??
                                 activity.estimatedStartDate ?? activity.lastUpdatedStamp
-                        if (beforeMillis != null && toMillis(date) >= beforeMillis) continue
-                        entries.push({kind: 'activity', date: date, authorPartyId: assigneePartyId, authorUserId: null,
+                        if (before && toMillis(date) >= before.getTime()) continue
+                        entries.push({kind: 'activity', date: date, entryKey: `we:${activity.workEffortId}`, authorPartyId: assigneePartyId,
+                            authorUserId: null,
                             title: activity.workEffortName ?? null, body: activity.description ?? null, contentType: null,
                             statusId: activity.statusId, source: 'mantle.work.effort.WorkEffort', workEffortId: activity.workEffortId,
                             purposeEnumId: activity.purposeEnumId})
@@ -2224,7 +2462,7 @@ along with this software (see the LICENSE.md file). If not, see
             if (wants('change')) runSource('auditLog', () => {
                 let find = ec.entity.find('moqui.entity.EntityAuditLog').condition('changedEntityName', recordEntityName)
                         .condition('pkPrimaryValue', recordId).condition(cf.makeCondition('pkSecondaryValue', 'is-null', null))
-                        .orderBy('-changedDate').limit(need).disableAuthz()
+                        .orderBy('-changedDate').limit(fetch).disableAuthz()
                 if (before) find = find.condition(cf.makeCondition('changedDate', 'less', before))
                 const statusDescription = (statusId) => {
                     if (!statusId) return null
@@ -2236,7 +2474,8 @@ along with this software (see the LICENSE.md file). If not, see
                     const isStatus = /statusId$/i.test(change.changedFieldName || '')
                     const oldDescription = isStatus ? statusDescription(change.oldValueText) : null
                     const newDescription = isStatus ? statusDescription(change.newValueText) : null
-                    entries.push({kind: 'change', date: change.changedDate, authorPartyId: null, authorUserId: change.changedByUserId ?? null,
+                    entries.push({kind: 'change', date: change.changedDate, entryKey: `audit:${change.auditHistorySeqId}`, authorPartyId: null,
+                        authorUserId: change.changedByUserId ?? null,
                         title: change.changedFieldName, body: `${oldDescription ?? change.oldValueText ?? ''} → ${newDescription ?? change.newValueText ?? ''}`,
                         contentType: 'text/plain', statusId: null, source: 'moqui.entity.EntityAuditLog',
                         auditHistorySeqId: change.auditHistorySeqId, fieldName: change.changedFieldName, oldValue: change.oldValueText ?? null,
@@ -2249,12 +2488,13 @@ along with this software (see the LICENSE.md file). If not, see
             if (wants('file') && info.contentEntity) runSource('content', () => {
                 const contentInfo = info.contentEntity
                 let find = ec.entity.find(contentInfo.entityName).condition(contentInfo.keyField, recordId)
-                        .orderBy('-' + contentInfo.dateField).limit(need)
+                        .orderBy('-' + contentInfo.dateField).limit(fetch)
                 if (before) find = find.condition(cf.makeCondition(contentInfo.dateField, 'less', before))
                 for (const value of find.list()) {
                     const row = value.getMap()
                     const location = row.contentLocation ? String(row.contentLocation) : ''
-                    entries.push({kind: 'file', date: row[contentInfo.dateField], authorPartyId: null, authorUserId: row.userId ?? null,
+                    entries.push({kind: 'file', date: row[contentInfo.dateField], entryKey: `file:${Object.values(value.getPrimaryKeys()).join('/')}`,
+                        authorPartyId: null, authorUserId: row.userId ?? null,
                         title: location ? location.substring(location.lastIndexOf('/') + 1) : null, body: row.description ?? null,
                         contentType: null, statusId: null, source: contentInfo.entityName, contentKey: value.getPrimaryKeys(),
                         contentLocation: row.contentLocation ?? null, contentTypeEnumId: row[contentInfo.typeField] ?? null})
@@ -2266,21 +2506,36 @@ along with this software (see the LICENSE.md file). If not, see
                     .useCache(true).list()
             for (const register of registered) runSource(register.serviceRegisterId, () => {
                 const out = callSource(register.serviceName, {recordEntityName: recordEntityName, recordId: recordId,
-                    kinds: Array.from(wanted), beforeDate: before, limit: need})
+                    kinds: Array.from(wanted), beforeDate: before, limit: fetch})
                 if (ec.message.hasError()) return
                 for (const entry of (out?.entryList ?? [])) {
                     const kind = kindNames[entry.kind] || entry.kind
                     if (!wants(kind)) continue
-                    if (beforeMillis != null && toMillis(entry.date) >= beforeMillis) continue
-                    entries.push(Object.assign({source: register.serviceName}, entry, {kind: kind}))
+                    if (before && toMillis(entry.date) >= before.getTime()) continue
+                    const ownKey = entry.entryKey ?? entry.id ?? `${toMillis(entry.date)}:${entry.title ?? ''}`
+                    entries.push(Object.assign({source: register.serviceName}, entry,
+                            {kind: kind, entryKey: `${register.serviceRegisterId}:${ownKey}`}))
                 }
             })
 
-            // the union, newest first, and the page
+            // the union after the cursor, newest first (by entryKey within a date), and the page
             const dateOf = (entry) => toMillis(entry.date) ?? 0
-            entries.sort((left, right) => dateOf(right) - dateOf(left))
-            hasMore = entries.length > start + pageSize
-            const page = entries.slice(start, start + pageSize)
+            const after = beforeMillis == null ? entries : entries.filter((entry) => {
+                const millis = dateOf(entry)
+                return millis < beforeMillis || (inclusive && millis === beforeMillis && !seen.has(entry.entryKey))
+            })
+            after.sort((left, right) => dateOf(right) - dateOf(left)
+                    || (left.entryKey < right.entryKey ? 1 : left.entryKey > right.entryKey ? -1 : 0))
+            hasMore = after.length > start + pageSize
+            const page = after.slice(start, start + pageSize)
+            // the next page's cursor: the last entry's date and the keys shown so far of that date
+            if (page.length) {
+                const lastMillis = dateOf(page[page.length - 1])
+                nextBeforeDate = new Date(lastMillis)
+                nextSeenKeys = after.slice(0, start + pageSize).filter((entry) => dateOf(entry) === lastMillis)
+                        .map((entry) => entry.entryKey)
+                if (inclusive && lastMillis === beforeMillis) for (const key of seen) if (!nextSeenKeys.includes(key)) nextSeenKeys.push(key)
+            }
             for (const entry of page) entry.date = entry.date == null ? null : new Date(dateOf(entry))
 
             // the attachments of the messages and notes shown
