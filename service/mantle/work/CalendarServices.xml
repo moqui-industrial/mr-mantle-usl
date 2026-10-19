@@ -668,8 +668,8 @@ along with this software (see the LICENSE.md file). If not, see
         ]]></script></actions>
     </service>
     <service verb="fetch" noun="CalendarSubscription" authenticate="anonymous-all">
-        <description>One subscription of the fetch job: GET its URL (webcal as https), parse it with the ICalendar tool,
-            store its events and set lastFetchDate and lastFetchStatus ok. Errors are the caller's to record.</description>
+        <description>One subscription of the fetch job: GET its URL (webcal as https) and read what it answered with
+            store#CalendarFeedText. Errors are the caller's to record.</description>
         <in-parameters><parameter name="calendarId" required="true"/></in-parameters>
         <out-parameters>
             <parameter name="createdCount" type="Integer"/>
@@ -684,12 +684,40 @@ along with this software (see the LICENSE.md file). If not, see
             const response = ec.service.rest().method('GET').uri(uri).contentType('text/calendar').timeout(60).call()
             const status = response.getStatusCode()
             if (status < 200 || status >= 300) { ec.message.addError(`The feed answered ${status} ${response.getReasonPhrase() || ''}`.trim()); return }
-            const parsed = ec.factory.getTool('ICalendar').parse(response.text())
+            const feedText = response.text()
+            if (!feedText || !String(feedText).trim()) { ec.message.addError('The feed answered with no calendar'); return }
+            const stored = ec.service.sync().name('mantle.work.CalendarServices.store#CalendarFeedText')
+                    .parameters({calendarId: calendarId, feedText: feedText}).call()
+            if (ec.message.hasError()) return
+            createdCount = stored.createdCount; updatedCount = stored.updatedCount; removedCount = stored.removedCount
+        ]]></script></actions>
+    </service>
+    <service verb="store" noun="CalendarFeedText">
+        <description>A subscription's feed as its URL answered it: parsed by the ICalendar tool (parse), its events written
+            into the subscription's calendar (store#CalendarFeedEvents with replaceAll), and lastFetchDate and
+            lastFetchStatus set (error, with lastFetchError, when some events were not read). fetch#CalendarSubscription
+            calls it with the body of its GET.</description>
+        <in-parameters>
+            <parameter name="calendarId" required="true"/>
+            <parameter name="feedText" required="true" allow-html="any"><description>The iCalendar text of the feed</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="createdCount" type="Integer"/>
+            <parameter name="updatedCount" type="Integer"/>
+            <parameter name="removedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const subscription = ec.entity.find('mantle.work.calendar.CalendarSubscription').condition('calendarId', calendarId).one()
+            if (subscription == null) { ec.message.addError(`Calendar subscription ${calendarId} not found`); return }
+            if (ec.factory.getToolFactory('ICalendar') == null) { ec.message.addError('The ICalendar tool is not available'); return }
+            const parsed = ec.factory.getTool('ICalendar').parse(String(feedText))
             const events = Array.from(parsed?.events || [])
             const stored = ec.service.sync().name('mantle.work.CalendarServices.store#CalendarFeedEvents')
                     .parameters({calendarId: calendarId, eventList: events, replaceAll: true}).call()
             if (ec.message.hasError()) return
             createdCount = stored.createdCount; updatedCount = stored.updatedCount; removedCount = stored.removedCount
+            failedCount = stored.failedCount
             subscription.set('lastFetchDate', ec.user.nowTimestamp)
             subscription.set('lastFetchStatus', stored.failedCount ? 'error' : 'ok')
             subscription.set('lastFetchError', stored.failedCount ? `${stored.failedCount} of ${events.length} events not read` : null)
@@ -839,10 +867,10 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="export" noun="Calendar">
         <description>The events of a calendar (view permission; not the cancelled ones) as an iCalendar file, written by the
             framework's ICalendar tool (write, method PUBLISH) from the event maps of
-            mantle.work.EventServices.get#EventIcsMaps; an error until the tool exists.</description>
+            mantle.work.EventServices.get#EventIcsMaps; an error when the tool is turned off.</description>
         <in-parameters><parameter name="calendarId" required="true"/></in-parameters>
         <out-parameters>
-            <parameter name="fileText"/>
+            <parameter name="fileText" allow-html="any"><description>The file's text, parsed by the framework tool, never shown as HTML; real vCard and ICS files hold &lt; (Apple labels, HTML descriptions)</description></parameter>
             <parameter name="fileName"/>
             <parameter name="contentType"/>
         </out-parameters>
@@ -866,12 +894,12 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="import" noun="Calendar">
         <description>Reads an iCalendar file into a calendar (edit permission; not a subscription calendar) through the
-            framework's ICalendar tool (parse): new UIDs become events, known ones are updated; an error until the tool
-            exists.</description>
+            framework's ICalendar tool (parse): new UIDs become events, known ones are updated; an error when the tool is
+            turned off.</description>
         <in-parameters>
             <parameter name="calendarId" required="true"/>
             <parameter name="calendarFile" type="org.apache.commons.fileupload2.core.FileItem"/>
-            <parameter name="fileText"/>
+            <parameter name="fileText" allow-html="any"><description>The file's text, parsed by the framework tool, never shown as HTML; real vCard and ICS files hold &lt; (Apple labels, HTML descriptions)</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="createdCount" type="Integer"/>

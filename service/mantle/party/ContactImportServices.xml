@@ -34,7 +34,7 @@ along with this software (see the LICENSE.md file). If not, see
         </description>
         <in-parameters>
             <parameter name="contactFile" type="org.apache.commons.fileupload2.core.FileItem"/>
-            <parameter name="fileText"/>
+            <parameter name="fileText" allow-html="any"><description>The file's text, parsed by the framework tool, never shown as HTML; real vCard and ICS files hold &lt; (Apple labels, HTML descriptions)</description></parameter>
             <parameter name="fileLocation"/>
             <parameter name="fileName"/>
             <parameter name="characterSet" default-value="UTF-8"/>
@@ -62,7 +62,7 @@ along with this software (see the LICENSE.md file). If not, see
             field it maps to and sample values, the first rows, and the row count.</description>
         <in-parameters>
             <parameter name="contactFile" type="org.apache.commons.fileupload2.core.FileItem"/>
-            <parameter name="fileText"/>
+            <parameter name="fileText" allow-html="any"><description>The file's text, parsed by the framework tool, never shown as HTML; real vCard and ICS files hold &lt; (Apple labels, HTML descriptions)</description></parameter>
             <parameter name="fileLocation"/>
             <parameter name="fileName"/>
             <parameter name="characterSet" default-value="UTF-8"/>
@@ -168,7 +168,7 @@ along with this software (see the LICENSE.md file). If not, see
         </description>
         <in-parameters>
             <parameter name="contactFile" type="org.apache.commons.fileupload2.core.FileItem"/>
-            <parameter name="fileText"/>
+            <parameter name="fileText" allow-html="any"><description>The file's text, parsed by the framework tool, never shown as HTML; real vCard and ICS files hold &lt; (Apple labels, HTML descriptions)</description></parameter>
             <parameter name="fileLocation"/>
             <parameter name="fileName"/>
             <parameter name="characterSet" default-value="UTF-8"/>
@@ -243,7 +243,7 @@ along with this software (see the LICENSE.md file). If not, see
         </description>
         <in-parameters>
             <parameter name="contactFile" type="org.apache.commons.fileupload2.core.FileItem"/>
-            <parameter name="fileText"/>
+            <parameter name="fileText" allow-html="any"><description>The file's text, parsed by the framework tool, never shown as HTML; real vCard and ICS files hold &lt; (Apple labels, HTML descriptions)</description></parameter>
             <parameter name="fileLocation"/>
             <parameter name="fileName"/>
             <parameter name="characterSet" default-value="UTF-8"/>
@@ -413,7 +413,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="format" default-value="csv"><description>csv or vcard</description></parameter>
         </in-parameters>
         <out-parameters>
-            <parameter name="fileText"/>
+            <parameter name="fileText" allow-html="any"><description>The file's text, parsed by the framework tool, never shown as HTML; real vCard and ICS files hold &lt; (Apple labels, HTML descriptions)</description></parameter>
             <parameter name="fileName"/>
             <parameter name="contentType"/>
             <parameter name="exportedCount" type="Integer"/>

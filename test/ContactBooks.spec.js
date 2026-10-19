@@ -611,7 +611,7 @@ feature("an Outlook CSV: a bad row is reported and the rest imported, a match up
     },
 })
 
-feature("the duplicate policies on a generic CSV: skip, create, and a vCard file waits for the framework tool", {
+feature("the duplicate policies on a generic CSV: skip and create", {
     when() {
         at(10)
         const csv = "Full Name,E-mail,Cell\nGina Googler,GINA.GOOGLER@example.com,\nNew Person,new.person@example.com,8015558188\n"
@@ -624,13 +624,10 @@ feature("the duplicate policies on a generic CSV: skip, create, and a vCard file
             const created = call("mantle.party.ContactImportServices.import#Contacts", { fileText: csv, duplicatePolicy: "create" })
             const ginas = ec.entity.find("mantle.party.PartyDetail").condition("firstName", "Gina").condition("lastName", "Googler")
                     .condition("privateOwnerUserId", averyUserId).count()
-            const vcard = ec.factory.getToolFactory("VCard") != null ? null
-                    : errorOf("mantle.party.ContactImportServices.parse#ContactFile", { fileText: "BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Vee\r\nEND:VCARD\r\n",
-                        fileName: "cards.vcf" })
-            return { parsed, preview, skipped, created, ginas, vcard }
+            return { parsed, preview, skipped, created, ginas }
         })
     },
-    then({ parsed, preview, skipped, created, ginas, vcard }) {
+    then({ parsed, preview, skipped, created, ginas }) {
         parsed.presetId == "generic"
         preview.rowList.map((row) => `${row.action}:${row.matchReason}`) == ["skip:email", "create:null", "skip:phone", "create:null"]
         preview.rowList[2].matchedPartyId == oliveId
@@ -644,7 +641,123 @@ feature("the duplicate policies on a generic CSV: skip, create, and a vCard file
         created.createdCount == 4
         created.skippedCount == 0
         ginas == 2
-        vcard == null || vcard.includes("vCard import is not available yet")
+    },
+})
+
+// a vCard 3.0 card with TYPE parameters, a PREF type and a folded NOTE; a 4.0 card with PREF values and Apple's item
+// labels (a standard one and a custom one); and a 4.0 card of a contact already there (Olive, by email)
+const vcf = [
+    "BEGIN:VCARD", "VERSION:3.0", "N:Cardholder;Vera;Q.;Ms.;", "FN:Ms. Vera Q. Cardholder", "ORG:Cardholder Studio;Design", "TITLE:Art Director",
+    "EMAIL;TYPE=INTERNET,WORK:vera@cardholder-studio.example.com", "EMAIL;TYPE=INTERNET,HOME,PREF:vera.cardholder@example.com",
+    "TEL;TYPE=CELL,VOICE:+1 801 555 8201", "TEL;TYPE=WORK,FAX:(801) 555-8202", "ADR;TYPE=HOME:;;42 Juniper Lane;Ogden;UT;84401;United States",
+    "BDAY:1990-02-03", "NOTE:Met at the print expo\\, prefers email over phone calls on weekday", " s and evenings",
+    "CATEGORIES:Clients,Designers", "END:VCARD",
+    "BEGIN:VCARD", "VERSION:4.0", "UID:urn:uuid:5f0c2b1e-8d3a-4e6f-9b7c-1a2d3e4f5a6b", "FN:Wade Cardholder", "N:Cardholder;Wade;;;",
+    "EMAIL;TYPE=work;PREF=2:wade@cardholder-studio.example.com", "EMAIL;TYPE=home;PREF=1:wade.cardholder@example.com",
+    "item1.TEL:+1-801-555-8203", "item1.X-ABLabel:_$!<Mobile>!$_", "item2.TEL;VALUE=uri:tel:+1-801-555-8204", "item2.X-ABLabel:Studio",
+    "item3.ADR:;;9 Canyon Rd;Park City;UT;84060;USA", "item3.X-ABLabel:_$!<Work>!$_", "CATEGORIES:Designers", "END:VCARD",
+    "BEGIN:VCARD", "VERSION:4.0", "FN:Olive Outlooker", "N:Outlooker;Olive;;;", "EMAIL;PREF=1:olive.outlooker@example.com",
+    "EMAIL;TYPE=work:olive@contoso-labs.example.com", "END:VCARD",
+].join("\r\n") + "\r\n"
+let cardsBookId
+
+feature("a vCard file: 3.0 and 4.0 cards previewed and imported into a book as personal contacts, a known one updated, and the book's vCard export reads back", {
+    when() {
+        at(11.5)
+        return as("cbk.avery", () => {
+            cardsBookId = call("mantle.party.ContactBookServices.create#ContactBook", { contactBookName: "Cards" }).contactBookId
+            // as an upload, as a screen sends it (the Apple labels have a < that a text parameter refuses)
+            const file = () => uploadedFile("cards.vcf", vcf, "text/vcard")
+            const parsed = call("mantle.party.ContactImportServices.parse#ContactFile", { contactFile: file() })
+            const preview = call("mantle.party.ContactImportServices.preview#Contacts", { contactFile: file(), duplicatePolicy: "update" })
+            const imported = call("mantle.party.ContactImportServices.import#Contacts", { contactFile: file(), contactBookId: cardsBookId,
+                    duplicatePolicy: "update" })
+            const idOf = (rowNumber) => imported.resultList.find((row) => row.rowNumber === rowNumber).partyId
+            const [veraId, wadeId] = [idOf(1), idOf(2)]
+            const person = (partyId) => ec.entity.find("mantle.party.PartyDetail").condition("partyId", partyId).one()
+            const emails = (partyId) => Array.from(ec.entity.find("mantle.party.contact.PartyContactMechInfo").condition("partyId", partyId)
+                    .condition("contactMechTypeEnumId", "CmtEmailAddress").list()).map((row) => `${row.infoString}:${row.contactMechPurposeId}`).sort()
+            const phones = (partyId) => Array.from(ec.entity.find("mantle.party.contact.PartyContactMechTelecomNumber").condition("partyId", partyId)
+                    .list()).map((tn) => `${tn.countryCode}-${tn.areaCode}-${tn.contactNumber}:${tn.contactMechPurposeId}`).sort()
+            const address = (partyId) => ec.entity.find("mantle.party.contact.PartyContactMechPostalAddress").condition("partyId", partyId).one()
+            const veraOrg = ec.entity.find("mantle.party.PartyRelationship").condition("fromPartyId", veraId).condition("relationshipTypeEnumId", "PrtContact").one()
+            const listed = members(cardsBookId).contactList
+            const groups = Array.from(ec.entity.find("mantle.party.contact.ContactBookGroup").condition("contactBookId", cardsBookId)
+                    .orderBy("groupName").list()).map((group) => group.groupName)
+            const result = { parsed, preview, imported, veraId, wadeId, vera: person(veraId), wade: person(wadeId), veraEmails: emails(veraId),
+                wadeEmails: emails(wadeId), oliveEmails: emails(oliveId), veraPhones: phones(veraId), wadePhones: phones(wadeId),
+                veraAddress: address(veraId), wadeAddress: address(wadeId), veraOrg, veraOrgName: person(veraOrg?.toPartyId)?.organizationName,
+                listed, groups }
+            // the book as vCard 4.0, read back by the tool, and an import preview of it finds every contact again
+            result.exported = call("mantle.party.ContactImportServices.export#Contacts", { contactBookId: cardsBookId, format: "vcard" })
+            result.cards = Array.from(ec.factory.getTool("VCard").parse(result.exported.fileText))
+            result.again = call("mantle.party.ContactImportServices.preview#Contacts", { contactFile: uploadedFile("Cards.vcf", result.exported.fileText,
+                    "text/vcard") })
+            return result
+        })
+    },
+    then({ parsed, preview, imported, veraId, wadeId, vera, wade, veraEmails, wadeEmails, oliveEmails, veraPhones, wadePhones, veraAddress,
+            wadeAddress, veraOrg, veraOrgName, listed, groups, exported, cards, again }) {
+        parsed.fileKind == "vcard"
+        parsed.presetId == "vcard"
+        parsed.rowCount == 3
+        parsed.columnMapping["email1.label"] == "email1.label"
+        parsed.columnMapping["address1.city"] == "address1.city"
+        parsed.sampleRowList[0]["email2.label"] == "* Home"
+        parsed.sampleRowList[1]["phone1.label"] == "Mobile"
+        parsed.sampleRowList[1]["phone2.label"] == "Studio"
+        preview.rowList.map((row) => `${row.action}:${row.matchReason}`) == ["create:null", "create:null", "update:email"]
+        preview.rowList[2].matchedPartyId == oliveId
+        imported.contactBookId == cardsBookId
+        imported.createdCount == 2
+        imported.updatedCount == 1
+        imported.failedCount == 0
+        imported.resultList[2].partyId == oliveId
+        // names, with the folded NOTE joined
+        ;[vera.firstName, vera.middleName, vera.lastName, vera.personalTitle] == ["Vera", "Q.", "Cardholder", "Ms."]
+        vera.privateOwnerUserId == averyUserId
+        dayOf(vera.birthDate) == "1990-02-03"
+        vera.comments == "Met at the print expo, prefers email over phone calls on weekdays and evenings"
+        ;[wade.firstName, wade.lastName, wade.privateOwnerUserId] == ["Wade", "Cardholder", averyUserId]
+        // the preferred email is the primary one: TYPE=PREF in 3.0, PREF=1 in 4.0
+        veraEmails == ["vera.cardholder@example.com:EmailPrimary", "vera@cardholder-studio.example.com:EmailOther"]
+        wadeEmails == ["wade.cardholder@example.com:EmailPrimary", "wade@cardholder-studio.example.com:EmailOther"]
+        // the duplicate policy update adds Olive's new work address
+        oliveEmails == ["olive.outlooker@example.com:EmailPrimary", "olive@contoso-labs.example.com:EmailOther"]
+        veraPhones == ["1-801-555-8201:PhoneMobile", "1-801-555-8202:PhoneFax"]
+        // Apple's _$!<Mobile>!$_ is Mobile; its custom label Studio is another phone
+        wadePhones == ["1-801-555-8203:PhoneMobile", "1-801-555-8204:Other"]
+        veraAddress.address1 == "42 Juniper Lane"
+        veraAddress.city == "Ogden"
+        veraAddress.postalCode == "84401"
+        veraAddress.stateProvinceGeoId == "USA_UT"
+        veraAddress.countryGeoId == "USA"
+        veraAddress.contactMechPurposeId == "PostalHome"
+        wadeAddress.city == "Park City"
+        wadeAddress.contactMechPurposeId == "PostalWork"
+        veraOrgName == "Cardholder Studio"
+        veraOrg.relationshipName == "Art Director, Design"
+        // the cards' CATEGORIES are groups of the book
+        groups == ["Clients", "Designers"]
+        listed.length == 3
+        listed.find((contact) => contact.partyId === veraId).groupList.map((group) => group.groupName).sort() == ["Clients", "Designers"]
+        listed.find((contact) => contact.partyId === wadeId).groupList.map((group) => group.groupName) == ["Designers"]
+        listed.find((contact) => contact.partyId === oliveId).groupList.length == 0
+        exported.contentType == "text/vcard"
+        exported.fileName == "Cards.vcf"
+        exported.exportedCount == 3
+        exported.fileText.startsWith("BEGIN:VCARD\r\nVERSION:4.0\r\n")
+        cards.length == 3
+        cards.find((card) => card.firstName === "Vera").lastName == "Cardholder"
+        cards.find((card) => card.firstName === "Vera").email1 == "vera.cardholder@example.com"
+        cards.find((card) => card.firstName === "Vera").email2 == "vera@cardholder-studio.example.com"
+        cards.find((card) => card.firstName === "Vera")["address1.city"] == "Ogden"
+        cards.find((card) => card.firstName === "Vera").birthday == "1990-02-03"
+        cards.find((card) => card.firstName === "Vera").notes == "Met at the print expo, prefers email over phone calls on weekdays and evenings"
+        cards.find((card) => card.firstName === "Vera").groups.split(", ").sort() == ["Clients", "Designers"]
+        cards.find((card) => card.firstName === "Wade").email1 == "wade.cardholder@example.com"
+        again.rowList.map((row) => `${row.action}:${row.matchReason}`) == ["skip:email", "skip:email", "skip:email"]
+        again.rowList.map((row) => row.matchedPartyId).sort() == [veraId, wadeId, oliveId].sort()
     },
 })
 
