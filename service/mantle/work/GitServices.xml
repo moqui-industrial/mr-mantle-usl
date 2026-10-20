@@ -1,0 +1,468 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Git repositories of projects, and their commits, branches and tags on tasks (MR Moqui, no Java counterpart). The
+    repositories are the framework's moqui.resource.GitRepository, served over HTTPS and SSH; the rules that call the
+    link services on each push or mirror fetch are service/Work.gitecas.xml. Conventions, in a repository linked to a
+    project:
+    - a task ID of the project as a word of a commit message (PROJ-100023), or a "Task: <workEffortId>" trailer for
+      any task, links the commit; "Fixes PROJ-100023" (also Closes, Resolves) completes the task when the commit
+      reaches the default branch
+    - a branch named PROJ-100023 or PROJ-100023-some-words links the branch to the task
+    - a tag named <workEffortId> or <workEffortId>/<anything> (PROJ/v1.2.0, PROJ-100023/review) links the tag to that
+      project, milestone or task; an annotated tag's message is read for task IDs as a commit's is
+    The guide is docs/Git-Hosting.md of mr-moqui. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- ========== Projects and repositories ========== -->
+
+    <service verb="add" noun="ProjectRepository">
+        <description>Link a git repository to a project.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="repositoryId" required="true"/>
+        </in-parameters>
+        <actions>
+            <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="project"/>
+            <if condition="project?.workEffortTypeEnumId != 'WetProject'">
+                <return error="true" message="Project ${workEffortId} not found"/></if>
+            <entity-find-one entity-name="moqui.resource.GitRepository" value-field="repository"/>
+            <if condition="repository == null"><return error="true" message="Git repository ${repositoryId} not found"/></if>
+            <entity-find entity-name="mantle.work.effort.WorkEffortGitRepository" list="existingList">
+                <date-filter/><econdition field-name="workEffortId"/><econdition field-name="repositoryId"/></entity-find>
+            <if condition="existingList.length"><return/></if>
+            <service-call name="create#mantle.work.effort.WorkEffortGitRepository"
+                    in-map="{workEffortId:workEffortId, repositoryId:repositoryId, fromDate:ec.user.nowTimestamp}"/>
+        </actions>
+    </service>
+    <service verb="remove" noun="ProjectRepository">
+        <description>Unlink a git repository from a project (the links of its commits and refs stay).</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="repositoryId" required="true"/>
+        </in-parameters>
+        <actions>
+            <entity-find entity-name="mantle.work.effort.WorkEffortGitRepository" list="linkList">
+                <date-filter/><econdition field-name="workEffortId"/><econdition field-name="repositoryId"/></entity-find>
+            <iterate list="linkList" entry="link">
+                <service-call name="update#mantle.work.effort.WorkEffortGitRepository"
+                        in-map="{workEffortId:link.workEffortId, repositoryId:link.repositoryId, fromDate:link.fromDate, thruDate:ec.user.nowTimestamp}"/>
+            </iterate>
+        </actions>
+    </service>
+    <service verb="create" noun="ProjectRepository">
+        <description>Make a git repository for a project and link it: kept on disk (local, the default for code) or
+            in the database (db). A content repository (a web site's images, documents and media) keeps images, video,
+            audio, PDFs and archives in Git LFS.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="repositoryId"><description>The project ID in lower case when empty</description></parameter>
+            <parameter name="repositoryKind" default-value="local"><description>local or db</description></parameter>
+            <parameter name="description"/>
+            <parameter name="branch" default-value="main"/>
+            <parameter name="contentRepository" type="Boolean" default-value="false"/>
+        </in-parameters>
+        <out-parameters><parameter name="repositoryId"/></out-parameters>
+        <actions>
+            <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="project"/>
+            <if condition="project?.workEffortTypeEnumId != 'WetProject'">
+                <return error="true" message="Project ${workEffortId} not found"/></if>
+            <if condition="!repositoryId"><set field="repositoryId" from="workEffortId.toLowerCase()"/></if>
+            <if condition="!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(repositoryId) || repositoryId.endsWith('.git')">
+                <return error="true" message="A repository ID has letters, digits, '_', '.' and '-', and does not end in .git"/></if>
+            <if condition="!['local', 'db'].includes(repositoryKind)">
+                <return error="true" message="A project repository is local or db"/></if>
+            <entity-find-one entity-name="moqui.resource.GitRepository" value-field="existing"/>
+            <if condition="existing != null"><return error="true" message="Git repository ${repositoryId} already exists"/></if>
+            <service-call name="create#moqui.resource.GitRepository" in-map="{repositoryId:repositoryId,
+                    repositoryKind:repositoryKind, branch:branch, description:description || project.workEffortName}"/>
+            <service-call name="org.moqui.impl.GitServices.init#GitRepository"
+                    in-map="{repositoryId:repositoryId, contentRepository:contentRepository}"/>
+            <service-call name="mantle.work.GitServices.add#ProjectRepository"
+                    in-map="{workEffortId:workEffortId, repositoryId:repositoryId}"/>
+        </actions>
+    </service>
+    <service verb="get" noun="RepositoryProjects">
+        <description>The projects a git repository is linked to now.</description>
+        <in-parameters><parameter name="repositoryId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="projectIdList" type="List"/>
+            <parameter name="linkList" type="List"/>
+        </out-parameters>
+        <actions>
+            <entity-find entity-name="mantle.work.effort.WorkEffortGitRepository" list="linkList">
+                <date-filter/><econdition field-name="repositoryId"/></entity-find>
+            <set field="projectIdList" from="linkList.map(link => link.workEffortId)"/>
+        </actions>
+    </service>
+
+    <!-- ========== Task references ========== -->
+
+    <service verb="find" noun="TaskReferences">
+        <description>The tasks a text names: a word that is the ID of a task of a project linked to the repository
+            (PROJ-100023), and each Task trailer value (an ID of any task). A word right after Fix, Fixes, Fixed,
+            Close, Closes, Closed, Resolve, Resolves or Resolved (any case) marks its task to complete. At most 50
+            candidate words are read.</description>
+        <in-parameters>
+            <parameter name="repositoryId" required="true"/>
+            <parameter name="text"/>
+            <parameter name="trailerValues" type="List"><description>The values of the Task trailers</description></parameter>
+            <parameter name="projectIdList" type="List"><description>The linked projects, when the caller has them</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="referenceList" type="List"><description>Maps: workEffortId, rootWorkEffortId,
+                linkSourceEnumId (WglsMessage or WglsTrailer), complete (Boolean)</description></parameter>
+        </out-parameters>
+        <actions>
+            <if condition="projectIdList == null">
+                <service-call name="mantle.work.GitServices.get#RepositoryProjects" in-map="{repositoryId:repositoryId}"
+                        out-map="projectOut"/>
+                <set field="projectIdList" from="projectOut.projectIdList"/>
+            </if>
+            <script><![CDATA[
+                const prefixes = new Set(projectIdList ?? [])
+                const keywords = /^(fix|fixes|fixed|close|closes|closed|resolve|resolves|resolved)$/i
+                const fromText = new Map()
+                const word = /[A-Za-z0-9][A-Za-z0-9_-]*/g
+                let match
+                let previous = null
+                let candidates = 0
+                while ((match = word.exec(text ?? '')) !== null && candidates < 50) {
+                    const token = match[0].replace(/[-_]+$/, '')
+                    const dash = token.indexOf('-')
+                    if (dash > 0 && prefixes.has(token.substring(0, dash))) {
+                        candidates++
+                        const complete = previous != null && keywords.test(previous)
+                        fromText.set(token, (fromText.get(token) ?? false) || complete)
+                    }
+                    previous = token
+                }
+                const fromTrailers = new Set()
+                for (const value of trailerValues ?? []) {
+                    for (const id of String(value).split(/[\s,]+/)) {
+                        if (id) fromTrailers.add(id)
+                    }
+                }
+                textIds = Array.from(fromText.keys())
+                trailerIds = Array.from(fromTrailers)
+                completeIds = Array.from(fromText.entries()).filter(([, complete]) => complete).map(([id]) => id)
+            ]]></script>
+            <set field="referenceList" from="[]"/>
+            <if condition="textIds.length">
+                <entity-find entity-name="mantle.work.effort.WorkEffort" list="textTaskList">
+                    <econdition field-name="workEffortId" operator="in" from="textIds"/>
+                    <econdition field-name="rootWorkEffortId" operator="in" from="projectIdList"/>
+                    <econdition field-name="workEffortTypeEnumId" value="WetTask"/>
+                    <select-field field-name="workEffortId,rootWorkEffortId"/>
+                </entity-find>
+                <iterate list="textTaskList" entry="task">
+                    <!-- a trailer is the explicit form, so it names the source when the text has the ID too -->
+                    <script>referenceList.push({workEffortId:task.workEffortId, rootWorkEffortId:task.rootWorkEffortId,
+                        linkSourceEnumId:trailerIds.includes(task.workEffortId) ? 'WglsTrailer' : 'WglsMessage',
+                        complete:completeIds.includes(task.workEffortId)})</script>
+                </iterate>
+            </if>
+            <if condition="trailerIds.length">
+                <entity-find entity-name="mantle.work.effort.WorkEffort" list="trailerTaskList">
+                    <econdition field-name="workEffortId" operator="in" from="trailerIds"/>
+                    <econdition field-name="workEffortTypeEnumId" value="WetTask"/>
+                    <select-field field-name="workEffortId,rootWorkEffortId"/>
+                </entity-find>
+                <iterate list="trailerTaskList" entry="task">
+                    <if condition="!referenceList.some(ref => ref.workEffortId == task.workEffortId)">
+                        <script>referenceList.push({workEffortId:task.workEffortId, rootWorkEffortId:task.rootWorkEffortId,
+                            linkSourceEnumId:'WglsTrailer', complete:false})</script>
+                    </if>
+                </iterate>
+            </if>
+        </actions>
+    </service>
+
+    <!-- ========== Commits on tasks ========== -->
+
+    <service verb="store" noun="TaskCommit">
+        <description>Link a commit (a map as org.moqui.impl.GitServices.get#GitCommit gives it) to a work effort,
+            unless it is linked already.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="repositoryId" required="true"/>
+            <parameter name="commit" type="Map" required="true"/>
+            <parameter name="refName"/>
+            <parameter name="linkSourceEnumId" default-value="WglsExplicit"/>
+        </in-parameters>
+        <out-parameters><parameter name="created" type="Boolean"/></out-parameters>
+        <actions>
+            <entity-find-one entity-name="mantle.work.effort.WorkEffortGitCommit" value-field="existing">
+                <field-map field-name="workEffortId"/><field-map field-name="repositoryId"/>
+                <field-map field-name="commitId" from="commit.commitId"/></entity-find-one>
+            <if condition="existing != null"><set field="created" from="false"/><return/></if>
+            <service-call name="create#mantle.work.effort.WorkEffortGitCommit" in-map="{workEffortId:workEffortId,
+                    repositoryId:repositoryId, commitId:commit.commitId, summary:(commit.summary ?? '').substring(0, 255),
+                    authorName:commit.authorName, authorEmail:commit.authorEmail, commitDate:commit.committerDate,
+                    refName:refName, linkSourceEnumId:linkSourceEnumId, linkedByUserId:ec.user.userId,
+                    linkedDate:ec.user.nowTimestamp}"/>
+            <set field="created" from="true"/>
+        </actions>
+    </service>
+    <service verb="add" noun="TaskCommit">
+        <description>Link a commit to a task by hand, by its ID or a prefix of at least 4 hex digits.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="repositoryId" required="true"/>
+            <parameter name="commitId" required="true"/>
+        </in-parameters>
+        <actions>
+            <service-call name="org.moqui.impl.GitServices.get#GitCommit" out-map="found"
+                    in-map="{repositoryId:repositoryId, commitId:commitId.trim(), stats:false}"/>
+            <if condition="!found.commit"><return error="true" message="No commit ${commitId} in repository ${repositoryId}"/></if>
+            <service-call name="mantle.work.GitServices.store#TaskCommit" in-map="{workEffortId:workEffortId,
+                    repositoryId:repositoryId, commit:found.commit, linkSourceEnumId:'WglsExplicit'}"/>
+        </actions>
+    </service>
+    <service verb="remove" noun="TaskCommit">
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="repositoryId" required="true"/>
+            <parameter name="commitId" required="true"/>
+        </in-parameters>
+        <actions>
+            <service-call name="delete#mantle.work.effort.WorkEffortGitCommit" in-map="context"/>
+        </actions>
+    </service>
+    <service verb="link" noun="CommitReferences">
+        <description>For the commit gitECA event: link the commit to each task its message names.</description>
+        <implements service="org.moqui.GitServices.process#GitEca"/>
+        <actions>
+            <set field="trailerValues" from="commit?.trailers?.Task ?? []"/>
+            <service-call name="mantle.work.GitServices.get#RepositoryProjects" in-map="{repositoryId:repositoryId}"
+                    out-map="projectOut"/>
+            <if condition="!projectOut.projectIdList.length &amp;&amp; !trailerValues.length"><return/></if>
+            <service-call name="mantle.work.GitServices.find#TaskReferences" out-map="refOut"
+                    in-map="{repositoryId:repositoryId, text:commit.message, trailerValues:trailerValues,
+                        projectIdList:projectOut.projectIdList}"/>
+            <iterate list="refOut.referenceList" entry="reference">
+                <service-call name="mantle.work.GitServices.store#TaskCommit" in-map="{workEffortId:reference.workEffortId,
+                        repositoryId:repositoryId, commit:commit, refName:refName, linkSourceEnumId:reference.linkSourceEnumId}"/>
+            </iterate>
+        </actions>
+    </service>
+
+    <!-- ========== Branches and tags on work efforts ========== -->
+
+    <service verb="store" noun="WorkEffortRef">
+        <description>Link a branch or tag to a work effort, or renew a link a deleted ref ended.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="repositoryId" required="true"/>
+            <parameter name="refName" required="true"/>
+            <parameter name="objectId"/>
+            <parameter name="linkSourceEnumId" default-value="WglsExplicit"/>
+        </in-parameters>
+        <actions>
+            <set field="refType" from="refName.startsWith('refs/tags/') ? 'tag' : 'branch'"/>
+            <entity-find-one entity-name="mantle.work.effort.WorkEffortGitRef" value-field="existing">
+                <field-map field-name="workEffortId"/><field-map field-name="repositoryId"/><field-map field-name="refName"/></entity-find-one>
+            <if condition="existing != null">
+                <service-call name="update#mantle.work.effort.WorkEffortGitRef" in-map="{workEffortId:workEffortId,
+                        repositoryId:repositoryId, refName:refName, objectId:objectId ?? existing.objectId, thruDate:null}"/>
+                <return/>
+            </if>
+            <service-call name="create#mantle.work.effort.WorkEffortGitRef" in-map="{workEffortId:workEffortId,
+                    repositoryId:repositoryId, refName:refName, refType:refType, objectId:objectId,
+                    linkSourceEnumId:linkSourceEnumId, linkedByUserId:ec.user.userId, linkedDate:ec.user.nowTimestamp}"/>
+        </actions>
+    </service>
+    <service verb="add" noun="WorkEffortRef">
+        <description>Link a branch or tag to a work effort by hand: a full ref name, or a branch or tag name.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="repositoryId" required="true"/>
+            <parameter name="refName" required="true"/>
+        </in-parameters>
+        <actions>
+            <service-call name="org.moqui.impl.GitServices.get#GitRefs" in-map="{repositoryId:repositoryId}" out-map="refsOut"/>
+            <set field="found" from="(refsOut.refList ?? []).find(ref => ref.refName == refName.trim() || ref.shortName == refName.trim())"/>
+            <if condition="!found"><return error="true" message="No branch or tag ${refName} in repository ${repositoryId}"/></if>
+            <service-call name="mantle.work.GitServices.store#WorkEffortRef" in-map="{workEffortId:workEffortId,
+                    repositoryId:repositoryId, refName:found.refName, objectId:found.commitId ?? found.objectId,
+                    linkSourceEnumId:'WglsExplicit'}"/>
+        </actions>
+    </service>
+    <service verb="remove" noun="WorkEffortRef">
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="repositoryId" required="true"/>
+            <parameter name="refName" required="true"/>
+        </in-parameters>
+        <actions>
+            <service-call name="delete#mantle.work.effort.WorkEffortGitRef" in-map="context"/>
+        </actions>
+    </service>
+    <service verb="link" noun="RefByName">
+        <description>For the tag event and a branch's ref-update create event: link the ref to the work efforts its
+            name names, under the projects linked to the repository. A tag: the name before its first '/' is the ID
+            of the project, a milestone or a task (PROJ/v1.0, PROJ-100023/review, or PROJ-100023 alone); an annotated
+            tag's message names tasks as a commit message does. A branch: its last path segment, or the part of it
+            before a '-', is the ID of a task (PROJ-100023, feature/PROJ-100023-login-fix).</description>
+        <implements service="org.moqui.GitServices.process#GitEca"/>
+        <actions>
+            <service-call name="mantle.work.GitServices.get#RepositoryProjects" in-map="{repositoryId:repositoryId}"
+                    out-map="projectOut"/>
+            <set field="projectIdList" from="projectOut.projectIdList"/>
+            <if condition="!projectIdList.length"><return/></if>
+            <set field="isTag" from="refName.startsWith('refs/tags/')"/>
+            <set field="objectId" from="isTag ? (tag?.commitId ?? newId) : newId"/>
+            <script><![CDATA[
+                const short = refName.replace(/^refs\/(heads|tags)\//, '')
+                if (isTag) {
+                    candidateIds = [short.split('/')[0]]
+                } else {
+                    // the last path segment, then each prefix of it that ends before a '-', longest first
+                    const segment = short.split('/').pop()
+                    candidateIds = []
+                    let end = segment.length
+                    while (end > 0) {
+                        candidateIds.push(segment.substring(0, end))
+                        end = segment.lastIndexOf('-', end - 1)
+                    }
+                }
+            ]]></script>
+            <entity-find entity-name="mantle.work.effort.WorkEffort" list="namedList">
+                <econdition field-name="workEffortId" operator="in" from="candidateIds"/>
+                <select-field field-name="workEffortId,rootWorkEffortId,workEffortTypeEnumId"/>
+            </entity-find>
+            <!-- the longest name that is a work effort here: a task for a branch; the project itself, or anything
+                under it, for a tag -->
+            <set field="named" from="candidateIds.map(id => namedList.find(we => we.workEffortId == id)).find(we => we != null
+                    &amp;&amp; (isTag ? (projectIdList.includes(we.workEffortId) || projectIdList.includes(we.rootWorkEffortId))
+                        : (we.workEffortTypeEnumId == 'WetTask' &amp;&amp; projectIdList.includes(we.rootWorkEffortId))))"/>
+            <if condition="named">
+                <service-call name="mantle.work.GitServices.store#WorkEffortRef" in-map="{workEffortId:named.workEffortId,
+                        repositoryId:repositoryId, refName:refName, objectId:objectId,
+                        linkSourceEnumId:isTag ? 'WglsTagName' : 'WglsBranchName'}"/>
+            </if>
+            <if condition="isTag &amp;&amp; tag?.annotated">
+                <service-call name="mantle.work.GitServices.find#TaskReferences" out-map="refOut"
+                        in-map="{repositoryId:repositoryId, text:tag.message, projectIdList:projectIdList}"/>
+                <iterate list="refOut.referenceList" entry="reference">
+                    <if condition="reference.workEffortId != named?.workEffortId">
+                        <service-call name="mantle.work.GitServices.store#WorkEffortRef" in-map="{workEffortId:reference.workEffortId,
+                                repositoryId:repositoryId, refName:refName, objectId:objectId, linkSourceEnumId:'WglsTagMessage'}"/>
+                    </if>
+                </iterate>
+            </if>
+        </actions>
+    </service>
+    <service verb="close" noun="RefLinks">
+        <description>For a ref-update delete event: end the links of a deleted branch or tag.</description>
+        <implements service="org.moqui.GitServices.process#GitEca"/>
+        <actions>
+            <entity-find entity-name="mantle.work.effort.WorkEffortGitRef" list="linkList">
+                <econdition field-name="repositoryId"/><econdition field-name="refName"/>
+                <econdition field-name="thruDate" operator="is-null"/></entity-find>
+            <iterate list="linkList" entry="link">
+                <service-call name="update#mantle.work.effort.WorkEffortGitRef" in-map="{workEffortId:link.workEffortId,
+                        repositoryId:link.repositoryId, refName:link.refName, thruDate:ec.user.nowTimestamp}"/>
+            </iterate>
+        </actions>
+    </service>
+
+    <!-- ========== Keywords ========== -->
+
+    <service verb="apply" noun="CommitKeywords">
+        <description>For a ref-update event of the default branch: complete (and resolve) each task a commit the branch
+            gained names after Fixes, Closes or Resolves. Only commits made after the repository was linked to the task's
+            project count, so the first fetch of a mirror does not complete tasks from old history; a task already
+            complete, closed or cancelled, or whose status flow has no way to Complete from where it is, is left.</description>
+        <implements service="org.moqui.GitServices.process#GitEca"/>
+        <actions>
+            <service-call name="mantle.work.GitServices.get#RepositoryProjects" in-map="{repositoryId:repositoryId}"
+                    out-map="projectOut"/>
+            <if condition="!projectOut.projectIdList.length"><return/></if>
+            <iterate list="newCommitIds" entry="commitId">
+                <service-call name="org.moqui.impl.GitServices.get#GitCommit" out-map="found"
+                        in-map="{repositoryId:repositoryId, commitId:commitId, stats:false}"/>
+                <if condition="!found.commit"><continue/></if>
+                <service-call name="mantle.work.GitServices.find#TaskReferences" out-map="refOut"
+                        in-map="{repositoryId:repositoryId, text:found.commit.message, projectIdList:projectOut.projectIdList}"/>
+                <iterate list="refOut.referenceList" entry="reference">
+                    <if condition="!reference.complete"><continue/></if>
+                    <set field="link" from="projectOut.linkList.find(link => link.workEffortId == reference.rootWorkEffortId)"/>
+                    <!-- a commit time has whole seconds -->
+                    <if condition="!link || Number(found.commit.committerDate) + 999 &lt; Number(link.fromDate)"><continue/></if>
+                    <service-call name="mantle.work.GitServices.complete#TaskFromCommit"
+                            in-map="{workEffortId:reference.workEffortId, commitId:commitId}"/>
+                </iterate>
+            </iterate>
+        </actions>
+    </service>
+    <service verb="complete" noun="TaskFromCommit">
+        <description>Complete and resolve a task when its status flow allows it from where it is.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="commitId"/>
+        </in-parameters>
+        <out-parameters><parameter name="completed" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="completed" from="false"/>
+            <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="task"/>
+            <if condition="task == null || ['WeComplete', 'WeClosed', 'WeCancelled'].includes(task.statusId)"><return/></if>
+            <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="project">
+                <field-map field-name="workEffortId" from="task.rootWorkEffortId"/></entity-find-one>
+            <set field="statusFlowId" from="task.statusFlowId || project?.statusFlowId || 'Default'"/>
+            <entity-find entity-name="moqui.basic.StatusFlowTransition" list="transitionList">
+                <econdition field-name="statusFlowId"/><econdition field-name="statusId" from="task.statusId"/>
+                <econdition field-name="toStatusId" value="WeComplete"/></entity-find>
+            <if condition="!transitionList.length">
+                <log level="info" message="Task ${workEffortId} named by commit ${commitId} cannot go from ${task.statusId} to WeComplete"/>
+                <return/>
+            </if>
+            <service-call name="update#mantle.work.effort.WorkEffort"
+                    in-map="{workEffortId:workEffortId, statusId:'WeComplete', resolutionEnumId:'WerCompleted'}"/>
+            <set field="completed" from="true"/>
+        </actions>
+    </service>
+
+    <!-- ========== Access ========== -->
+
+    <service verb="check" noun="GitRepositoryAuthz">
+        <description>The authzServiceName of the ALL_USERS grant on the GitRepositories artifact group: the active
+            parties of a project linked to the repository (as a UserAccount's party) may view it and push new refs and
+            fast-forwards to it (AUTHZT_ALLOW); nothing for anyone else, so other grants decide. Force pushes and ref
+            deletes (AUTHZA_DELETE) take a grant of their own.</description>
+        <in-parameters>
+            <parameter name="userId"/>
+            <parameter name="authzActionEnumId"/>
+            <parameter name="artifactTypeEnumId"/>
+            <parameter name="artifactName"/>
+        </in-parameters>
+        <out-parameters><parameter name="authzTypeEnumId"/></out-parameters>
+        <actions>
+            <set field="authzTypeEnumId" value="AUTHZT_NONE"/>
+            <if condition="!userId || !['AUTHZA_VIEW', 'AUTHZA_CREATE', 'AUTHZA_UPDATE'].includes(authzActionEnumId)"><return/></if>
+            <entity-find-one entity-name="moqui.security.UserAccount" value-field="account" cache="true">
+                <field-map field-name="userId"/></entity-find-one>
+            <if condition="!account?.partyId"><return/></if>
+            <entity-find entity-name="mantle.work.effort.WorkEffortGitRepository" list="linkList">
+                <date-filter/><econdition field-name="repositoryId" from="artifactName"/></entity-find>
+            <if condition="!linkList.length"><return/></if>
+            <entity-find entity-name="mantle.work.effort.WorkEffortParty" list="memberList" limit="1">
+                <date-filter/>
+                <econdition field-name="workEffortId" operator="in" from="linkList.map(link => link.workEffortId)"/>
+                <econdition field-name="partyId" from="account.partyId"/>
+            </entity-find>
+            <if condition="memberList.length"><set field="authzTypeEnumId" value="AUTHZT_ALLOW"/></if>
+        </actions>
+    </service>
+</services>
