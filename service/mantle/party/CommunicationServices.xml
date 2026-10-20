@@ -417,21 +417,25 @@ along with this software (see the LICENSE.md file). If not, see
             newer_than: its date; in: the view (inbox received, sent, flagged or starred, snoozed, archive, all or
             anywhere). The thread's state: is:unread, is:read, is:flagged (starred), is:snoozed, has:attachment and
             filename: (an attachment's name). A word is in the subject or body or the sender's name, a "phrase" in the
-            subject or body, and a -word in neither. What internal messages do not have matches none of them, and with a -
-            matches all: bcc:, label: (internal messages have no labels), larger: and smaller: (no size), is:answered, and an
-            in: of a mail-only view (drafts, scheduled, outbox, spam, trash) or a folder. A date or size the operator does not
-            understand is an error.
+            subject or body, and a -word in neither. label: is a label the user put on a message of the thread
+            (CommunicationEventPartyLabel, an EmailLabel of the user's Internal account; the name contains the text).
+            What internal messages do not have matches none of them, and with a - matches all: bcc:, larger: and smaller:
+            (no size), is:answered, and an in: of a mail-only view (drafts, scheduled, outbox, spam, trash) or a folder.
+            A date or size the operator does not understand is an error. With emailLabelId, only threads the user labeled
+            with that label.
 
             Paging: pageSize threads, and beforeDate, the sortDate of the last thread shown (nextBeforeDate), for the
             next page. A row is {store (internal), threadId and rootCommEventId (the root's id), lastCommEventId,
             communicationEventTypeId, subject, snippet (the last message as text), sortDate, lastDate, firstDate (epoch
             millis), messageCount, replyCount, unreadCount, isUnread, isFlagged, isArchived, snoozedThruDate, hasAttachment,
             fromPartyId (of the last message), participantPartyIdList, participantList ({partyId, name}), contactListId,
-            contactListName, isClosed}; the store and the date cursor let find#InboxThreads merge it with the framework's mail.
+            contactListName, isClosed, labelList ({emailLabelId, labelName, color})}; the store and the date cursor let
+            find#InboxThreads merge it with the framework's mail.
         </description>
         <in-parameters>
             <parameter name="view"><description>received, sent, flagged, snoozed, archived, comments or all</description></parameter>
             <parameter name="contactListId"/>
+            <parameter name="emailLabelId"><description>Only threads the user labeled with this label of the Internal account</description></parameter>
             <parameter name="unreadOnly" type="Boolean" default="false"/>
             <parameter name="needsReply" type="Boolean" default="false"/>
             <parameter name="searchText" allow-html="any"/>
@@ -462,6 +466,27 @@ along with this software (see the LICENSE.md file). If not, see
             const partyId = ec.user.userAccount?.partyId || null
             if (!partyId) { ec.message.addError('Internal messages need a user with a party'); return }
             if (!(pageSize > 0)) pageSize = 50
+            // the user's labels on messages, once: a missing EmailLabel (deleted) is left out
+            const labelByEvent = new Map()
+            const labelJoins = Array.from(ec.entity.find('mantle.party.communication.CommunicationEventPartyLabel').condition('partyId', partyId).list())
+            if (labelJoins.length) {
+                const known = {}
+                const labelIds = Array.from(new Set(labelJoins.map((row) => row.emailLabelId)))
+                for (const label of ec.entity.find('moqui.basic.email.EmailLabel').condition('emailLabelId', 'in', labelIds).list())
+                    known[label.emailLabelId] = {emailLabelId: label.emailLabelId, labelName: label.labelName ?? null, color: label.color ?? null}
+                for (const row of labelJoins) {
+                    const label = known[row.emailLabelId]
+                    if (!label) continue
+                    const list = labelByEvent.get(row.communicationEventId) || []
+                    list.push(label)
+                    labelByEvent.set(row.communicationEventId, list)
+                }
+            }
+            const labelsOf = (messages) => {
+                const byId = new Map()
+                for (const message of messages) for (const label of (labelByEvent.get(message.communicationEventId) || [])) byId.set(label.emailLabelId, label)
+                return Array.from(byId.values())
+            }
             const now = ec.user.nowTimestamp
             const nowMillis = toMillis(now)
 
@@ -580,8 +605,16 @@ along with this software (see the LICENSE.md file). If not, see
                             else if (value === 'snoozed') threadFilters.push((summary) => (summary.snoozedThruDate != null) !== negate)
                             else if (!negate) matchesNothing = true
                             break
+                        case 'label': {
+                            const needle = value.toLowerCase()
+                            const matching = new Set()
+                            for (const [eventId, list] of labelByEvent) if (list.some((label) => String(label.labelName || '').toLowerCase().includes(needle))) matching.add(eventId)
+                            threadFilters.push((summary, thread) => thread.messageList.some((message) => matching.has(message.communicationEventId)) !== negate)
+                            if (!negate && matching.size === 0) matchesNothing = true
+                            break
+                        }
                         // what internal messages do not have: none match, and all with a -
-                        case 'bcc': case 'label': case 'larger': case 'smaller':
+                        case 'bcc': case 'larger': case 'smaller':
                             if (!negate) matchesNothing = true
                             break
                         default: ec.message.addError(`${term.operator}: is not a search term`); return
@@ -599,6 +632,14 @@ along with this software (see the LICENSE.md file). If not, see
             if (!view) view = contactListId ? 'all' : 'received'
             if (!['received', 'sent', 'flagged', 'snoozed', 'archived', 'comments', 'all'].includes(view)) {
                 ec.message.addError(`Unknown view ${view}: received, sent, flagged, snoozed, archived, comments or all`); return }
+            if (emailLabelId) {
+                const accountId = ec.service.sync().name('org.moqui.impl.EmailClientServices.ensure#InternalAccount').call()?.emailAccountId
+                const label = ec.entity.find('moqui.basic.email.EmailLabel').condition('emailLabelId', emailLabelId).one()
+                if (ec.message.hasError()) return
+                if (label == null || label.emailAccountId !== accountId) { ec.message.addError(`Email label ${emailLabelId} not found`); return }
+                threadFilters.push((summary, thread) => thread.messageList.some((message) => (labelByEvent.get(message.communicationEventId) || [])
+                        .some((item) => item.emailLabelId === emailLabelId)))
+            }
             if (view === 'comments') TYPES = ['Comment']
             if (needsReply) threadFilters.push((summary, thread) => {
                 const last = thread.messageList[thread.messageList.length - 1]
@@ -683,7 +724,7 @@ along with this software (see the LICENSE.md file). If not, see
                     snoozedThruDate: snoozes.length ? Math.max.apply(null, snoozes) : null,
                     hasAttachment: messages.some((message) => message.attachmentList.length > 0), fromPartyId: last.fromPartyId ?? null,
                     participantPartyIdList: participants, participantList: [], contactListId: thread.isMailbox ? thread.contactListId : null,
-                    contactListName: thread.isMailbox ? thread.contactListName : null, isClosed: thread.isClosed}
+                    contactListName: thread.isMailbox ? thread.contactListName : null, isClosed: thread.isClosed, labelList: labelsOf(messages)}
                 return threadFilters.every((filter) => filter(summary, thread)) ? summary : null
             }
 
@@ -750,7 +791,8 @@ along with this software (see the LICENSE.md file). If not, see
             fields, its to and cc recipients, its attachments, and myState: the user's row {roleTypeId, readDate,
             isFlagged, archivedDate, snoozedThruDate}, null when the user has none (a post read through the mailbox, or a
             message the user sent). It marks nothing read; set#InternalMessageState does. canReply is false for a closed
-            thread or a mailbox the user may not post to.
+            thread or a mailbox the user may not post to. labelList is the labels this user put on any message of the
+            thread (CommunicationEventPartyLabel). Another party's labels are not in it. Internal messages have no folders.
         </description>
         <in-parameters>
             <parameter name="communicationEventId"/>
@@ -774,11 +816,13 @@ along with this software (see the LICENSE.md file). If not, see
                 <parameter name="isUnread" type="Boolean"/>
             </parameter></parameter>
             <parameter name="participantList" type="List"/>
+            <parameter name="labelList" type="List"><description>Labels this user put on any message of the thread: {emailLabelId, labelName, color}</description></parameter>
         </out-parameters>
         <actions><script><![CDATA[
             const DELIVERY = ['MessageTo', 'MessageCc', 'MessageMailbox']
             messageList = []
             participantList = []
+            labelList = []
             const partyId = ec.user.userAccount?.partyId || null
             if (!partyId) { ec.message.addError('Internal messages need a user with a party'); return }
             const wanted = communicationEventId || rootCommEventId
@@ -824,6 +868,21 @@ along with this software (see the LICENSE.md file). If not, see
                 for (const party of ec.entity.find('mantle.party.PartyDetail').condition('partyId', 'in', participants).disableAuthz().list())
                     names[party.partyId] = party.organizationName || [party.firstName, party.lastName].filter((part) => part).join(' ') || party.partyId
                 participantList = participants.map((id) => ({partyId: id, name: names[id] || id}))
+            }
+            const eventIds = messageList.map((message) => message.communicationEventId)
+            if (eventIds.length) {
+                const joins = Array.from(ec.entity.find('mantle.party.communication.CommunicationEventPartyLabel')
+                        .condition('partyId', partyId).condition('communicationEventId', 'in', eventIds).list())
+                const known = {}
+                const labelIds = Array.from(new Set(joins.map((row) => row.emailLabelId)))
+                if (labelIds.length) for (const label of ec.entity.find('moqui.basic.email.EmailLabel').condition('emailLabelId', 'in', labelIds).list())
+                    known[label.emailLabelId] = {emailLabelId: label.emailLabelId, labelName: label.labelName ?? null, color: label.color ?? null}
+                const byId = new Map()
+                for (const row of joins) {
+                    const label = known[row.emailLabelId]
+                    if (label) byId.set(label.emailLabelId, label)
+                }
+                labelList = Array.from(byId.values())
             }
         ]]></script></actions>
     </service>
@@ -907,6 +966,80 @@ along with this software (see the LICENSE.md file). If not, see
                 row.update()
                 updatedCount++
                 changed.add(row.communicationEventId)
+            }
+            communicationEventIdList = Array.from(changed)
+        ]]></script></actions>
+    </service>
+
+    <service verb="set" noun="InternalMessageLabels">
+        <description>
+            Puts labels on, or takes them off, a message the current user may see (communicationEventId) or every visible
+            message of a thread (rootCommEventId). Each label is an EmailLabel of the user's Internal account
+            (org.moqui.impl.EmailClientServices.ensure#InternalAccount); any other is "Email label X not found". The join
+            is CommunicationEventPartyLabel, so two people on the same message label it apart, and a reply does not
+            inherit a label. Linking a label that is already on the message, or removing one that is not, changes
+            nothing. A message or thread the user may not see is "not found". At least one label to add or remove.
+        </description>
+        <in-parameters>
+            <parameter name="communicationEventId"/>
+            <parameter name="rootCommEventId"><description>Every visible message of the thread</description></parameter>
+            <parameter name="addLabelIdList" type="List"/>
+            <parameter name="removeLabelIdList" type="List"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="updatedCount" type="Integer"/>
+            <parameter name="communicationEventIdList" type="List"><description>The messages whose labels changed</description></parameter>
+        </out-parameters>
+        <actions><script><![CDATA[
+            updatedCount = 0
+            communicationEventIdList = []
+            const partyId = ec.user.userAccount?.partyId || null
+            if (!partyId) { ec.message.addError('Internal messages need a user with a party'); return }
+            if (!communicationEventId && !rootCommEventId) { ec.message.addError('A communicationEventId or rootCommEventId is required'); return }
+            const asList = (value) => (value == null ? [] : (typeof value === 'string' ? value.split(',') : Array.from(value)))
+                    .map((id) => String(id).trim()).filter((id) => id)
+            const addIds = Array.from(new Set(asList(addLabelIdList)))
+            const removeIds = Array.from(new Set(asList(removeLabelIdList)))
+            if (addIds.length === 0 && removeIds.length === 0) { ec.message.addError('Name the labels to add or remove'); return }
+            const wanted = communicationEventId || rootCommEventId
+            let rootId = rootCommEventId
+            if (!rootId) {
+                const event = ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', communicationEventId).one()
+                if (event == null) { ec.message.addError(`Communication event ${communicationEventId} not found`); return }
+                rootId = event.rootCommEventId || event.communicationEventId
+            }
+            const thread = ec.service.sync().name('mantle.party.CommunicationServices.get#InternalThreadMessages')
+                    .parameter('rootCommEventIdList', [rootId]).call().threadMap[rootId]
+            if (ec.message.hasError()) return
+            if (thread == null || (communicationEventId && !thread.messageList.some((message) => message.communicationEventId === communicationEventId))) {
+                ec.message.addError(`Communication event ${wanted} not found`); return }
+            const scopeIds = communicationEventId && !rootCommEventId ? [communicationEventId]
+                    : thread.messageList.map((message) => message.communicationEventId)
+            const accountId = ec.service.sync().name('org.moqui.impl.EmailClientServices.ensure#InternalAccount').call()?.emailAccountId
+            if (ec.message.hasError()) return
+            for (const emailLabelId of addIds.concat(removeIds)) {
+                const label = ec.entity.find('moqui.basic.email.EmailLabel').condition('emailLabelId', emailLabelId).one()
+                if (label == null || label.emailAccountId !== accountId) { ec.message.addError(`Email label ${emailLabelId} not found`); return }
+            }
+            const changed = new Set()
+            const findJoin = (eventId, emailLabelId) => ec.entity.find('mantle.party.communication.CommunicationEventPartyLabel')
+                    .condition('communicationEventId', eventId).condition('partyId', partyId).condition('emailLabelId', emailLabelId).one()
+            for (const eventId of scopeIds) {
+                for (const emailLabelId of addIds) {
+                    if (findJoin(eventId, emailLabelId) != null) continue
+                    const join = ec.entity.makeValue('mantle.party.communication.CommunicationEventPartyLabel')
+                    join.setFields({communicationEventId: eventId, partyId: partyId, emailLabelId: emailLabelId}, false, null, null)
+                    join.create()
+                    updatedCount++
+                    changed.add(eventId)
+                }
+                for (const emailLabelId of removeIds) {
+                    const join = findJoin(eventId, emailLabelId)
+                    if (join == null) continue
+                    join.delete()
+                    updatedCount++
+                    changed.add(eventId)
+                }
             }
             communicationEventIdList = Array.from(changed)
         ]]></script></actions>
@@ -1016,12 +1149,15 @@ along with this software (see the LICENSE.md file). If not, see
             - With no emailAccountId and no contactListId: view inbox (the default: the Unified inbox, every mail account's
               Inbox and the internal received view), flagged, snoozed, sent, archive and all read both stores (the internal
               views received, flagged, snoozed, sent, archived and all); scheduled, outbox, drafts, junk and trash read only
-              the mail, and so do emailFolderId (view folder) and emailLabelId (view label).
+              the mail, and so does emailFolderId (view folder). emailLabelId of a mail account reads only that
+              account's mail (view label). emailLabelId of the Internal account, with no mail account named, reads only
+              the internal threads.
             - emailAccountId of a mail account: that account's mail only, in view (inbox by default), its folder
-              (emailFolderId) or its label (emailLabelId).
+              (emailFolderId) or its label (emailLabelId). A label of the Internal account is not that account's.
             - emailAccountId of the user's Internal account, or store internal: the internal threads only, in view received
-              (or inbox, the default), sent, flagged, snoozed, archived (or archive) or all; a view with no internal
-              counterpart (drafts) lists nothing.
+              (or inbox, the default), sent, flagged, snoozed, archived (or archive) or all. A label (emailLabelId) is
+              allowed; a view with no internal counterpart, such as label, is read as all. A folder is refused. A view
+              with no internal counterpart and no label (drafts) lists nothing.
             - contactListId: the threads of that mailbox only (view all by default, else an internal view).
             - store email keeps the mail of a view that reads both stores; view comments (the internal notes to the user)
               reads only the internal threads.
@@ -1180,10 +1316,12 @@ along with this software (see the LICENSE.md file). If not, see
                     if (!account.isInternal && store === 'internal') { ec.message.addError(`Email account ${emailAccountId} is not the Internal account`); return }
                 }
                 if (account?.isInternal || store === 'internal') {
-                    if (emailFolderId || emailLabelId) { ec.message.addError('The Internal account has no folders or labels'); return }
-                    const internalView = INTERNAL_VIEWS[view || 'received']
-                    if (!internalView && !EMAIL_VIEWS.includes(view)) { ec.message.addError(`Unknown view ${view}`); return }
-                    if (internalView && !internalOff) internalParameters = Object.assign({view: internalView}, internalShared)
+                    if (emailFolderId) { ec.message.addError('The Internal account has no folders'); return }
+                    // view label has no internal counterpart: a label lists every thread the user labeled
+                    let internalView = INTERNAL_VIEWS[view || (emailLabelId ? 'all' : 'received')]
+                    if (!internalView && emailLabelId) internalView = 'all'
+                    if (!internalView && view && !EMAIL_VIEWS.includes(view)) { ec.message.addError(`Unknown view ${view}`); return }
+                    if (internalView && !internalOff) internalParameters = Object.assign({view: internalView, emailLabelId: emailLabelId || null}, internalShared)
                 } else {
                     const emailView = view ? (EMAIL_ALIASES[view] || view) : (emailFolderId ? 'folder' : (emailLabelId ? 'label' : 'inbox'))
                     if (!EMAIL_VIEWS.includes(emailView)) { ec.message.addError(`Unknown view ${view}: ${EMAIL_VIEWS.join(', ')}`); return }
@@ -1198,13 +1336,26 @@ along with this software (see the LICENSE.md file). If not, see
                         return true
                     }
                     if (emailFolderId && !reaches('moqui.basic.email.EmailFolder', 'emailFolderId', emailFolderId, 'Email folder')) return
-                    if (emailLabelId && !reaches('moqui.basic.email.EmailLabel', 'emailLabelId', emailLabelId, 'Email label')) return
-                    emailParameters = Object.assign({view: emailView, emailAccountId: emailAccountId, emailFolderId: emailFolderId,
-                        emailLabelId: emailLabelId, threadMode: threadMode, fromAddress: fromAddress, toAddress: toAddress, subject: subject,
-                        hasAttachment: hasAttachment, fromDate: fromDate, thruDate: thruDate, minSize: minSize, maxSize: maxSize}, emailShared)
-                    const internalView = INTERNAL_VIEWS[emailView]
-                    if (!account && !emailFolderId && !emailLabelId && store !== 'email' && internalView && !internalOff)
-                        internalParameters = Object.assign({view: internalView}, internalShared)
+                    let labelRow = null
+                    if (emailLabelId) {
+                        labelRow = ec.entity.find('moqui.basic.email.EmailLabel').condition('emailLabelId', emailLabelId).one()
+                        if (labelRow == null || !access.accessMap[labelRow.emailAccountId] || (emailAccountId && labelRow.emailAccountId !== emailAccountId)) {
+                            ec.message.addError(`Email label ${emailLabelId} not found`); return }
+                    }
+                    const internalAccount = (access?.accountList || []).find((item) => item.isInternal)
+                    const labelIsInternal = !!(labelRow && internalAccount && labelRow.emailAccountId === internalAccount.emailAccountId)
+                    // a label of the Internal account is not a mail filter; a mail label is not sent to the internal store
+                    if (labelIsInternal) {
+                        if (store === 'email') { ec.message.addError(`Email label ${emailLabelId} not found`); return }
+                        if (!internalOff) internalParameters = Object.assign({view: INTERNAL_VIEWS[emailView] || 'all', emailLabelId: emailLabelId}, internalShared)
+                    } else {
+                        emailParameters = Object.assign({view: emailView, emailAccountId: emailAccountId, emailFolderId: emailFolderId,
+                            emailLabelId: emailLabelId, threadMode: threadMode, fromAddress: fromAddress, toAddress: toAddress, subject: subject,
+                            hasAttachment: hasAttachment, fromDate: fromDate, thruDate: thruDate, minSize: minSize, maxSize: maxSize}, emailShared)
+                        const internalView = INTERNAL_VIEWS[emailView]
+                        if (!account && !emailFolderId && !emailLabelId && store !== 'email' && internalView && !internalOff)
+                            internalParameters = Object.assign({view: internalView}, internalShared)
+                    }
                 }
             }
             const stores = []
@@ -1605,9 +1756,10 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="RecordLinkInfo">
         <description>
             What the record link and timeline services know about a record type: the full entity name and its single
-            primary key field, the record's own communication event join and work effort join (null when the generic
-            CommunicationEventRecord or WorkEffortRecord holds its links; a party's own communication event link is the
-            event's from and to party and its CommunicationEventParty rows), its note entity and its content entity.
+            primary key field, the record's own communication event join, work effort join and request join (null when
+            the generic CommunicationEventRecord, WorkEffortRecord or RequestRecord holds its links; a party's own
+            communication event link is the event's from and to party and its CommunicationEventParty rows), its note
+            entity and its content entity.
 
             With checkRecord (the default) the record must be one the user may see, or there is an error (the record is
             not found). With checkOnly the answer is recordVisible, true or false, and no error, so the caller's
@@ -1672,6 +1824,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="isParty" type="Boolean"/>
             <parameter name="commEventJoin" type="Map"><description>{entityName, keyField}</description></parameter>
             <parameter name="workEffortJoin" type="Map"><description>{entityName, keyField}</description></parameter>
+            <parameter name="requestJoin" type="Map"><description>{entityName, keyField}</description></parameter>
             <parameter name="noteEntity" type="Map"><description>{entityName, keyField}</description></parameter>
             <parameter name="contentEntity" type="Map"><description>{entityName, keyField, typeField, dateField}</description></parameter>
             <parameter name="recordVisible" type="Boolean"><description>Whether the user may see the record; null when it was
@@ -1688,6 +1841,9 @@ along with this software (see the LICENSE.md file). If not, see
             const workEffortJoins = {
                 'mantle.request.Request': {entityName: 'mantle.request.RequestWorkEffort', keyField: 'requestId'},
                 'moqui.resource.wiki.WikiPage': {entityName: 'mantle.work.effort.WikiPageWorkEffort', keyField: 'wikiPageId'}}
+            const requestJoins = {
+                'mantle.work.effort.WorkEffort': {entityName: 'mantle.request.RequestWorkEffort', keyField: 'workEffortId'},
+                'moqui.resource.wiki.WikiPage': {entityName: 'mantle.request.WikiPageRequest', keyField: 'wikiPageId'}}
             const noteEntities = {
                 'mantle.party.Party': {entityName: 'mantle.party.PartyNote', keyField: 'partyId'},
                 'mantle.work.effort.WorkEffort': {entityName: 'mantle.work.effort.WorkEffortNote', keyField: 'workEffortId'},
@@ -1744,6 +1900,7 @@ along with this software (see the LICENSE.md file). If not, see
             isParty = recordEntityName === PARTY
             commEventJoin = commEventJoins[recordEntityName] || null
             workEffortJoin = workEffortJoins[recordEntityName] || null
+            requestJoin = requestJoins[recordEntityName] || null
             noteEntity = noteEntities[recordEntityName] || null
             contentEntity = contentEntities[recordEntityName] || null
             if (!checkRecord && !checkOnly) return

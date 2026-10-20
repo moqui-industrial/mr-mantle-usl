@@ -1,5 +1,6 @@
 // Record links, the record timeline, followers and mentions (mantle.party.CommunicationServices link#CommunicationEventRecord,
-// get#RecordTimeline, follow#Record, log#RecordNote, notify#RecordMention; mantle.work.WorkEffortServices.link#WorkEffortRecord),
+// get#RecordTimeline, follow#Record, log#RecordNote, notify#RecordMention; mantle.work.WorkEffortServices.link#WorkEffortRecord;
+// mantle.request.RequestServices.link#RequestRecord),
 // find#PartyCommunicationEvents with the recipient rows and without mailbox posts, add#WikiPageComment's
 // communicationEventId, and the joins a wiki page's delete takes first (delete#WikiPageJoins): the Mantle side of IronStone
 // M3 (Chatter). New spec, no Groovy original.
@@ -42,6 +43,20 @@ function link(communicationEventId, recordEntityName, recordId) {
 }
 function linkActivity(workEffortId, recordEntityName, recordId) {
     return call("mantle.work.WorkEffortServices.link#WorkEffortRecord", { workEffortId, recordEntityName, recordId })
+}
+function linkRequest(requestId, recordEntityName, recordId) {
+    return call("mantle.request.RequestServices.link#RequestRecord", { requestId, recordEntityName, recordId })
+}
+// run as a user with authz on, as a screen would, then back to john.doe with authz off
+function asUser(username, run) {
+    login(username, "moqui1!!")
+    call("mantle.party.PartyServices.setup#UserOrganizationInfo", {})
+    ec.artifactExecution.enableAuthz()
+    try { return run() } finally {
+        ec.artifactExecution.disableAuthz()
+        for (const name of ["userOrgIds", "filterOrgIds", "activeOrgId"]) delete ec.user.context[name]
+        login("john.doe")
+    }
 }
 function timeline(recordEntityName, recordId, params) {
     return call("mantle.party.CommunicationServices.get#RecordTimeline", Object.assign({ recordEntityName, recordId }, params || {}))
@@ -432,6 +447,84 @@ feature("unfollow removes the follower", {
     },
     then({ followers }) {
         followers == ["EX_JOHN_DOE"]
+    },
+})
+
+feature("a request goes on an order through RequestRecord and on a work effort or wiki page through its own join", {
+    when() {
+        const onOrder = linkRequest("RL-R1", ORDER, "RL-O1")
+        const orderAgain = linkRequest("RL-R1", ORDER, "RL-O1")
+        const orderRow = ec.entity.find("mantle.request.RequestRecord").condition({ requestId: "RL-R1", recordEntityName: ORDER, recordId: "RL-O1" }).one()
+        const onWork = linkRequest("RL-R1", WORK, "RL-T1")
+        const workAgain = linkRequest("RL-R1", WORK, "RL-T1")
+        const onWiki = linkRequest("RL-R1", WIKI, wikiPageId)
+        const linked = {
+            orderRows: count("mantle.request.RequestRecord", { requestId: "RL-R1", recordEntityName: ORDER, recordId: "RL-O1" }),
+            workRows: count("mantle.request.RequestWorkEffort", { requestId: "RL-R1", workEffortId: "RL-T1" }),
+            workGeneric: count("mantle.request.RequestRecord", { requestId: "RL-R1", recordEntityName: WORK, recordId: "RL-T1" }),
+            wikiRows: count("mantle.request.WikiPageRequest", { requestId: "RL-R1", wikiPageId }),
+            wikiGeneric: count("mantle.request.RequestRecord", { requestId: "RL-R1", recordEntityName: WIKI, recordId: wikiPageId }),
+        }
+        const missing = errorOf("mantle.request.RequestServices.link#RequestRecord", { requestId: "RL-NONE", recordEntityName: ORDER, recordId: "RL-O1" })
+        const unlink = (entityName, recordId) => call("mantle.request.RequestServices.unlink#RequestRecord",
+                { requestId: "RL-R1", recordEntityName: entityName, recordId }).unlinked
+        const unlinkedOrder = unlink(ORDER, "RL-O1")
+        const unlinkedOrderAgain = unlink(ORDER, "RL-O1")
+        const unlinkedWork = unlink(WORK, "RL-T1")
+        const unlinkedWiki = unlink(WIKI, wikiPageId)
+        return { onOrder, orderAgain, orderRow, onWork, workAgain, onWiki, linked, missing, unlinkedOrder, unlinkedOrderAgain, unlinkedWork, unlinkedWiki,
+            orderRows: count("mantle.request.RequestRecord", { requestId: "RL-R1", recordEntityName: ORDER, recordId: "RL-O1" }),
+            workRows: count("mantle.request.RequestWorkEffort", { requestId: "RL-R1", workEffortId: "RL-T1" }),
+            wikiRows: count("mantle.request.WikiPageRequest", { requestId: "RL-R1", wikiPageId }) }
+    },
+    then({ onOrder, orderAgain, orderRow, onWork, workAgain, onWiki, linked, missing, unlinkedOrder, unlinkedOrderAgain, unlinkedWork, unlinkedWiki,
+            orderRows, workRows, wikiRows }) {
+        onOrder.linkEntityName == "mantle.request.RequestRecord"
+        onOrder.recordEntityName == ORDER
+        onOrder.created
+        orderAgain.created == false
+        orderAgain.linkEntityName == "mantle.request.RequestRecord"
+        orderRow.linkedByUserId == "EX_JOHN_DOE"
+        orderRow.linkedDate != null
+        onWork.linkEntityName == "mantle.request.RequestWorkEffort"
+        onWork.created
+        workAgain.created == false
+        onWiki.linkEntityName == "mantle.request.WikiPageRequest"
+        onWiki.created
+        linked == { orderRows: 1, workRows: 1, workGeneric: 0, wikiRows: 1, wikiGeneric: 0 }
+        missing.includes("RL-NONE not found")
+        unlinkedOrder == true
+        unlinkedOrderAgain == false
+        unlinkedWork == true
+        unlinkedWiki == true
+        orderRows == 0
+        workRows == 0
+        wikiRows == 0
+    },
+})
+
+feature("a record the user may not see is refused, the way other record links are, and no link is written", {
+    when() {
+        call("create#moqui.security.UserGroup", { userGroupId: "RL_FILTERED", description: "Request record link filter" })
+        call("create#moqui.security.ArtifactGroup", { artifactGroupId: "RL_FILTERED", description: "Request record link filter" })
+        for (const artifactName of ["mantle.request.RequestServices.link#RequestRecord", "mantle.party.CommunicationServices.get#RecordLinkInfo"])
+            call("create#moqui.security.ArtifactGroupMember", { artifactGroupId: "RL_FILTERED", artifactTypeEnumId: "AT_SERVICE",
+                    artifactName, nameIsPattern: "N", inheritAuthz: "Y" })
+        call("create#moqui.security.ArtifactAuthz", { artifactAuthzId: "RL_FILTERED", userGroupId: "RL_FILTERED", artifactGroupId: "RL_FILTERED",
+                authzTypeEnumId: "AUTHZT_ALLOW", authzActionEnumId: "AUTHZA_ALL" })
+        call("create#moqui.security.ArtifactAuthzFilter", { artifactAuthzId: "RL_FILTERED", entityFilterSetId: "MANTLE_USER_ORG" })
+        const partyId = call("mantle.party.PartyServices.create#Person", { firstName: "Lee", lastName: "Recordlink" }).partyId
+        const userId = call("mantle.party.PartyServices.create#PartyUserAccount", { partyId, emailAddress: "rl.lee@example.com", username: "rl.lee",
+                newPassword: "moqui1!!", newPasswordVerify: "moqui1!!" }).userId
+        call("create#moqui.security.UserGroupMember", { userGroupId: "RL_FILTERED", userId, fromDate: effectiveTime - 86400000 })
+        const refused = asUser("rl.lee", () => errorOf("mantle.request.RequestServices.link#RequestRecord",
+                { requestId: "RL-R1", recordEntityName: ORDER, recordId: "RL-O1" }))
+        return { refused, rows: count("mantle.request.RequestRecord", { requestId: "RL-R1", recordEntityName: ORDER, recordId: "RL-O1" }) }
+    },
+    then({ refused, rows }) {
+        refused != null
+        refused.includes("RL-O1 not found")
+        rows == 0
     },
 })
 

@@ -491,8 +491,9 @@ feature("a change of a message's unread state publishes the shell counts of its 
 
 // The search line over both stores: find#InboxThreads reads searchText once (parse#SearchText), the mail gets the text and
 // the internal threads its terms, which find#InternalThreads applies to the parties, dates, subjects and bodies of the
-// internal messages and to the thread's state; what internal messages do not have (label:, larger:, bcc:, a mail-only in:)
-// matches none of them, and with a - all of them.
+// internal messages and to the thread's state. label: is a label the user put on a message; a name that is not one of
+// the user's matches none, and with a - it matches all. What internal messages do not have (larger:, bcc:, a mail-only
+// in:) matches none of them, and with a - all of them.
 feature("the search operators apply to the internal threads as they do to the mail", {
     when() {
         const old = effectiveTime - 3 * 1440 * minute

@@ -401,4 +401,70 @@ along with this software (see the LICENSE.md file). If not, see
                     in-map="{requestContentId:requestContentId, contentLocation:contentLocation}"/></if>
         </actions>
     </service>
+
+    <service verb="link" noun="RequestRecord">
+        <description>
+            Puts a request on a record, its full entity name and single primary key value. The link is the record's own
+            join when it has one (mantle.request.RequestWorkEffort for a work effort, mantle.request.WikiPageRequest for
+            a wiki page), else a RequestRecord. Linking again changes nothing. The record must be one the user sees
+            (get#RecordLinkInfo).
+        </description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="recordEntityName" required="true"/>
+            <parameter name="recordId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="linkEntityName"><description>The entity holding the link</description></parameter>
+            <parameter name="created" type="Boolean"><description>True when this call wrote the link</description></parameter>
+        </out-parameters>
+        <actions><script><![CDATA[
+            created = false
+            const request = ec.entity.find('mantle.request.Request').condition('requestId', requestId).one()
+            if (request == null) { ec.message.addError(`Request ${requestId} not found`); return }
+            const info = ec.service.sync().name('mantle.party.CommunicationServices.get#RecordLinkInfo')
+                    .parameters({recordEntityName: recordEntityName, recordId: recordId}).call()
+            if (ec.message.hasError()) return
+            recordEntityName = info.recordEntityName
+
+            let keys
+            if (info.requestJoin) {
+                linkEntityName = info.requestJoin.entityName
+                keys = {requestId: requestId, [info.requestJoin.keyField]: recordId}
+            } else {
+                linkEntityName = 'mantle.request.RequestRecord'
+                keys = {requestId: requestId, recordEntityName: recordEntityName, recordId: recordId}
+            }
+            if (ec.entity.find(linkEntityName).condition(keys).one() != null) return
+            const fields = info.requestJoin ? keys : Object.assign({linkedByUserId: ec.user.userId, linkedDate: ec.user.nowTimestamp}, keys)
+            ec.service.sync().name('create#' + linkEntityName).parameters(fields).call()
+            if (ec.message.hasError()) return
+            created = true
+        ]]></script></actions>
+    </service>
+    <service verb="unlink" noun="RequestRecord">
+        <description>Takes a request off a record: the own join row and any RequestRecord for that request and record.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="recordEntityName" required="true"/>
+            <parameter name="recordId" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="unlinked" type="Boolean"><description>True when a link row was removed</description></parameter></out-parameters>
+        <actions><script><![CDATA[
+            unlinked = false
+            const info = ec.service.sync().name('mantle.party.CommunicationServices.get#RecordLinkInfo')
+                    .parameters({recordEntityName: recordEntityName, recordId: recordId}).call()
+            if (ec.message.hasError()) return
+            const removeRows = (entityName, keys) => {
+                for (const row of ec.entity.find(entityName).condition(keys).list()) {
+                    ec.service.sync().name('delete#' + entityName).parameters(row.getPrimaryKeys()).call()
+                    if (ec.message.hasError()) return
+                    unlinked = true
+                }
+            }
+            if (info.requestJoin) removeRows(info.requestJoin.entityName, {requestId: requestId, [info.requestJoin.keyField]: recordId})
+            removeRows('mantle.request.RequestRecord', {requestId: requestId, recordEntityName: info.recordEntityName, recordId: recordId})
+        ]]></script></actions>
+    </service>
 </services>
